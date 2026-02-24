@@ -757,7 +757,7 @@ function App() {
                             { icon:"📦", label:"Мои заказы",  page:"orders" },
                             { icon:"❤️", label:"Избранное",   page:"favorites" },
                             { icon:"🪙", label:"Перевод " + currName(), page:"transfer" },
-                            { icon:"⚙️", label:"Настройки",   page:"settings" },
+                            { icon:"👤", label: isAdmin ? "Настройки" : "Профиль", page:"settings" },
                           ].map(item => (
                             <button key={item.page} className="user-dropdown-item" onClick={() => { setPage(item.page); setMenuOpen(false); }}>
                               <span className="udi-icon">{item.icon}</span>
@@ -4007,6 +4007,7 @@ function CurrencySettingsTab({ appearance, saveAppearance, notify }) {
 
 function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbConfig, refreshDbConfig, isAdmin, orders, saveOrders, products, saveProducts, categories, saveCategories, appearance, saveAppearance, markOrdersSeen, transfers, saveTransfers, faq, saveFaq, tasks, saveTasks, taskSubmissions, saveTaskSubmissions, auctions, saveAuctions }) {
   const [tab, setTab] = useState("profile");
+  const setTabSafe = (t) => { if (!isAdmin && t !== "profile") return; setTab(t); };
   const [adminTab, setAdminTab] = useState("users");
   const [currencySubTab, setCurrencySubTab] = useState("currency_settings");
   const [bdBonus, setBdBonus] = useState(String(appearance.birthdayBonus ?? 100));
@@ -4117,18 +4118,21 @@ function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbC
 
   const applyAndSave = (newAp) => { setAp(newAp); saveAppearance(newAp); notify("Внешний вид сохранён ✓"); };
 
-  const SIDEBAR_TABS = [
-    { id: "profile", icon: "👤", label: "Профиль" },
+  const SIDEBAR_TABS = isAdmin ? [
+    { id: "profile",    icon: "👤", label: "Профиль" },
     { id: "appearance", icon: "🎨", label: "Внешний вид" },
-    { id: "banner", icon: "🖼️", label: "Баннер" },
-    { id: "currency", icon: "🪙", label: "Валюта" },
-    { id: "seo", icon: "🔍", label: "SEO" },
-    { id: "database", icon: "🗄️", label: "База данных" },
-    { id: "socials", icon: "🌐", label: "Соц. сети" },
-    { id: "faq", icon: "❓", label: "Вопрос / Ответ" },
-    { id: "tasks", icon: "🎯", label: "Задания" },
-    { id: "auction", icon: "🔨", label: "Аукцион" },
-    ...(isAdmin ? [{ id: "shop", icon: "🛍️", label: "Управление магазином" }, { id: "integrations", icon: "🔗", label: "Интеграции" }] : []),
+    { id: "banner",     icon: "🖼️", label: "Баннер" },
+    { id: "currency",   icon: "🪙", label: "Валюта" },
+    { id: "seo",        icon: "🔍", label: "SEO" },
+    { id: "database",   icon: "🗄️", label: "База данных" },
+    { id: "socials",    icon: "🌐", label: "Соц. сети" },
+    { id: "faq",        icon: "❓", label: "Вопрос / Ответ" },
+    { id: "tasks",      icon: "🎯", label: "Задания" },
+    { id: "auction",    icon: "🔨", label: "Аукцион" },
+    { id: "shop",       icon: "🛍️", label: "Управление магазином" },
+    { id: "integrations", icon: "🔗", label: "Интеграции" },
+  ] : [
+    { id: "profile", icon: "👤", label: "Профиль" },
   ];
   const CURRENCY_SUB_TABS = isAdmin ? [
     { id: "currency_settings", icon: "✏️", label: "Настройки" },
@@ -4157,7 +4161,7 @@ function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbC
           {SIDEBAR_TABS.map((t, i) => (
             <React.Fragment key={t.id}>
               {t.id === "shop" && <div className="settings-tab-divider"></div>}
-              <button className={"settings-tab" + (tab===t.id?" active":"")} onClick={() => { setTab(t.id); }}>
+              <button className={"settings-tab" + (tab===t.id?" active":"")} onClick={() => { setTabSafe(t.id); }}>
                 <span className="settings-tab-icon">{t.icon}</span>
                 {t.label}
               </button>
