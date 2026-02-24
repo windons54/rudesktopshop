@@ -55,12 +55,13 @@ const DB_NAME = 'merch_store_sqlite';
 const DB_STORE = 'sqlitedb';
 const DB_KEY = 'main';
 
-let _sqliteDB = null;       // sql.js Database instance
+let _sqliteDB = null;
 let _sqlReady = false;
 let _sqlReadyCallbacks = [];
 let _savePending = false;
+// Queue of writes that happened before SQLite was ready
+const _pendingWrites = {};
 
-// Открыть IndexedDB и вернуть Promise<IDBDatabase>
 function openIDB() {
   return new Promise((res, rej) => {
     const req = indexedDB.open(DB_NAME, 1);
@@ -70,7 +71,6 @@ function openIDB() {
   });
 }
 
-// Загрузить бинарный дамп из IndexedDB
 async function loadDbFromIDB() {
   try {
     const idb = await openIDB();
@@ -83,7 +83,6 @@ async function loadDbFromIDB() {
   } catch { return null; }
 }
 
-// Сохранить бинарный дамп в IndexedDB (debounced)
 async function saveDbToIDB() {
   if (!_sqliteDB) return;
   try {
@@ -103,7 +102,6 @@ function scheduleSave() {
   _saveTimer = setTimeout(saveDbToIDB, 400);
 }
 
-// Инициализировать sql.js и создать/открыть базу
 async function initSQLite() {
   if (_sqlReady) return _sqliteDB;
   const initSqlJs = (await import("sql.js")).default;
@@ -116,26 +114,37 @@ async function initSQLite() {
   } else {
     _sqliteDB = new SQL.Database();
   }
-  // Создать таблицы если не существуют
   _sqliteDB.run(`
     CREATE TABLE IF NOT EXISTS kv (
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL
     );
   `);
+
+  // Flush any writes that happened before SQLite was ready
+  const pendingKeys = Object.keys(_pendingWrites);
+  if (pendingKeys.length > 0) {
+    pendingKeys.forEach(k => {
+      try {
+        _sqliteDB.run(`INSERT OR REPLACE INTO kv (key, value) VALUES (?, ?)`, [k, JSON.stringify(_pendingWrites[k])]);
+      } catch(e) { console.warn('Flush pending write error', k, e); }
+    });
+    // Clear pending queue
+    pendingKeys.forEach(k => delete _pendingWrites[k]);
+    saveDbToIDB();
+  }
+
   _sqlReady = true;
   _sqlReadyCallbacks.forEach(cb => cb());
   _sqlReadyCallbacks = [];
   return _sqliteDB;
 }
 
-// Дождаться инициализации SQLite
 function whenSQLReady() {
   if (_sqlReady) return Promise.resolve();
   return new Promise(res => _sqlReadyCallbacks.push(res));
 }
 
-// API хранилища — синхронный интерфейс (с кешем для мгновенного чтения)
 const _cache = {};
 
 const storage = {
@@ -154,7 +163,11 @@ const storage = {
   },
   set: (k, v) => {
     _cache[k] = v;
-    if (!_sqliteDB) return;
+    if (!_sqliteDB) {
+      // SQLite not ready yet — queue the write
+      _pendingWrites[k] = v;
+      return;
+    }
     try {
       _sqliteDB.run(`INSERT OR REPLACE INTO kv (key, value) VALUES (?, ?)`, [k, JSON.stringify(v)]);
       scheduleSave();
@@ -162,6 +175,7 @@ const storage = {
   },
   delete: (k) => {
     delete _cache[k];
+    delete _pendingWrites[k];
     if (!_sqliteDB) return;
     try {
       _sqliteDB.run(`DELETE FROM kv WHERE key=?`, [k]);
@@ -177,16 +191,13 @@ const storage = {
       return out;
     } catch { return {}; }
   },
-  // Вернуть бинарный дамп базы (Uint8Array)
   exportDB: () => _sqliteDB ? _sqliteDB.export() : null,
-  // Импортировать базу из Uint8Array
   importDB: async (data) => {
     const initSqlJs2 = (await import("sql.js")).default; const SQL = await initSqlJs2({ locateFile: () => '/sql-wasm.wasm' });
     _sqliteDB = new SQL.Database(data);
     Object.keys(_cache).forEach(k => delete _cache[k]);
     await saveDbToIDB();
   },
-  // Выполнить произвольный SQL (для консоли в настройках)
   exec: (sql) => {
     if (!_sqliteDB) throw new Error('SQLite не инициализирован');
     return _sqliteDB.exec(sql);
@@ -487,6 +498,14 @@ function App() {
       setSqliteInitError(err.message || String(err));
       setLoaded(true);
     });
+
+    // Flush saves immediately when user closes/leaves the page
+    const handleBeforeUnload = () => {
+      if (_saveTimer) { clearTimeout(_saveTimer); _saveTimer = null; }
+      saveDbToIDB();
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
   }, []);
 
   // Получить статистику по таблицам SQLite (кол-во ключей)
