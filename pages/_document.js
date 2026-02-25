@@ -7,7 +7,6 @@ export default function Document() {
         <meta charSet="UTF-8" />
         <meta name="description" content="Корпоративный магазин мерча" />
         <link rel="icon" href="/favicon.ico" />
-        <link rel="stylesheet" href="https://cdn.lineicons.com/5.0/lineicons.css" />
       </Head>
       <body>
         <Main />

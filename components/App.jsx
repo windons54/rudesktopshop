@@ -2,19 +2,8 @@
 import React, { useState, useEffect } from 'react';
 import Head from 'next/head';
 import * as XLSX from 'xlsx';
-import { Chip, Card, CardBody } from '@heroui/react';
 
-// --- Lineicons helper ---------------------------------------------------------
-function LniIcon({ name, size, color, className = "", style = {} }) {
-  return (
-    <i
-      className={'lni lni-' + name + ' ' + className}
-      style={{ fontSize: size || "inherit", color: color || "inherit", lineHeight: 1, ...style }}
-    />
-  );
-}
-
-// --- DEFAULT PRODUCTS (fallback if no custom products in DB) ------------------
+// ─── DEFAULT PRODUCTS (fallback if no custom products in DB) ──────────────────
 const PRODUCTS = [
   { id: 1,  name: "Худи «Apex»",         price: 850,  category: "Одежда",      emoji: "🧥", desc: "Флисовая толстовка с вышитым логотипом, оверсайз-крой, 320 г/м²" },
   { id: 2,  name: "Футболка «Origin»",   price: 320,  category: "Одежда",      emoji: "👕", desc: "100% органический хлопок, шелкографическая печать, унисекс" },
@@ -39,7 +28,7 @@ function CurrencyIcon({ currency, size = 16 }) {
   return <span style={{verticalAlign:"middle"}}>{(c && c.icon) ? c.icon : "🪙"}</span>;
 }
 
-// --- Умное сжатие изображений ------------------------------------------------
+// ─── Умное сжатие изображений ────────────────────────────────────────────────
 // maxW/maxH: максимальные размеры (пиксели). Изображения меньше — не увеличиваются.
 // quality: базовое качество JPEG (0–1). Автоматически снижается если файл всё ещё большой.
 // targetKB: целевой размер в КБ (мягкий лимит, используется для авто-снижения качества).
@@ -79,11 +68,11 @@ const compressImage = (dataUrl, maxW = 1200, maxH = 1200, quality = 0.85, target
   });
 };
 
-// --------------------------------------------------------------
+// ══════════════════════════════════════════════════════════════
 // Серверное хранилище — данные общие для всех браузеров
 // pgConfig хранится ТОЛЬКО на сервере (env или файл)
 // Клиент никогда не передаёт pgConfig в запросах
-// --------------------------------------------------------------
+// ══════════════════════════════════════════════════════════════
 
 async function _apiCall(action, body = {}) {
   const res = await fetch('/api/store', {
@@ -218,7 +207,7 @@ function whenSQLReady() {
   return new Promise(res => _sqlReadyCallbacks.push(res));
 }
 
-// -- HISTORY ----------------------------------------------------------------
+// ── HISTORY ────────────────────────────────────────────────────────────────
 
 function HistoryPage({ currentUser, transfers, orders, taskSubmissions }) {
   const [filter, setFilter] = useState("all");
@@ -536,7 +525,7 @@ function App() {
 
     window.addEventListener('beforeunload', () => storage.flush());
 
-    // -- Polling: обновляем данные с сервера каждые 4 секунды --
+    // ── Polling: обновляем данные с сервера каждые 4 секунды ──
     const _applyServerData = (data) => {
       if (!data) return;
       // Всегда обновляем — не проверяем truthy, чтобы не пропустить пустые массивы/объекты
@@ -847,24 +836,13 @@ function App() {
                         <div className="user-dropdown">
                           <div className="user-dropdown-header">
                             <div className="user-dropdown-name">{displayName}</div>
-                            <Chip
-                              size="sm"
-                              variant="flat"
-                              color="success"
-                              startContent={<CurrIcon />}
-                              classNames={{
-                                base: "mt-1",
-                                content: "font-bold text-xs"
-                              }}
-                            >
-                              {users[currentUser]?.balance || 0} {currName()}
-                            </Chip>
+                            <div className="user-dropdown-balance"><CurrIcon /> {users[currentUser]?.balance || 0} {currName()}</div>
                           </div>
                           {[
-                            { icon: <LniIcon name="package" />,       label:"Мои заказы",  page:"orders" },
-                            { icon: <LniIcon name="heart" />,         label:"Избранное",   page:"favorites" },
-                            { icon: <LniIcon name="coins" />,         label:"Перевод " + currName(), page:"transfer" },
-                            { icon: <LniIcon name="cog" />,           label: isAdmin ? "Настройки" : "Профиль", page:"settings" },
+                            { icon:"📦", label:"Мои заказы",  page:"orders" },
+                            { icon:"❤️", label:"Избранное",   page:"favorites" },
+                            { icon:"🪙", label:"Перевод " + currName(), page:"transfer" },
+                            { icon:"👤", label: isAdmin ? "Настройки" : "Профиль", page:"settings" },
                           ].map(item => (
                             <button key={item.page} className="user-dropdown-item" onClick={() => { setPage(item.page); setMenuOpen(false); }}>
                               <span className="udi-icon">{item.icon}</span>
@@ -873,7 +851,7 @@ function App() {
                           ))}
                           <div className="user-dropdown-divider"></div>
                           <button className="user-dropdown-item danger" onClick={() => { setCurrentUser(null); storage.set("cm_session", null); setPage("shop"); setMenuOpen(false); }}>
-                            <span className="udi-icon"><LniIcon name="exit" /></span>
+                            <span className="udi-icon">🚪</span>
                             Выйти
                           </button>
                         </div>
@@ -954,7 +932,7 @@ function App() {
           <div className="rd-footer-inner">
             <div className="rd-footer-logo"><img src="data:image/svg+xml;base64,PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0iVVRGLTgiPz4NCjwhRE9DVFlQRSBzdmcgUFVCTElDICItLy9XM0MvL0RURCBTVkcgMS4xLy9FTiIgImh0dHA6Ly93d3cudzMub3JnL0dyYXBoaWNzL1NWRy8xLjEvRFREL3N2ZzExLmR0ZCI+DQo8IS0tIENyZWF0b3I6IENvcmVsRFJBVyAtLT4NCjxzdmcgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIiB4bWw6c3BhY2U9InByZXNlcnZlIiB3aWR0aD0iMTg2LjYwNW1tIiBoZWlnaHQ9IjczLjI1bW0iIHZlcnNpb249IjEuMSIgc3R5bGU9InNoYXBlLXJlbmRlcmluZzpnZW9tZXRyaWNQcmVjaXNpb247IHRleHQtcmVuZGVyaW5nOmdlb21ldHJpY1ByZWNpc2lvbjsgaW1hZ2UtcmVuZGVyaW5nOm9wdGltaXplUXVhbGl0eTsgZmlsbC1ydWxlOmV2ZW5vZGQ7IGNsaXAtcnVsZTpldmVub2RkIg0Kdmlld0JveD0iMCAwIDE4NjYwLjUyIDczMjUiDQogeG1sbnM6eGxpbms9Imh0dHA6Ly93d3cudzMub3JnLzE5OTkveGxpbmsiDQogeG1sbnM6eG9kbT0iaHR0cDovL3d3dy5jb3JlbC5jb20vY29yZWxkcmF3L29kbS8yMDAzIj4NCiA8ZGVmcz4NCiAgPGZvbnQgaWQ9IkZvbnRJRDAiIGhvcml6LWFkdi14PSI3NjAiIGZvbnQtdmFyaWFudD0ibm9ybWFsIiBzdHlsZT0iZmlsbC1ydWxlOm5vbnplcm8iIGZvbnQtd2VpZ2h0PSI1MDAiPg0KCTxmb250LWZhY2UgDQoJCWZvbnQtZmFtaWx5PSJTdG9semwgTWVkaXVtIj4NCgkJPGZvbnQtZmFjZS1zcmM+DQoJCQk8Zm9udC1mYWNlLW5hbWUgbmFtZT0iU3RvbHpsLU1lZGl1bSIvPg0KCQk8L2ZvbnQtZmFjZS1zcmM+DQoJPC9mb250LWZhY2U+DQogICA8bWlzc2luZy1nbHlwaD48cGF0aCBkPSJNMCAweiIvPjwvbWlzc2luZy1nbHlwaD4NCiAgIDxnbHlwaCB1bmljb2RlPSJEIiBob3Jpei1hZHYteD0iNzMzIiBkPSJNMzI5LjAwMyA2OTkuOTk5YzEwMiwwIDE4NywtMy4yOTk2OGUrMDAxIDI1NS45OTcsLTkuOTk5NmUrMDAxIDY3Ljk5ODEsLTYuNzAwNTllKzAwMSAxMDIsLTEuNTAwMDFlKzAwMiAxMDIsLTIuNTAwMDNlKzAwMiAwLC05Ljk5OTZlKzAwMSAtMy40MDAyNGUrMDAxLC0xLjgyOTk3ZSswMDIgLTEuMDJlKzAwMiwtMi40OTk5N2UrMDAyIC02Ljg5OTY5ZSswMDEsLTYuNzAwNTllKzAwMSAtMS41Mzk5NmUrMDAyLC0xLjAwMDAzZSswMDIgLTIuNTU5OTdlKzAwMiwtMS4wMDAwM2UrMDAybC0yLjUzZSswMDIgMCAwIDY5OS45OTkgMjUzIDB6bTAgLTUuNjM5OTZlKzAwMmM2Mi45OTY5LDAgMTE0Ljk5OSwxOS45OTc4IDE1NC45OTUsNjAuMDAwMyA0MC4wMDI0LDM5Ljk5NTcgNjAuMDAwMyw5MC45OTkzIDYwLjAwMDMsMTUzLjk5NiAwLDYzLjAwMzcgLTEuOTk5NzhlKzAwMSwxMTQuMDAxIC02LjAwMDAzZSswMDEsMTU0LjAwMyAtMy45OTk1N2UrMDAxLDM5Ljk5NTcgLTkuMTk5ODJlKzAwMSw2MC4wMDAzIC0xLjU0OTk1ZSswMDIsNjAuMDAwM2wtMS4xMDAwNWUrMDAyIDAgMCAtNC4yOGUrMDAyIDExMC4wMDUgMHoiLz4NCiAgIDxnbHlwaCB1bmljb2RlPSJSIiBob3Jpei1hZHYteD0iNjgxIiBkPSJNNDc5LjAwMyAwbC0xLjgxMDA2ZSswMDIgMjUyLjAwMSAtNy44OTk5MmUrMDAxIDAgMCAtMi41MjAwMWUrMDAyIC0xLjQyOTk1ZSswMDIgMCAwIDY5OS45OTkgMzAxIDBjNzQuOTk3LDAgMTMyLjk5OSwtMS45OTk3OGUrMDAxIDE3NS45OTksLTYuMDk5OTFlKzAwMSA0Mi4wMDAyLC00LjEwMDEzZSswMDEgNjIuOTk2OSwtOS42OTk5M2UrMDAxIDYyLjk5NjksLTEuNjcwMDJlKzAwMiAwLC01LjU5OThlKzAwMSAtMS4zOTk3OGUrMDAxLC0xLjAyZSswMDIgLTQuMTAwMTNlKzAwMSwtMS4zNjk5NWUrMDAyIC0yLjY5OTY3ZSswMDEsLTMuNTAwMTNlKzAwMSAtNi42MDAwM2UrMDAxLC01LjkwMDE0ZSswMDEgLTEuMTU5OThlKzAwMiwtNy4yMDAwM2UrMDAxbDE5Ni4wMDMgLTIuNjMwMDJlKzAwMiAtMS43NTk5OWUrMDAyIDB6bS0yLjYwMDA2ZSswMDIgNTY0LjAwM2wwIC0xLjg3ZSswMDIgMTQyLjAwMyAwYzM2Ljk5OSwwIDY0LjAwMjUsNy45OTc3OSA4My4wMDE1LDI0Ljk5OSAxOC4wMDAxLDE1Ljk5NTYgMjYuOTk2NywzOC45OTY4IDI2Ljk5NjcsNjcuOTk4MSAwLDI5LjAwMTMgLTguOTk2NjdlKzAwMCw1Mi4wMDI1IC0yLjc5OTU2ZSswMDEsNjguOTk2OSAtMS45MDA1N2UrMDAxLDE3LjAwMTIgLTQuNjAwMjVlKzAwMSwyNS4wMDU3IC04LjIwMDI2ZSswMDEsMjUuMDA1N2wtMS40MjAwM2UrMDAyIDB6Ii8+DQogICA8Z2x5cGggdW5pY29kZT0iZSIgaG9yaXotYWR2LXg9IjY1MSIgZD0iTTMzMSA1NjEuOTk4YzkwLjAwMDQsMCAxNjEuMDAyLC0zLjA5OTllKzAwMSAyMTMuOTk2LC05LjI5OTdlKzAwMSA1Mi4wMDI1LC02LjE5OThlKzAwMSA3NC4wMDQ4LC0xLjM5ZSswMDIgNjcuMDA1OSwtMi4zMDk5OGUrMDAybC00LjIyZSswMDIgMGM0Ljk5NDQsLTQuMzAwNThlKzAwMSAxOS45OTc4LC03LjUwMDM3ZSswMDEgNDUuOTk1NywtOS44MDA0OWUrMDAxIDI1Ljk5NzksLTIuMzAwMTJlKzAwMSA1OC4wMDI1LC0zLjM5OTU3ZSswMDEgOTYuOTk5MywtMy4zOTk1N2UrMDAxIDI4LjAwMjQsMCA1My4wMDE0LDYuMDAwMDMgNzUuMDAzNywxOC45OTkgMjEuOTk1NiwxMi4wMDAxIDM3Ljk5NzksMjkuMDAxMyA0Ny4wMDEzLDQ5Ljk5OGwxNDcuOTk2IDBjLTEuODk5OWUrMDAxLC02LjE5OThlKzAwMSAtNS4zMDAxNGUrMDAxLC0xLjA4OTk5ZSswMDIgLTEuMDJlKzAwMiwtMS4zOTk5OGUrMDAyIC00Ljg5OTkxZSswMDEsLTMuMDk5OWUrMDAxIC0xLjAzOTk4ZSswMDIsLTQuNzAwMTNlKzAwMSAtMS42NzAwMmUrMDAyLC00LjcwMDEzZSswMDEgLTguNDk5OTNlKzAwMSwwIC0xLjU0OTk1ZSswMDIsMjYuOTk2NyAtMi4wODk5NWUrMDAyLDgwLjk5NyAtNS40MDAwMmUrMDAxLDU0LjAwMDIgLTguMTAwMzdlKzAwMSwxMjIuMDA1IC04LjEwMDM3ZSswMDEsMjA1IDAsODMuMDAxNSAyNy4wMDM1LDE1MS4wMDYgODEuMDAzNywyMDYuMDA1IDU0LjAwMDIsNTQuOTk5MSAxMjIuOTk3LDgxLjk5NTkgMjA1Ljk5OSw4MS45OTU5em0tOS45ODg4ZS0wMDEgLTEuMTc5OTZlKzAwMmMtMy40MDAyNGUrMDAxLDAgLTYuMjAwNDhlKzAwMSwtOS4wMDM0MmUrMDAwIC04LjQ5OTkzZSswMDEsLTIuNzAwMzVlKzAwMSAtMi4zMDAxMmUrMDAxLC0xLjg5OTllKzAwMSAtMy45MDAzNmUrMDAxLC00LjI5OTkxZSswMDEgLTQuODAwMDJlKzAwMSwtNy4zOTk4MWUrMDAxbDI2Mi45OTYgMGMtNy45OTc3OWUrMDAwLDMwLjk5OSAtMi4yOTk0NWUrMDAxLDU0Ljk5OTEgLTQuNTk5NTdlKzAwMSw3My45OTgxIC0yLjMwMDEyZSswMDEsMTguMDAwMSAtNS4xMDAzNmUrMDAxLDI3LjAwMzUgLTguNDAwMDRlKzAwMSwyNy4wMDM1eiIvPg0KICAgPGdseXBoIHVuaWNvZGU9ImsiIGhvcml6LWFkdi14PSI2MzMiIGQ9Ik02MTMuMDAyIDBsLTEuODMwMDRlKzAwMiAwIC0yLjI0OTk4ZSswMDIgMjQwLjAwMSAwIC0yLjQwMDAxZSswMDIgLTEuNDMwMDJlKzAwMiAwIDAgNzcwLjAwMSAxNDMuMDAyIDAgMCAtNC40OTAwM2UrMDAyIDIwOS4wMDIgMjI5IDE4MS45OTkgMCAtMi41MTAwMmUrMDAyIC0yLjYxOTk3ZSswMDIgMjY4LjAwMyAtMi44ODAwMWUrMDAyeiIvPg0KICAgPGdseXBoIHVuaWNvZGU9Im8iIGhvcml6LWFkdi14PSI2NjAiIGQ9Ik0xMjYuOTk5IDQ4MC4wMDJjNTQuOTk5MSw1NC45OTkxIDEyMy4wMDQsODEuOTk1OSAyMDMuMDAyLDgxLjk5NTkgNzkuOTk4MSwwIDE0Ny45OTYsLTIuNjk5NjdlKzAwMSAyMDQuMDAxLC04LjE5OTU5ZSswMDEgNTQuOTk5MSwtNS40OTk5MWUrMDAxIDgyLjk5NDcsLTEuMjMwMDRlKzAwMiA4Mi45OTQ3LC0yLjA1ZSswMDIgMCwtOC4zMDAxNWUrMDAxIC0yLjY5OTY3ZSswMDEsLTEuNTFlKzAwMiAtOC4xOTk1OWUrMDAxLC0yLjA1ZSswMDIgLTUuNDk5OTFlKzAwMSwtNS41MDA1OWUrMDAxIC0xLjI0MDAzZSswMDIsLTguMjAwMjZlKzAwMSAtMi4wNWUrMDAyLC04LjIwMDI2ZSswMDEgLTguMTAwMzdlKzAwMSwwIC0xLjQ4MDAzZSswMDIsMjYuOTk2NyAtMi4wMzAwMmUrMDAyLDgyLjAwMjYgLTUuNDk5OTFlKzAwMSw1NC45OTkxIC04LjMwMDE1ZSswMDEsMTIyLjk5NyAtOC4zMDAxNWUrMDAxLDIwNSAwLDgxLjk5NTkgMjguMDAyNCwxNTAuMDAxIDgzLjAwMTUsMjA1em0zMDQuMDA0IC05LjYwMDA0ZSswMDFjLTIuNzAwMzVlKzAwMSwyNy45OTU2IC02LjAwMDAzZSswMDEsNDIuMDAwMiAtMS4wMTAwMmUrMDAyLDQyLjAwMDIgLTQuMTAwMTNlKzAwMSwwIC03LjQwMDQ4ZSswMDEsLTEuNDAwNDZlKzAwMSAtMS4wMTAwMmUrMDAyLC00LjIwMDAyZSswMDEgLTIuNjk5NjdlKzAwMSwtMi44MDAyNGUrMDAxIC00LjEwMDEzZSswMDEsLTYuNDAwMjVlKzAwMSAtNC4xMDAxM2UrMDAxLC0xLjA4OTk5ZSswMDIgMCwtNC41MDAzNmUrMDAxIDE0LjAwNDYsLTguMTAwMzdlKzAwMSA0MS4wMDEzLC0xLjA4OTk5ZSswMDIgMjYuOTk2NywtMi44MDAyNGUrMDAxIDYwLjAwMDMsLTQuMjAwMDJlKzAwMSAxMDEuMDAyLC00LjIwMDAyZSswMDEgNDEuMDAxMywwIDc0Ljk5NywxMy45OTc4IDEwMiw0Mi4wMDAyIDI2Ljk5NjcsMjcuOTk1NiAzOS45OTU3LDYzLjk5NTggMzkuOTk1NywxMDguOTk5IDAsNDQuOTk2OCAtMS4zOTk3OGUrMDAxLDgwLjk5NyAtNC4wOTk0NmUrMDAxLDEwOC45OTl6Ii8+DQogICA8Z2x5cGggdW5pY29kZT0icCIgaG9yaXotYWR2LXg9IjY3MyIgZD0iTTM3OS4wMDEgNTYxLjk5OGM3MS4wMDE0LDAgMTMxLjAwMiwtMi42OTk2N2UrMDAxIDE3OS4wMDIsLTcuOTk5ODFlKzAwMSA0OC4wMDAyLC01LjQwMDAyZSswMDEgNzIuMDAwMywtMS4yMjk5N2UrMDAyIDcyLjAwMDMsLTIuMDY5OThlKzAwMiAwLC04LjQwMDA0ZSswMDEgLTIuNDAwMDFlKzAwMSwtMS41MzAwNGUrMDAyIC03LjEwMDE0ZSswMDEsLTIuMDYwMDVlKzAwMiAtNC44MDAwMmUrMDAxLC01LjQwMDAyZSswMDEgLTEuMDhlKzAwMiwtOC4wOTk3ZSswMDEgLTEuODAwMDFlKzAwMiwtOC4wOTk3ZSswMDEgLTcuMjk5OTJlKzAwMSwwIC0xLjMxMDAyZSswMDIsMjkuMDAxMyAtMS43NDAwMWUrMDAyLDg1Ljk5ODFsMCAtMy4yNDAwMWUrMDAyIC0xLjQzMDAyZSswMDIgMCAwIDgwMC4wMDEgMTQzLjAwMiAwIDAgLTcuNjk5NDdlKzAwMWM0Mi45OTkxLDU4Ljk5NDYgMTAxLjAwMiw4OC45OTQ4IDE3NC4wMDEsODguOTk0OHptLTMuMzAwMzVlKzAwMSAtNC4zNzk5NWUrMDAyYzQwLjAwMjQsMCA3My4wMDYsMTMuOTk3OCAxMDAuMDAzLDQyLjAwMDIgMjUuOTk3OSwyNy45OTU2IDM5LjAwMzYsNjMuOTk1OCAzOS4wMDM2LDEwOC45OTkgMCw0NC45OTY4IC0xLjMwMDU3ZSswMDEsODAuOTk3IC0zLjkwMDM2ZSswMDEsMTA4Ljk5OSAtMi41OTk3OWUrMDAxLDI3Ljk5NTYgLTUuOTAwMTRlKzAwMSw0Mi4wMDAyIC0xLjAwMDAzZSswMDIsNDIuMDAwMiAtNC4wOTk0NmUrMDAxLDAgLTcuMzk5ODFlKzAwMSwtMS40MDA0NmUrMDAxIC0xLjAwOTk1ZSswMDIsLTQuMjAwMDJlKzAwMSAtMi43MDAzNWUrMDAxLC0yLjgwMDI0ZSswMDEgLTQuMDAwMjRlKzAwMSwtNi40MDAyNWUrMDAxIC00LjAwMDI0ZSswMDEsLTEuMDg5OTllKzAwMiAwLC00LjUwMDM2ZSswMDEgMTIuOTk4OSwtOC4xMDAzN2UrMDAxIDQwLjAwMjQsLTEuMDg5OTllKzAwMiAyNi45OTY3LC0yLjgwMDI0ZSswMDEgNjAuMDAwMywtNC4yMDAwMmUrMDAxIDEwMC45OTUsLTQuMjAwMDJlKzAwMXoiLz4NCiAgIDxnbHlwaCB1bmljb2RlPSJzIiBob3Jpei1hZHYteD0iNTkxIiBkPSJNMzExLjAwMyAtMS4yMDAwMWUrMDAxYy03LjQwMDQ4ZSswMDEsMCAtMS4zNjAwM2UrMDAyLDE3LjAwMTIgLTEuODUwMDJlKzAwMiw1Mi4wMDI1IC00Ljg5OTkxZSswMDEsMzMuOTk1NyAtNy44OTk5MmUrMDAxLDgwLjk5NyAtOC45MDAxNWUrMDAxLDE0MC45OTdsMTQ1IDBjMTIuMDAwMSwtNC44OTk5MWUrMDAxIDU2LjAwNDgsLTcuMzk5ODFlKzAwMSAxMzIuOTk5LC03LjM5OTgxZSswMDEgNjIuMDA0OCwwIDkzLjAwMzgsMTQuOTk2NyA5My4wMDM4LDQ0Ljk5NjggMCw0LjAwMjI3IDAsOC4wMDQ1NCAtOS45ODg4ZS0wMDEsMTEuMDAxMiAtMS4wMDU2M2UrMDAwLDMuMDAzMzkgLTMuMDAzMzllKzAwMCw2LjAwMDAzIC01LjAwMTE1ZSswMDAsOS4wMDM0MiAtMy4wMDMzOWUrMDAwLDIuOTk2NjQgLTUuMDAxMTVlKzAwMCw0Ljk5NDQgLTguMDA0NTRlKzAwMCw3Ljk5Nzc5IC0yLjk5NjY0ZSswMDAsMS45OTc3NiAtNi4wMDAwM2UrMDAwLDQuMDAyMjcgLTEuMDk5NDRlKzAwMSw2LjAwMDAzIC01LjAwMTE1ZSswMDAsMS45OTc3NiAtMS4wMDAyM2UrMDAxLDQuMDAyMjcgLTEuNDAwNDZlKzAwMSw1LjAwMTE1IC0zLjk5NTUyZSswMDAsMC45OTg4OCAtOS45OTU1NWUrMDAwLDIuOTk2NjQgLTEuNzAwMTJlKzAwMSw1LjAwMTE1IC03Ljk5Nzc5ZSswMDAsMS45OTc3NiAtMS40OTk2N2UrMDAxLDMuOTk1NTIgLTEuOTk5NzhlKzAwMSw0Ljk5NDQgLTYuMDAwMDNlKzAwMCwxLjAwNTYzIC0xLjM5OTc4ZSswMDEsMy4wMDMzOSAtMi40MDAwMWUrMDAxLDUuMDAxMTUgLTEuMDAwMjNlKzAwMSwyLjAwNDUxIC0xLjg5OTllKzAwMSw0LjAwMjI3IC0yLjU5OTc5ZSswMDEsNi4wMDAwMyAtOC4yMDAyNmUrMDAxLDE4Ljk5OSAtMS4zOWUrMDAyLDQxLjAwMTMgLTEuNzEwMDRlKzAwMiw2NC4wMDI1IC0zLjI5OTY4ZSswMDEsMjMuMDAxMiAtNC44OTk5MWUrMDAxLDU2Ljk5NjkgLTQuODk5OTFlKzAwMSwxMDIuOTk5IDAsNTYuOTk2OSAyMi4wMDIzLDEwMiA2Ni4wMDAzLDEzNC45OTcgNDIuOTk5MSwzMi4wMDQ2IDEwMiw0OC4wMDAyIDE3NSw0OC4wMDAyIDcyLjk5OTIsMCAxMzAuMDAzLC0xLjU5OTU2ZSswMDEgMTcxLjAwNCwtNC43MDAxM2UrMDAxIDQwLjk5NDYsLTMuMTk5NzllKzAwMSA2Ni4wMDAzLC03LjQ5OTdlKzAwMSA3NS45OTU4LC0xLjI4OTk3ZSswMDJsLTEuNDVlKzAwMiAwYy0xLjIwMDAxZSswMDEsMzYuOTk5IC00LjgwMDAyZSswMDEsNTUuOTk4IC0xLjA3MDAyZSswMDIsNTUuOTk4IC02LjA5OTkxZSswMDEsMCAtOS4xOTk4MmUrMDAxLC0xLjQ5OTY3ZSswMDEgLTkuMTk5ODJlKzAwMSwtNC41OTk1N2UrMDAxIDAsLTEuMjAwMDFlKzAwMSA2LjAwMDAzLC0yLjEwMDM1ZSswMDEgMTguOTk5LC0yLjYwMDQ2ZSswMDEgMTMuMDA1NywtNC45OTQ0ZSswMDAgNDEuMDAxMywtMS4yOTk4OWUrMDAxIDg2LjAwNDksLTIuMjk5NDVlKzAwMSA0NC45OTY4LC0xLjAwMDIzZSswMDEgNzkuOTk4MSwtMS45MDA1N2UrMDAxIDEwNS45OTYsLTIuNzAwMzVlKzAwMSAyNi4wMDQ2LC04Ljk5NjY3ZSswMDAgNTEuMDAzNiwtMS45OTk3OGUrMDAxIDc0LjAwNDgsLTMuMjk5NjhlKzAwMSAyMi45OTQ1LC0xLjMwMDU3ZSswMDEgMzkuOTk1NywtMi45MDAxM2UrMDAxIDQ5Ljk5OCwtNC44MDAwMmUrMDAxIDkuOTk1NTUsLTEuODk5OWUrMDAxIDE0Ljk5NjcsLTQuMTAwMTNlKzAwMSAxNC45OTY3LC02LjgwMDQ4ZSswMDEgMCwtNS44OTk0NmUrMDAxIC0yLjMwMDEyZSswMDEsLTEuMDQ5OTdlKzAwMiAtNi44OTk2OWUrMDAxLC0xLjM1OTk2ZSswMDIgLTQuNjAwMjVlKzAwMSwtMy4wOTk5ZSswMDEgLTEuMDUwMDRlKzAwMiwtNC43MDAxM2UrMDAxIC0xLjc1OTk5ZSswMDIsLTQuNzAwMTNlKzAwMXoiLz4NCiAgIDxnbHlwaCB1bmljb2RlPSJ0IiBob3Jpei1hZHYteD0iNTI1IiBkPSJNNDY1Ljk5OCAxNDguMDAzbDI0LjAwMDEgLTEuMTYwMDVlKzAwMmMtMS42OTk0NWUrMDAxLC0xLjEwMDEyZSswMDEgLTMuOTk5NTdlKzAwMSwtMi4wOTk2N2UrMDAxIC03LjA5OTQ3ZSswMDEsLTMuMDAwMDFlKzAwMSAtMy4xMDA1OGUrMDAxLC05Ljk5NTU1ZSswMDAgLTYuMjAwNDhlKzAwMSwtMS4zOTk3OGUrMDAxIC05LjMwMDM4ZSswMDEsLTEuMzk5NzhlKzAwMSAtNS45MDAxNGUrMDAxLDAgLTEuMDhlKzAwMiwxOC45OTkgLTEuNDY5OTdlKzAwMiw1NS45OTggLTMuOTAwMzZlKzAwMSwzNi45OTkgLTUuOTAwMTRlKzAwMSw5My4wMDM4IC01LjkwMDE0ZSswMDEsMTY4LjAwMWwwIDIwMy4wMDIgLTkuNzk5ODJlKzAwMSAwIDAgMTM0Ljk5NyA5Ny45OTgyIDAgMCAxMTkuMDAyIDE0My4wMDIgMzAuOTk5IDAgLTEuNTAwMDFlKzAwMiAyMDQuMDAxIDAgMCAtMS4zNDk5N2UrMDAyIC0yLjA0MDAxZSswMDIgMCAwIC0xLjk0OTk4ZSswMDJjMCwtNi42MDAwM2UrMDAxIDI4Ljk5NDUsLTkuOTAwMzhlKzAwMSA4Ny45OTU5LC05LjkwMDM4ZSswMDEgMjYuMDA0NiwwIDY0LjAwMjUsOS4wMDM0MiAxMTQuOTk5LDI3LjAwMzV6Ii8+DQogICA8Z2x5cGggdW5pY29kZT0idSIgaG9yaXotYWR2LXg9IjYxNiIgZD0iTTQxNy45OTcgNTQ5Ljk5OGwxNDMuMDAyIDAgMCAtNS40OTk5OGUrMDAyIC0xLjQzMDAyZSswMDIgMCAwIDc2LjAwMjZjLTQuMjAwMDJlKzAwMSwtNS45MDAxNGUrMDAxIC05Ljg5OTcxZSswMDEsLTguODAwMjZlKzAwMSAtMS42OTk5OWUrMDAyLC04LjgwMDI2ZSswMDEgLTYuMDk5OTFlKzAwMSwwIC0xLjA4ZSswMDIsMTkuOTk3OCAtMS40MzAwMmUrMDAyLDU5LjAwMTQgLTMuNDk5NDVlKzAwMSwzOC45OTY4IC01LjI5OTQ2ZSswMDEsOTAuOTk5MyAtNS4yOTk0NmUrMDAxLDE1Ny45OThsMCAzNDQuOTk4IDE0Mi45OTUgMCAwIC0zLjEzOTk5ZSswMDJjMCwtMy42OTk5ZSswMDEgOC4wMDQ1NCwtNi41MDAxNGUrMDAxIDI0LjAwMDEsLTguNDAwMDRlKzAwMSAxNS4wMDM0LC0xLjg5OTllKzAwMSA0MS4wMDEzLC0yLjc5OTU2ZSswMDEgNzcuMDAxNSwtMi43OTk1NmUrMDAxIDM5LjAwMzYsMCA3MC4wMDI2LDEyLjAwMDEgOTAuOTk5MywzNC45OTQ1IDIxLjAwMzUsMjMuMDAxMiAzMC45OTksNTcuMDAzNiAzMC45OTksMTAybDAgMjg5eiIvPg0KICA8L2ZvbnQ+DQogIDxzdHlsZSB0eXBlPSJ0ZXh0L2NzcyI+DQogICA8IVtDREFUQVsNCiAgICBAZm9udC1mYWNlIHsgZm9udC1mYW1pbHk6IlN0b2x6bCBNZWRpdW0iO2ZvbnQtdmFyaWFudDpub3JtYWw7Zm9udC13ZWlnaHQ6NTAwO3NyYzp1cmwoIiNGb250SUQwIikgZm9ybWF0KHN2Zyl9DQogICAgLmZpbDEge2ZpbGw6IzJCMkIyQX0NCiAgICAuZmlsMCB7ZmlsbDojRDEyRDJGfQ0KICAgIC5mbnQwIHtmb250LXdlaWdodDo1MDA7Zm9udC1zaXplOjE0ODEuNjZweDtmb250LWZhbWlseTonU3RvbHpsIE1lZGl1bSd9DQogICBdXT4NCiAgPC9zdHlsZT4NCiA8L2RlZnM+DQogPGcgaWQ9ItCh0LvQvtC5X3gwMDIwXzEiPg0KICA8bWV0YWRhdGEgaWQ9IkNvcmVsQ29ycElEXzBDb3JlbC1MYXllciIvPg0KICA8cGF0aCBjbGFzcz0iZmlsMCIgZD0iTTM1ODIuOTkgMTcxMy41NmwxNzI0LjA1IDBjNTEzLjYyLDAgOTMzLjg0LDQyMC4yMiA5MzMuODQsOTMzLjg0bDAgMTcyNC4wNWMwLDUxMy42MiAtNDIwLjIyLDkzMy44NCAtOTMzLjg0LDkzMy44NGwtMTcyNC4wNSAwYy01MTMuNjIsMCAtOTMzLjg0LC00MjAuMjIgLTkzMy44NCwtOTMzLjg0bDAgLTE3MjQuMDVjMCwtNTEzLjYyIDQyMC4yMiwtOTMzLjg0IDkzMy44NCwtOTMzLjg0em0yNjggMjM1MS42OWMtNzYuNjcsLTQ0LjI4IC0xNDMuODksLTEwMy4yMyAtMTk3LjgxLC0xNzMuNDYgLTUzLjg5LC03MC4yNSAtOTMuNDMsLTE1MC40MyAtMTE2LjM1LC0yMzUuOTcgLTIyLjkyLC04NS41MiAtMjguNzcsLTE3NC43NCAtMTcuMjEsLTI2Mi41MiAxMS41NSwtODcuODEgNDAuMywtMTcyLjQ1IDg0LjU4LC0yNDkuMTUgNDQuMjUsLTc2LjY4IDEwMy4yLC0xNDMuOSAxNzMuNDYsLTE5Ny43OSA3MC4yNSwtNTMuOTEgMTUwLjQzLC05My40NiAyMzUuOTcsLTExNi4zOCA4NS41MiwtMjIuOTIgMTc0Ljc0LC0yOC43NSAyNjIuNTIsLTE3LjIgODcuNzksMTEuNTcgMTcyLjQ1LDQwLjMgMjQ5LjEzLDg0LjU4bC0zMzcuMTMgNTgzLjk0IC0zMzcuMTYgNTgzLjk1em0xMDc1LjY3IC0xMzk0LjY1YzEwMi4yMyw1OS4wMiAxOTEuODcsMTM3LjYzIDI2My43MywyMzEuMjkgNzEuODgsOTMuNjYgMTI0LjYsMjAwLjU4IDE1NS4xNiwzMTQuNiAzMC41NSwxMTQuMDUgMzguMzYsMjMzLjAxIDIyLjk0LDM1MC4wNSAtMTUuNDIsMTE3LjA2IC01My43NCwyMjkuOTQgLTExMi43NSwzMzIuMTggLTU5LjA0LDEwMi4yNCAtMTM3LjYzLDE5MS44NyAtMjMxLjMxLDI2My43MyAtOTMuNjYsNzEuODggLTIwMC41NiwxMjQuNjEgLTMxNC42MSwxNTUuMTYgLTExNC4wNSwzMC41NSAtMjMyLjk4LDM4LjM2IC0zNTAuMDQsMjIuOTQgLTExNy4wNiwtMTUuNCAtMjI5LjkyLC01My43MSAtMzMyLjE4LC0xMTIuNzVsNDQ5LjUzIC03NzguNjEgNDQ5LjUzIC03NzguNTl6Ii8+DQogIDx0ZXh0IHg9IjcxNjguMTIiIHk9IjQwMTUuODUiICBjbGFzcz0iZmlsMSBmbnQwIj5SdURlc2t0b3A8L3RleHQ+DQogPC9nPg0KPC9zdmc+DQo=" alt="RuDesktop" /></div>
             <div className="rd-footer-copy">Корпоративный магазин мерча © 2025</div>
-            <div className="rd-footer-version" style={{fontSize:"11px",color:"rgba(255,255,255,0.3)",marginTop:"6px"}}>Версия портала 6</div>
+            <div className="rd-footer-version" style={{fontSize:"11px",color:"rgba(255,255,255,0.3)",marginTop:"6px"}}>Версия портала 3</div>
           </div>
           {/* Social icons */}
           {(() => {
@@ -993,7 +971,7 @@ function App() {
 
 
 
-// -- TASK COUNTDOWN --------------------------------------------------------
+// ── TASK COUNTDOWN ────────────────────────────────────────────────────────
 
 function TaskCountdown({ deadline }) {
   
@@ -1050,7 +1028,7 @@ function TaskCountdown({ deadline }) {
   );
 }
 
-// -- TASKS -----------------------------------------------------------------
+// ── TASKS ─────────────────────────────────────────────────────────────────
 
 function TaskSubmitButton({ task, currentUser, taskSubmissions, saveTaskSubmissions, notify, appearance, onClose, isShopModal }) {
   // If isShopModal, we use global window access pattern - pass real props when used standalone
@@ -1447,14 +1425,14 @@ function TasksAdminTab({ tasks, saveTasks, taskSubmissions, saveTaskSubmissions,
     <div>
       {/* Task list header */}
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"20px"}}>
-        <div style={{fontWeight:700,fontSize:"18px",color:"var(--rd-dark)"}}>{editId === "new" ? <><LniIcon name="plus" /> Новое задание</> : `Задания (${taskList.length})`}</div>
+        <div style={{fontWeight:700,fontSize:"18px",color:"var(--rd-dark)"}}>{editId === "new" ? "➕ Новое задание" : `Задания (${taskList.length})`}</div>
         {!editId && <button className="btn btn-primary btn-sm" onClick={startNew}>+ Новое задание</button>}
         {editId && <button className="btn btn-ghost btn-sm" onClick={cancel}>← Назад</button>}
       </div>
 
       {editId && (
         <div className="product-form-card" style={{marginBottom:"24px"}}>
-          <div className="product-form-title">{editId === "new" ? <><LniIcon name="plus" /> Новое задание</> : <><LniIcon name="pencil-alt" /> Редактирование</>}</div>
+          <div className="product-form-title">{editId === "new" ? "➕ Новое задание" : "✏️ Редактирование"}</div>
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"14px"}}>
             <div className="form-field" style={{gridColumn:"1/-1"}}>
               <label className="form-label">Название задания *</label>
@@ -1571,7 +1549,7 @@ function TasksAdminTab({ tasks, saveTasks, taskSubmissions, saveTaskSubmissions,
             )}
           </div>
           <div style={{display:"flex",gap:"10px",marginTop:"16px"}}>
-            <button className="btn btn-primary" onClick={save}><LniIcon name="save" /> Сохранить</button>
+            <button className="btn btn-primary" onClick={save}>💾 Сохранить</button>
             <button className="btn btn-ghost" onClick={cancel}>Отмена</button>
           </div>
         </div>
@@ -1593,8 +1571,8 @@ function TasksAdminTab({ tasks, saveTasks, taskSubmissions, saveTaskSubmissions,
               <div style={{fontSize:"12px",color:"var(--rd-gray-text)"}}>Награда: <b>{task.reward}</b> монет · {task.active!==false ? <span style={{color:"var(--rd-green)",fontWeight:700}}>Активно</span> : <span style={{color:"var(--rd-gray-text)"}}>Скрыто</span>}{task.deadline && <span> · ⏰ до {new Date(task.deadline).toLocaleString("ru-RU",{day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"})}</span>}</div>
             </div>
             <div style={{display:"flex",gap:"8px",flexShrink:0}}>
-              <button className="btn btn-ghost btn-sm" onClick={() => startEdit(task)} title="Редактировать"><LniIcon name="pencil-alt" /></button>
-              <button className="btn btn-ghost btn-sm" onClick={() => deleteTask(task.id)} style={{color:"var(--rd-red)"}} title="Удалить"><LniIcon name="trash" /></button>
+              <button className="btn btn-ghost btn-sm" onClick={() => startEdit(task)}>✏️</button>
+              <button className="btn btn-ghost btn-sm" onClick={() => deleteTask(task.id)} style={{color:"var(--rd-red)"}}>🗑️</button>
             </div>
           </div>
         ))}
@@ -1646,7 +1624,7 @@ function TasksAdminTab({ tasks, saveTasks, taskSubmissions, saveTaskSubmissions,
   );
 }
 
-// -- AUCTION ----------------------------------------------------------------
+// ── AUCTION ────────────────────────────────────────────────────────────────
 
 function AuctionCountdownInline({ endsAt }) {
   const [now, setNow] = useState(Date.now());
@@ -1949,7 +1927,7 @@ function AuctionAdminTab({ auctions, saveAuctions, notify }) {
                           {isEnded ? "✅ Завершён" : `⏱ До ${new Date(a.endsAt).toLocaleString("ru-RU")}`} · {a.bids?.length || 0} ставок
                         </div>
                       </div>
-                      <button className="btn btn-ghost btn-sm" onClick={() => deleteAuction(a.id)} style={{color:"var(--rd-red)",flexShrink:0}} title="Удалить"><LniIcon name="trash" /></button>
+                      <button className="btn btn-ghost btn-sm" onClick={() => deleteAuction(a.id)} style={{color:"var(--rd-red)",flexShrink:0}}>🗑️</button>
                     </div>
                   </div>
                 </div>
@@ -1969,7 +1947,7 @@ function AuctionAdminTab({ auctions, saveAuctions, notify }) {
           <label className="form-label">Фотография товара</label>
           <input type="file" accept="image/*" style={{display:"none"}} id="auction-img-input" onChange={handleImage} />
           <div style={{display:"flex",gap:"10px",alignItems:"center",flexWrap:"wrap"}}>
-            <label htmlFor="auction-img-input" className="btn btn-secondary btn-sm" style={{cursor:"pointer"}}><LniIcon name="camera" /> Загрузить фото</label>
+            <label htmlFor="auction-img-input" className="btn btn-secondary btn-sm" style={{cursor:"pointer"}}>📷 Загрузить фото</label>
             {imgPreview && <button className="btn btn-ghost btn-sm" style={{color:"var(--rd-red)"}} onClick={() => {setImgPreview(""); setForm(f => ({...f, image:""}));}}>✕ Удалить</button>}
           </div>
           {imgPreview && <img src={imgPreview} alt="" style={{marginTop:"10px",width:"120px",height:"80px",objectFit:"cover",borderRadius:"8px",border:"1.5px solid var(--rd-gray-border)"}} />}
@@ -1988,13 +1966,13 @@ function AuctionAdminTab({ auctions, saveAuctions, notify }) {
           <label className="form-label">Дата и время завершения</label>
           <input className="form-input" type="datetime-local" min={minDate} value={form.endsAt} onChange={e => setForm(f => ({...f, endsAt: e.target.value}))} />
         </div>
-        <button className="btn btn-primary" style={{marginTop:"16px",width:"100%"}} onClick={create}><LniIcon name="hammer" /> Создать аукцион</button>
+        <button className="btn btn-primary" style={{marginTop:"16px",width:"100%"}} onClick={create}>🔨 Создать аукцион</button>
       </div>
     </div>
   );
 }
 
-// -- FAQ PAGE --------------------------------------------------------------
+// ── FAQ PAGE ──────────────────────────────────────────────────────────────
 
 function FaqPage({ faq }) {
   const [openIdx, setOpenIdx] = useState(null);
@@ -2030,7 +2008,7 @@ function FaqPage({ faq }) {
   );
 }
 
-// -- SHOP ------------------------------------------------------------------
+// ── SHOP ──────────────────────────────────────────────────────────────────
 
 function ShopPage({ products, allProducts, categories, filterCat, setFilterCat, addToCart, setPage, currentUser, users, favorites, toggleFavorite, currency, faq, tasks, auctions }) {
   const cName = getCurrName(currency);
@@ -2454,7 +2432,7 @@ function ProductCard({ product, addToCart, onOpen, favorites, toggleFavorite }) 
   );
 }
 
-// -- FAVORITES ------------------------------------------------------------
+// ── FAVORITES ────────────────────────────────────────────────────────────
 
 function FavoritesPage({ products, favorites, toggleFavorite, addToCart, setPage }) {
   return (
@@ -2479,7 +2457,7 @@ function FavoritesPage({ products, favorites, toggleFavorite, addToCart, setPage
   );
 }
 
-    // -- CART ------------------------------------------------------------------
+    // ── CART ──────────────────────────────────────────────────────────────────
 
 function CartPage({ cart, removeFromCart, cartTotal, checkout, currentUser, setPage, users, currency }) {
   const cName = getCurrName(currency);
@@ -2515,17 +2493,7 @@ function CartPage({ cart, removeFromCart, cartTotal, checkout, currentUser, setP
               <div>
                 <div className="cs-label">Итого к оплате</div>
                 <div className="cs-total">{cartTotal}<span className="cs-unit">{cName}</span></div>
-                {currentUser && (
-                  <Chip
-                    size="sm"
-                    variant="flat"
-                    color="default"
-                    className="mt-2"
-                    classNames={{ content: "text-xs font-semibold text-gray-500" }}
-                  >
-                    Баланс: {users[currentUser]?.balance || 0} {cName}
-                  </Chip>
-                )}
+                {currentUser && <div className="cs-balance">Баланс: {users[currentUser]?.balance || 0} {cName}</div>}
               </div>
               <button className="btn btn-primary btn-lg" onClick={checkout}>
                 {currentUser ? "Оформить заказ" : "Войти и купить"}
@@ -2537,7 +2505,7 @@ function CartPage({ cart, removeFromCart, cartTotal, checkout, currentUser, setP
   );
 }
 
-// -- LOGIN -----------------------------------------------------------------
+// ── LOGIN ─────────────────────────────────────────────────────────────────
 
 function LoginPage({ users, setCurrentUser, setPage, notify }) {
   const [form, setForm] = useState({ username: "", password: "", remember: true });
@@ -2582,7 +2550,7 @@ function LoginPage({ users, setCurrentUser, setPage, notify }) {
   );
 }
 
-// -- REGISTER --------------------------------------------------------------
+// ── REGISTER ──────────────────────────────────────────────────────────────
 
 function RegisterPage({ users, saveUsers, setCurrentUser, setPage, notify }) {
   const [form, setForm] = useState({ username: "", firstName: "", lastName: "", email: "", password: "", confirm: "" });
@@ -2638,7 +2606,7 @@ function RegisterPage({ users, saveUsers, setCurrentUser, setPage, notify }) {
   );
 }
 
-// -- USER EDIT FORM --------------------------------------------------------
+// ── USER EDIT FORM ────────────────────────────────────────────────────────
 
 function UserEditForm({ username, user, users, saveUsers, notify, onClose }) {
   const [form, setForm] = useState({ email: user.email || "", newPassword: "", confirmPassword: "", birthdate: user.birthdate || "" });
@@ -2689,7 +2657,7 @@ function UserEditForm({ username, user, users, saveUsers, notify, onClose }) {
   );
 }
 
-// -- ADMIN -----------------------------------------------------------------
+// ── ADMIN ─────────────────────────────────────────────────────────────────
 
 const BLANK_PRODUCT = { name: "", price: "", category: "Одежда", emoji: "🛍️", desc: "", images: [], sizes: ["S","M","L","XL","XXL"], sku: "", badge: "", discount: 0, inactive: false, stock: "", sizeStock: {} };
 const ALL_CATEGORIES = ["Одежда", "Аксессуары", "Посуда", "Канцелярия"];
@@ -2888,7 +2856,7 @@ function FaqAdminTab({ faq, saveFaq, notify }) {
                       <textarea className="form-input" rows="4" style={{resize:"vertical",minHeight:"90px"}} value={editA} onChange={e => setEditA(e.target.value)} />
                     </div>
                     <div style={{display:"flex",gap:"10px",marginTop:"12px"}}>
-                      <button className="btn btn-primary btn-sm" onClick={saveEdit}><LniIcon name="save" /> Сохранить</button>
+                      <button className="btn btn-primary btn-sm" onClick={saveEdit}>💾 Сохранить</button>
                       <button className="btn btn-ghost btn-sm" onClick={() => setEditIdx(null)}>Отмена</button>
                     </div>
                   </div>
@@ -2905,7 +2873,7 @@ function FaqAdminTab({ faq, saveFaq, notify }) {
                       <button className="btn btn-ghost btn-sm" onClick={() => moveItem(idx,-1)} disabled={idx===0} title="Вверх">↑</button>
                       <button className="btn btn-ghost btn-sm" onClick={() => moveItem(idx,1)} disabled={idx===faqList.length-1} title="Вниз">↓</button>
                       <button className="btn btn-ghost btn-sm" onClick={() => startEdit(idx)} title="Редактировать">✏️</button>
-                      <button className="btn btn-ghost btn-sm" onClick={() => deleteItem(idx)} title="Удалить" style={{color:"var(--rd-red)"}} title="Удалить"><LniIcon name="trash" /></button>
+                      <button className="btn btn-ghost btn-sm" onClick={() => deleteItem(idx)} title="Удалить" style={{color:"var(--rd-red)"}}>🗑️</button>
                     </div>
                   </div>
                 )}
@@ -3274,12 +3242,12 @@ function AdminPage({ users, saveUsers, orders, saveOrders, products, saveProduct
 
           <div className="stats-grid">
             {[
-              { label: "Пользователей", val: Object.keys(users).filter(u => u !== "admin").length, icon: "users" },
-              { label: "Заказов всего", val: orders.length, icon: "package" },
-              { label: "Товаров в каталоге", val: products.length, icon: "shopping-bag" },
+              { label: "Пользователей", val: Object.keys(users).filter(u => u !== "admin").length, icon: "👥" },
+              { label: "Заказов всего", val: orders.length, icon: "📦" },
+              { label: "Товаров в каталоге", val: products.length, icon: "🛍️" },
             ].map(s => (
               <div key={s.label} className="stat-card">
-                <div className="sc-icon"><LniIcon name={s.icon} size="28px" /></div>
+                <div className="sc-icon">{s.icon}</div>
                 <div className="sc-label">{s.label}</div>
                 <div className="sc-value">{s.val}</div>
               </div>
@@ -3295,7 +3263,7 @@ function AdminPage({ users, saveUsers, orders, saveOrders, products, saveProduct
           <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:"20px",flexWrap:"wrap",gap:"12px"}}>
             <div style={{fontWeight:700,fontSize:"16px",color:"var(--rd-dark)"}}>Все товары ({products.length})</div>
             <button className="btn btn-primary btn-sm" onClick={openNewProduct} style={{gap:"6px"}}>
-              <LniIcon name="plus" /> Добавить товар
+              ➕ Добавить товар
             </button>
           </div>
           <div className="product-list-admin">
@@ -3330,7 +3298,7 @@ function AdminPage({ users, saveUsers, orders, saveOrders, products, saveProduct
               <div className="modal-box" onClick={e => e.stopPropagation()} style={{maxWidth:"680px",width:"95vw",maxHeight:"90vh",overflowY:"auto",padding:"32px 28px"}}>
                 <button className="modal-close" onClick={resetForm}>✕</button>
                 <div style={{fontWeight:800,fontSize:"22px",marginBottom:"24px",color:"var(--rd-dark)"}}>
-                  {editingProduct ? <><LniIcon name="pencil-alt" /> Редактирование товара</> : <><LniIcon name="plus" /> Новый товар</>}
+                  {editingProduct ? "✏️ Редактирование товара" : "➕ Новый товар"}
                 </div>
 
                 {imgPreviews.length > 0 && (
@@ -3521,8 +3489,8 @@ function AdminPage({ users, saveUsers, orders, saveOrders, products, saveProduct
               ))}
             </div>
             <div style={{marginLeft:"auto",display:"flex",gap:"8px",flexWrap:"wrap"}}>
-              <button className="btn btn-secondary btn-sm" onClick={exportUsersCSV}><LniIcon name="download" /> CSV</button>
-              <button className="btn btn-secondary btn-sm" onClick={exportUsersXLSX}><LniIcon name="download" /> XLSX</button>
+              <button className="btn btn-secondary btn-sm" onClick={exportUsersCSV}>⬇ CSV</button>
+              <button className="btn btn-secondary btn-sm" onClick={exportUsersXLSX}>⬇ XLSX</button>
               <label className="btn btn-primary btn-sm" style={{cursor:"pointer",position:"relative"}}>
                 ⬆ Импорт
                 <input type="file" accept=".csv,.xlsx,.xls" style={{position:"absolute",inset:0,opacity:0,cursor:"pointer",width:"100%",height:"100%"}} onChange={handleUsersImport} />
@@ -3546,18 +3514,9 @@ function AdminPage({ users, saveUsers, orders, saveOrders, products, saveProduct
                   {user.birthdate && <div className="user-card-date" style={{color:"var(--rd-red)"}}>🎂 {new Date(user.birthdate).toLocaleDateString("ru-RU", {day:"numeric",month:"long"})}</div>}
                 </div>
                 <div className="user-card-balance">
-                  <Card
-                    shadow="none"
-                    classNames={{
-                      base: "border-1 border-default-200 bg-default-50 min-w-[100px]",
-                    }}
-                  >
-                    <CardBody className="py-3 px-4 items-center text-center gap-0">
-                      <span className="text-[10px] font-bold uppercase tracking-widest text-default-400 mb-1">Баланс</span>
-                      <span className="text-3xl font-black text-danger leading-none">{user.balance || 0}</span>
-                      <Chip size="sm" variant="flat" color="danger" className="mt-1.5" classNames={{content:"text-[10px] font-bold"}}>{cName}</Chip>
-                    </CardBody>
-                  </Card>
+                  <div className="ucb-label">Баланс</div>
+                  <div className="ucb-value">{user.balance || 0}</div>
+                  <div className="ucb-unit">{cName}</div>
                 </div>
                 <div className="user-card-controls">
                   <input className="qty-input" type="number" min="1" placeholder="Сумма"
@@ -3565,11 +3524,11 @@ function AdminPage({ users, saveUsers, orders, saveOrders, products, saveProduct
                     onChange={e => setAmounts(prev => ({...prev, [username]: e.target.value}))} />
                   <button className="btn btn-primary btn-sm" onClick={() => grant(username, 1)}>+ Начислить</button>
                   <button className="btn btn-ghost btn-sm" onClick={() => grant(username, -1)}>− Списать</button>
-                  <button className="btn btn-ghost btn-sm" onClick={() => setUserEditModal({username, user})} title="Редактировать"><LniIcon name="pencil-alt" /></button>
+                  <button className="btn btn-ghost btn-sm" onClick={() => setUserEditModal({username, user})} title="Редактировать">✏️</button>
                   <button className="btn btn-ghost btn-sm" onClick={() => toggleAdmin(username)} title={user.role === "admin" ? "Разжаловать" : "Сделать админом"} style={{fontSize:"16px"}}>
-                    {user.role === "admin" ? <LniIcon name="user" /> : <LniIcon name="shield" />}
+                    {user.role === "admin" ? "👤" : "🛡️"}
                   </button>
-                  <button className="btn btn-ghost btn-sm" onClick={() => deleteUser(username)} title="Удалить" style={{color:"var(--rd-red)"}}><LniIcon name="trash" /></button>
+                  <button className="btn btn-ghost btn-sm" onClick={() => deleteUser(username)} title="Удалить" style={{color:"var(--rd-red)"}}>🗑️</button>
                 </div>
               </div>
             ))}
@@ -3626,7 +3585,7 @@ function AdminPage({ users, saveUsers, orders, saveOrders, products, saveProduct
                         }}>✓</button>
                         <button className="btn-icon" onClick={() => setEditCatIdx(null)}>✕</button>
                       </>
-                    : <button className="btn-icon" onClick={() => { setEditCatIdx(i); setEditCatVal(cat); }} title="Редактировать"><LniIcon name="pencil-alt" /></button>
+                    : <button className="btn-icon" onClick={() => { setEditCatIdx(i); setEditCatVal(cat); }}>✏️</button>
                   }
                   <button className="btn-icon delete" onClick={() => {
                     if (!confirm("Удалить категорию \"" + cat + "\"?")) return;
@@ -3750,7 +3709,7 @@ function AdminPage({ users, saveUsers, orders, saveOrders, products, saveProduct
                 <div style={{fontSize:"40px",marginBottom:"12px"}}>📊</div>
                 <div style={{fontWeight:800,fontSize:"17px",color:"var(--rd-dark)",marginBottom:"6px"}}>Excel (XLSX)</div>
                 <div style={{fontSize:"12px",color:"var(--rd-gray-text)",marginBottom:"16px"}}>Открывается в Excel, Google Sheets, LibreOffice</div>
-                <div className="btn btn-primary btn-sm btn-block"><LniIcon name="download" /> Скачать XLSX</div>
+                <div className="btn btn-primary btn-sm btn-block">⬇ Скачать XLSX</div>
               </div>
               <div style={{border:"1.5px solid var(--rd-gray-border)",borderRadius:"var(--rd-radius-sm)",padding:"24px",textAlign:"center",cursor:"pointer",transition:"all 0.15s"}}
                 onClick={exportCSV}
@@ -3759,7 +3718,7 @@ function AdminPage({ users, saveUsers, orders, saveOrders, products, saveProduct
                 <div style={{fontSize:"40px",marginBottom:"12px"}}>📄</div>
                 <div style={{fontWeight:800,fontSize:"17px",color:"var(--rd-dark)",marginBottom:"6px"}}>CSV</div>
                 <div style={{fontSize:"12px",color:"var(--rd-gray-text)",marginBottom:"16px"}}>Универсальный формат, любой текстовый редактор</div>
-                <div className="btn btn-secondary btn-sm btn-block"><LniIcon name="download" /> Скачать CSV</div>
+                <div className="btn btn-secondary btn-sm btn-block">⬇ Скачать CSV</div>
               </div>
             </div>
           </div>
@@ -3794,9 +3753,9 @@ function AdminPage({ users, saveUsers, orders, saveOrders, products, saveProduct
   );
 }
 
-// -- PROFILE ---------------------------------------------------------------
+// ── PROFILE ───────────────────────────────────────────────────────────────
 
-// -- SETTINGS --------------------------------------------------------------
+// ── SETTINGS ──────────────────────────────────────────────────────────────
 
 function BannerSettingsTab({ appearance, saveAppearance, notify }) {
   
@@ -3941,7 +3900,7 @@ function BannerSettingsTab({ appearance, saveAppearance, notify }) {
         </div>
 
         <div style={{marginTop:"24px"}}>
-          <button className="btn btn-primary" onClick={save}><LniIcon name="save" /> Сохранить</button>
+          <button className="btn btn-primary" onClick={save}>💾 Сохранить</button>
         </div>
       </div>
     </div>
@@ -3971,7 +3930,7 @@ function SeoSettingsTab({ appearance, saveAppearance, notify }) {
   return (
     <div>
       <div className="settings-card">
-        <div className="settings-section-title"><LniIcon name="search-alt" /> SEO настройки</div>
+        <div className="settings-section-title">🔍 SEO настройки</div>
         <div style={{fontSize:"13px",color:"var(--rd-gray-text)",marginBottom:"24px",lineHeight:"1.7"}}>
           Настройте заголовок вкладки браузера, описание страницы и значок сайта (favicon). Применяются мгновенно.
         </div>
@@ -4411,36 +4370,36 @@ function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbC
   const applyAndSave = (newAp) => { setAp(newAp); saveAppearance(newAp); notify("Внешний вид сохранён ✓"); };
 
   const SIDEBAR_TABS = isAdmin ? [
-    { id: "profile",    icon: <LniIcon name="user" />,         label: "Профиль" },
-    { id: "appearance", icon: <LniIcon name="brush-alt" />,    label: "Внешний вид" },
-    { id: "banner",     icon: <LniIcon name="image" />,        label: "Баннер" },
-    { id: "currency",   icon: <LniIcon name="coins" />,        label: "Валюта" },
-    { id: "seo",        icon: <LniIcon name="search-alt" />,   label: "SEO" },
-    { id: "database",   icon: <LniIcon name="database" />,     label: "База данных" },
-    { id: "socials",    icon: <LniIcon name="network" />,      label: "Соц. сети" },
-    { id: "faq",        icon: <LniIcon name="question-circle" />, label: "Вопрос / Ответ" },
-    { id: "tasks",      icon: <LniIcon name="target-revenue" />, label: "Задания" },
-    { id: "auction",    icon: <LniIcon name="hammer" />,       label: "Аукцион" },
-    { id: "shop",       icon: <LniIcon name="store" />,        label: "Управление магазином" },
-    { id: "integrations", icon: <LniIcon name="plug" />,       label: "Интеграции" },
+    { id: "profile",    icon: "👤", label: "Профиль" },
+    { id: "appearance", icon: "🎨", label: "Внешний вид" },
+    { id: "banner",     icon: "🖼️", label: "Баннер" },
+    { id: "currency",   icon: "🪙", label: "Валюта" },
+    { id: "seo",        icon: "🔍", label: "SEO" },
+    { id: "database",   icon: "🗄️", label: "База данных" },
+    { id: "socials",    icon: "🌐", label: "Соц. сети" },
+    { id: "faq",        icon: "❓", label: "Вопрос / Ответ" },
+    { id: "tasks",      icon: "🎯", label: "Задания" },
+    { id: "auction",    icon: "🔨", label: "Аукцион" },
+    { id: "shop",       icon: "🛍️", label: "Управление магазином" },
+    { id: "integrations", icon: "🔗", label: "Интеграции" },
   ] : [
-    { id: "profile", icon: <LniIcon name="user" />, label: "Профиль" },
+    { id: "profile", icon: "👤", label: "Профиль" },
   ];
   const CURRENCY_SUB_TABS = isAdmin ? [
-    { id: "currency_settings", icon: <LniIcon name="pencil-alt" />, label: "Настройки" },
-    { id: "currency_birthday", icon: <LniIcon name="cake" />,       label: "День рождения" },
-    { id: "currency_bulk",     icon: <LniIcon name="money-bag" />,  label: "Начисление" },
+    { id: "currency_settings", icon: "✏️", label: "Настройки" },
+    { id: "currency_birthday", icon: "🎂", label: "День рождения" },
+    { id: "currency_bulk", icon: "💸", label: "Начисление" },
   ] : [
-    { id: "currency_settings", icon: <LniIcon name="pencil-alt" />, label: "Настройки" },
+    { id: "currency_settings", icon: "✏️", label: "Настройки" },
   ];
   const ADMIN_SUB_TABS = [
-    { id: "users",      icon: <LniIcon name="users" />,         label: "Пользователи" },
-    { id: "products",   icon: <LniIcon name="shopping-bag" />,  label: "Товары" },
-    { id: "categories", icon: <LniIcon name="tag" />,           label: "Категории" },
-    { id: "orders",     icon: <LniIcon name="package" />,       label: "Заказы" },
-    { id: "faq",        icon: <LniIcon name="question-circle" />, label: "Вопрос-ответ" },
-    { id: "import",     icon: <LniIcon name="upload" />,        label: "Импорт" },
-    { id: "export",     icon: <LniIcon name="download" />,      label: "Экспорт" },
+    { id: "users",      icon: "👥", label: "Пользователи" },
+    { id: "products",   icon: "🛍️", label: "Товары" },
+    { id: "categories", icon: "🏷️", label: "Категории" },
+    { id: "orders",     icon: "📦", label: "Заказы" },
+    { id: "faq",        icon: "❓", label: "Вопрос-ответ" },
+    { id: "import",     icon: "⬆️", label: "Импорт" },
+    { id: "export",     icon: "⬇️", label: "Экспорт" },
   ];
 
   return (
@@ -4500,7 +4459,7 @@ function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbC
                       </div>
                   }
                   <label style={{position:"absolute",bottom:0,right:0,width:"24px",height:"24px",borderRadius:"50%",background:"var(--rd-dark)",border:"2px solid #fff",display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",fontSize:"12px",color:"#fff"}} title="Изменить фото">
-                    <LniIcon name="camera" />
+                    ✏️
                     <input type="file" accept="image/*" style={{display:"none"}} onChange={e => {
                       const file = e.target.files[0]; if (!file) return;
                       const reader = new FileReader();
@@ -5398,9 +5357,9 @@ function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbC
 }
 
 
-// -- TRANSFER --------------------------------------------------------------
+// ── TRANSFER ──────────────────────────────────────────────────────────────
 
-// -- TRANSFER --------------------------------------------------------------
+// ── TRANSFER ──────────────────────────────────────────────────────────────
 
 function TransferPage({ currentUser, users, saveUsers, transfers, saveTransfers, notify, setPage, currency }) {
   const cName = getCurrName(currency);
@@ -5456,23 +5415,16 @@ function TransferPage({ currentUser, users, saveUsers, transfers, saveTransfers,
       <h2 className="page-title" style={{fontSize:"32px",marginBottom:"24px"}}>{`Перевод ${cName}`}</h2>
 
       <div className="transfer-card">
-        <Card
-          shadow="none"
-          classNames={{
-            base: "border-1 border-default-200 bg-gradient-to-r from-default-50 to-default-100 mb-6",
-          }}
-        >
-          <CardBody className="flex flex-row items-center gap-4 py-4 px-5">
-            <div className="text-4xl">🪙</div>
-            <div className="flex flex-col gap-0.5">
-              <span className="text-[11px] font-bold uppercase tracking-widest text-default-400">Ваш баланс</span>
-              <div className="flex items-baseline gap-1.5">
-                <span className="text-3xl font-black text-foreground">{myBalance}</span>
-                <Chip size="sm" variant="flat" color="default" classNames={{content:"font-bold text-xs"}}>{cName}</Chip>
-              </div>
+        <div className="transfer-balance">
+          <div className="transfer-balance-icon">🪙</div>
+          <div>
+            <div className="transfer-balance-label">Ваш баланс</div>
+            <div style={{display:"flex",alignItems:"baseline",gap:"6px"}}>
+              <span className="transfer-balance-val">{myBalance}</span>
+              <span className="transfer-balance-unit">{cName}</span>
             </div>
-          </CardBody>
-        </Card>
+          </div>
+        </div>
 
         <div className="form-field" style={{position:"relative"}}>
           <label className="form-label">Получатель</label>
@@ -5565,7 +5517,7 @@ function TransferPage({ currentUser, users, saveUsers, transfers, saveTransfers,
   );
 }
 
-// -- ORDERS ----------------------------------------------------------------
+// ── ORDERS ────────────────────────────────────────────────────────────────
 
 function OrdersPage({ orders, currency }) {
   const cName = getCurrName(currency);
