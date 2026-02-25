@@ -63,11 +63,10 @@ function _getPgCfg() {
 }
 
 async function _apiCall(action, body = {}) {
-  const pgConfig = _getPgCfg();
   const res = await fetch('/api/store', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ action, pgConfig, ...body }),
+    body: JSON.stringify({ action, ...body }),
   });
   return res.json();
 }
@@ -417,6 +416,17 @@ function App() {
   const [sqliteInitError, setSqliteInitError] = useState(null);
 
   useEffect(() => {
+    // Синхронизируем pgConfig с сервером (один источник правды)
+    fetch('/api/store', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'getPgConfig' }) })
+      .then(r => r.json())
+      .then(r => {
+        if (r.ok && r.config) {
+          // Сервер использует PG — обновляем локальный state
+          savePgConfigState({ ...r.config, enabled: true });
+        }
+      }).catch(() => {});
+
     // Загружаем ВСЕ данные с сервера (PostgreSQL или JSON-файл)
     initStore().then(() => {
       const u  = storage.get("cm_users");
@@ -544,13 +554,10 @@ function App() {
 
     const pollInterval = setInterval(async () => {
       try {
-        const pgConfig = typeof localStorage !== 'undefined'
-          ? (() => { try { const r = localStorage.getItem('__pg_config__'); if (!r) return null; const c = JSON.parse(r); return (c && c.enabled && c.host) ? c : null; } catch { return null; } })()
-          : null;
         const res = await fetch('/api/store', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ action: 'getAll', pgConfig }),
+          body: JSON.stringify({ action: 'getAll' }),
         });
         const r = await res.json();
         if (r.ok && r.data) {
@@ -565,7 +572,7 @@ function App() {
           _applyServerData(filtered);
         }
       } catch(e) { /* polling error — ignore */ }
-    }, 4000);
+    }, 2000);
 
     return () => clearInterval(pollInterval);
   }, []);
@@ -4151,14 +4158,17 @@ function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbC
       notify("Заполните хост, базу данных и пользователя", "err"); return;
     }
     const cfg = { ...pgForm };
-    savePgConfig(cfg);
+    // Save to server (shared for all browsers)
+    await fetch('/api/store', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'savePgConfig', config: cfg }) });
+    savePgConfig(cfg); // also save locally for UI state
     notify("Настройки PostgreSQL сохранены ✓");
     await testPgConnection(cfg);
   };
 
   const enablePg = async () => {
     if (!pgForm.host || !pgForm.database || !pgForm.user) {
-      notify("Сначала сохраните настройки", "err"); return;
+      notify("Сначала заполните настройки", "err"); return;
     }
     const cfg = { ...pgForm, enabled: true };
     const testRes = await new Promise(async (res) => {
@@ -4173,22 +4183,28 @@ function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbC
       setPgTesting(false);
     });
     if (!testRes.ok) { notify("Не удалось подключиться: " + testRes.error, "err"); return; }
+    // Save to server — ALL browsers will now use PostgreSQL
+    await fetch('/api/store', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'savePgConfig', config: cfg }) });
     savePgConfig(cfg);
     setPgForm(cfg);
     notify("PostgreSQL активирована! Перезагрузите страницу.", "ok");
     setTimeout(() => window.location.reload(), 1500);
   };
 
-  const disablePg = () => {
+  const disablePg = async () => {
+    // Remove server-side config so all clients fall back to JSON
+    await fetch('/api/store', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'clearPgConfig' }) });
     const cfg = { ...pgForm, enabled: false };
     savePgConfig(cfg);
     setPgForm(cfg);
-    notify("PostgreSQL отключена. Используется SQLite.");
+    notify("PostgreSQL отключена. Используется JSON-хранилище.");
     setTimeout(() => window.location.reload(), 1200);
   };
 
   const migrateToPg = async () => {
-    if (!confirm("Мигрировать все данные из SQLite в PostgreSQL? Данные в PG будут перезаписаны.")) return;
+    if (!confirm("Мигрировать все данные в PostgreSQL? Данные в PG будут перезаписаны.")) return;
     setPgMigrating(true);
     try {
       const all = storage.all();
@@ -4309,14 +4325,10 @@ function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbC
   const clearDatabase = async () => {
     if (!confirm("Полностью очистить серверную базу данных? Все данные будут удалены без возможности восстановления!")) return;
     try {
-      const pgConfig = typeof localStorage !== 'undefined'
-        ? (() => { try { const r = localStorage.getItem('__pg_config__'); if (!r) return null; const c = JSON.parse(r); return (c && c.enabled && c.host) ? c : null; } catch { return null; } })()
-        : null;
-      // Удаляем все ключи через API
       const allKeys = Object.keys(storage.all());
       await Promise.all(allKeys.map(k =>
         fetch('/api/store', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ action: 'delete', key: k, pgConfig }) })
+          body: JSON.stringify({ action: 'delete', key: k }) })
       ));
       notify("Серверная база очищена. Перезагрузите страницу.");
       setTimeout(() => window.location.reload(), 1500);
