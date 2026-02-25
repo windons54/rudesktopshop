@@ -83,3 +83,54 @@ vercel --prod
 
 - **Логин**: `admin`
 - **Пароль**: `admin123`
+
+---
+
+## Prisma (ORM)
+
+Проект использует **Prisma ORM** для работы с PostgreSQL вместо сырых SQL-запросов.
+
+### Быстрый старт
+
+1. **Скопируй `.env.example` в `.env`** и заполни `DATABASE_URL`:
+   ```
+   cp .env.example .env
+   ```
+
+2. **Установи зависимости** (Prisma Client генерируется автоматически через `postinstall`):
+   ```bash
+   npm install
+   ```
+
+3. **Применить миграции** (создаст таблицу `kv` в БД):
+   ```bash
+   npm run prisma:migrate
+   ```
+
+4. **Запустить проект:**
+   ```bash
+   npm run dev
+   ```
+
+### Команды Prisma
+
+| Команда | Описание |
+|---|---|
+| `npm run prisma:generate` | Сгенерировать Prisma Client |
+| `npm run prisma:migrate` | Применить миграции (prod) |
+| `npm run prisma:migrate:dev` | Создать и применить миграцию (dev) |
+| `npm run prisma:studio` | Открыть Prisma Studio (GUI для БД) |
+
+### Схема базы данных
+
+```prisma
+model Kv {
+  key        String   @id
+  value      String
+  updated_at DateTime @default(now()) @updatedAt
+
+  @@map("kv")
+}
+```
+
+Таблица `kv` используется как универсальное хранилище ключ-значение для настроек и данных магазина. Если `DATABASE_URL` не задан — данные сохраняются в `data/store.json` (режим локальной разработки).

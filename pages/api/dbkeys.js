@@ -1,12 +1,17 @@
-// pages/api/dbkeys.js — показывает ключи из PostgreSQL
+// pages/api/dbkeys.js — показывает ключи из PostgreSQL через Prisma
 export default async function handler(req, res) {
   if (!process.env.DATABASE_URL) return res.json({ error: 'No DATABASE_URL' });
   try {
-    const { Pool } = await import('pg');
-    const pool = new Pool({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false }, max: 1 });
-    const r = await pool.query('SELECT key, updated_at, LEFT(value::text, 100) as preview FROM kv ORDER BY key');
-    await pool.end();
+    const { default: prisma } = await import('../../lib/prisma.js');
+    const rows = await prisma.kv.findMany({
+      orderBy: { key: 'asc' },
+      select: { key: true, updated_at: true, value: true },
+    });
     res.setHeader('Content-Type', 'text/plain; charset=utf-8');
-    res.send(r.rows.map(row => `${row.key} [${row.updated_at}]\n  ${row.preview}`).join('\n\n') || '(пусто)');
-  } catch(e) { res.status(500).send('ERROR: ' + e.message); }
+    res.send(
+      rows.map(row =>
+        `${row.key} [${row.updated_at}]\n  ${String(row.value).substring(0, 100)}`
+      ).join('\n\n') || '(пусто)'
+    );
+  } catch (e) { res.status(500).send('ERROR: ' + e.message); }
 }
