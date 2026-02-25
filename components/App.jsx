@@ -400,25 +400,27 @@ function App() {
   const [sqliteInitError, setSqliteInitError] = useState(null);
 
   useEffect(() => {
-    // Инициализируем SQLite, затем загружаем данные
+    // Загружаем ВСЕ данные с сервера (PostgreSQL или JSON-файл)
     initStore().then(() => {
-      const u = storage.get("cm_users");
-      const o = storage.get("cm_orders");
+      const u  = storage.get("cm_users");
+      const o  = storage.get("cm_orders");
       const cp = storage.get("cm_products");
       const tr = storage.get("cm_transfers");
       const cc = storage.get("cm_categories");
       const fq = storage.get("cm_faq");
-      const favs = storage.get("cm_favorites");
       const tk = storage.get("cm_tasks");
       const ts = storage.get("cm_task_submissions");
       const au = storage.get("cm_auctions");
-      if (o) setOrders(o);
+      const ap = storage.get("cm_appearance");
+
+      if (o)  setOrders(o);
       if (cp) setCustomProducts(cp);
       if (tr) setTransfers(tr);
       if (cc) setCustomCategories(cc);
       if (tk) setTasks(tk);
       if (ts) setTaskSubmissions(ts);
       if (au) setAuctions(au);
+
       if (fq && fq.length > 0) {
         setFaq(fq);
       } else {
@@ -431,61 +433,65 @@ function App() {
         setFaq(defaultFaq);
         storage.set("cm_faq", defaultFaq);
       }
-      if (favs) { try { setFavorites(Array.isArray(favs) ? favs : JSON.parse(favs)); } catch {} }
-      const ap = storage.get("cm_appearance");
-      if (ap) { 
+
+      if (ap) {
         if (ap.currency) _globalCurrency = { ...ap.currency };
-        setAppearance(prev => ({ ...prev, ...ap, socials: { ...(prev.socials||{}), ...(ap.socials||{}) }, integrations: { ...(prev.integrations||{}), ...(ap.integrations||{}) }, currency: { ...(prev.currency||{}), ...(ap.currency||{}) }, seo: { ...(prev.seo||{}), ...(ap.seo||{}) } })); applyTheme(ap.theme || "default", ap);
+        setAppearance(prev => ({ ...prev, ...ap,
+          socials:      { ...(prev.socials||{}),      ...(ap.socials||{}) },
+          integrations: { ...(prev.integrations||{}), ...(ap.integrations||{}) },
+          currency:     { ...(prev.currency||{}),     ...(ap.currency||{}) },
+          seo:          { ...(prev.seo||{}),           ...(ap.seo||{}) },
+        }));
+        applyTheme(ap.theme || "default", ap);
         if (ap.seo) applySeo(ap.seo);
       }
+
+      // Пользователи: берём с сервера. admin создаём ТОЛЬКО если его нет совсем
       const base = u || {};
-      if (!base.admin) base.admin = { username: "admin", password: "admin123", role: "admin", balance: 0, email: "admin@corp.ru", createdAt: Date.now() };
+      if (!base.admin) {
+        base.admin = { username: "admin", password: "admin123", role: "admin", balance: 0, email: "admin@corp.ru", createdAt: Date.now() };
+        storage.set("cm_users", base); // записываем только если создали admin впервые
+      }
       setUsers(base);
-      storage.set("cm_users", base);
+      // НЕ вызываем storage.set("cm_users") здесь — не затираем данные других браузеров!
 
-      // Обновляем dbConfig с реальным размером БД
       setDbConfig({ connected: true, dbSize: Object.keys(storage.all()).length, rowCounts: getSQLiteStats() });
-
       setLoaded(true);
 
-      // Restore session
-      const savedSession = storage.get("cm_session");
-      if (savedSession && savedSession.user) {
-        const sessionUsers = storage.get("cm_users") || {};
-        if (sessionUsers[savedSession.user]) {
-          setCurrentUser(savedSession.user);
-        }
+      // Восстанавливаем сессию из localStorage
+      const savedSession = _lsGet("cm_session");
+      if (savedSession && savedSession.user && base[savedSession.user]) {
+        setCurrentUser(savedSession.user);
       }
 
-      // Birthday bonus check
+      // Бонус на день рождения
       const today = new Date();
-      const lastBirthdayGrant = storage.get('cm_birthday_grant') || '';
+      const lastBirthdayGrant = _lsGet('cm_birthday_grant') || '';
       const currentYear = today.getFullYear();
       if (lastBirthdayGrant !== String(currentYear)) {
-        const currentUsers = u ? {...u} : base;
-        const apLoaded = ap ? {...ap} : {};
+        const apLoaded = ap || {};
         const bonusEnabled = apLoaded.birthdayEnabled !== false;
         const bonusAmount = parseInt(apLoaded.birthdayBonus || 100);
         if (bonusEnabled && bonusAmount > 0) {
           let grantedAny = false;
-          const updatedUsers = {...currentUsers};
-          Object.entries(currentUsers).forEach(([uname, ud]) => {
+          const updatedUsers = { ...base };
+          Object.entries(base).forEach(([uname, ud]) => {
             if (!ud.birthdate) return;
             const bd = new Date(ud.birthdate);
             if (bd.getDate() === today.getDate() && bd.getMonth() === today.getMonth()) {
-              updatedUsers[uname] = {...ud, balance: (ud.balance || 0) + bonusAmount};
+              updatedUsers[uname] = { ...ud, balance: (ud.balance || 0) + bonusAmount };
               grantedAny = true;
             }
           });
           if (grantedAny) {
             setUsers(updatedUsers);
             storage.set('cm_users', updatedUsers);
-            storage.set('cm_birthday_grant', String(currentYear));
+            _lsSet('cm_birthday_grant', String(currentYear));
           }
         }
       }
     }).catch(err => {
-      console.error('SQLite init failed', err);
+      console.error('Store init failed', err);
       setSqliteInitError(err.message || String(err));
       setLoaded(true);
     });
@@ -4269,12 +4275,39 @@ function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbC
   };
 
   // Очистить базу (сбросить все данные)
-  const clearDatabase = () => {
-    if (!confirm("Полностью очистить базу данных? Все данные будут удалены без возможности восстановления!")) return;
+  const clearDatabase = async () => {
+    if (!confirm("Полностью очистить серверную базу данных? Все данные будут удалены без возможности восстановления!")) return;
     try {
-      storage.run("DELETE FROM kv");
-      notify("База данных очищена. Перезагрузите страницу.");
+      const pgConfig = typeof localStorage !== 'undefined'
+        ? (() => { try { const r = localStorage.getItem('__pg_config__'); if (!r) return null; const c = JSON.parse(r); return (c && c.enabled && c.host) ? c : null; } catch { return null; } })()
+        : null;
+      // Удаляем все ключи через API
+      const allKeys = Object.keys(storage.all());
+      await Promise.all(allKeys.map(k =>
+        fetch('/api/store', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'delete', key: k, pgConfig }) })
+      ));
+      notify("Серверная база очищена. Перезагрузите страницу.");
       setTimeout(() => window.location.reload(), 1500);
+    } catch(err) { notify("Ошибка: " + err.message, "err"); }
+  };
+
+  const clearLocalSQLite = async () => {
+    if (!confirm("Удалить локальную копию SQLite из этого браузера?\nСерверные данные (PostgreSQL) не будут затронуты.")) return;
+    try {
+      // Удаляем IndexedDB
+      await new Promise((res, rej) => {
+        const req = indexedDB.deleteDatabase('merch_store_sqlite');
+        req.onsuccess = res;
+        req.onerror = () => rej(req.error);
+        req.onblocked = res;
+      });
+      // Удаляем localStorage ключи (уведомления, сессия и т.д.)
+      Object.keys(localStorage)
+        .filter(k => k.startsWith('_store_'))
+        .forEach(k => localStorage.removeItem(k));
+      notify("SQLite браузера очищен. Страница перезагружается...");
+      setTimeout(() => window.location.reload(), 1200);
     } catch(err) { notify("Ошибка: " + err.message, "err"); }
   };
 
@@ -5009,7 +5042,13 @@ function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbC
                     <div className="settings-card" style={{border:"1.5px solid rgba(199,22,24,0.25)"}}>
                       <div className="settings-section-title" style={{color:"var(--rd-red)"}}>⚠️ Опасная зона</div>
                       <div style={{fontSize:"13px",color:"var(--rd-gray-text)",marginBottom:"14px"}}>Очистка базы данных удалит всех пользователей, товары, заказы и остальные данные без возможности восстановления.</div>
-                      <button className="btn" style={{background:"var(--rd-red)",color:"#fff",fontWeight:700}} onClick={clearDatabase}>🗑️ Очистить базу данных</button>
+                      <div style={{display:"flex",gap:"10px",flexWrap:"wrap"}}>
+                        <button className="btn" style={{background:"var(--rd-red)",color:"#fff",fontWeight:700}} onClick={clearDatabase}>🗑️ Очистить серверную БД</button>
+                        <button className="btn" style={{background:"#7c3aed",color:"#fff",fontWeight:700}} onClick={clearLocalSQLite}>🧹 Очистить SQLite браузера</button>
+                      </div>
+                      <div style={{fontSize:"12px",color:"var(--rd-gray-text)",marginTop:"8px"}}>
+                        «Очистить SQLite браузера» — удаляет локальную копию IndexedDB в <em>этом</em> браузере. Серверные данные не затрагиваются. Используйте если браузер показывает устаревшие данные.
+                      </div>
                     </div>
                   )}
                 </div>
