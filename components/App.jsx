@@ -50,24 +50,15 @@ const compressImage = (dataUrl, maxW = 800, maxH = 800, quality = 0.7) => {
 
 // ══════════════════════════════════════════════════════════════
 // Серверное хранилище — данные общие для всех браузеров
-// Запись: сразу в API. Чтение: из кэша (обновляется polling каждые 4с)
+// pgConfig хранится ТОЛЬКО на сервере (env или файл)
+// Клиент никогда не передаёт pgConfig в запросах
 // ══════════════════════════════════════════════════════════════
 
-function _getPgCfg() {
-  try {
-    const r = typeof localStorage !== 'undefined' ? localStorage.getItem('__pg_config__') : null;
-    if (!r) return null;
-    const c = JSON.parse(r);
-    return (c && c.enabled && c.host) ? c : null;
-  } catch { return null; }
-}
-
 async function _apiCall(action, body = {}) {
-  const pgConfig = _getPgCfg(); // send as fallback if server has no config saved
   const res = await fetch('/api/store', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ action, pgConfig, ...body }),
+    body: JSON.stringify({ action, ...body }),
   });
   return res.json();
 }
@@ -353,18 +344,10 @@ function App() {
   const [auctions, setAuctions] = useState([]);
   const [taskSubmissions, setTaskSubmissions] = useState([]);
   const [dbConfig, setDbConfig] = useState({ connected: false, dbSize: 0, rowCounts: {} });
-  const [pgConfig, _setPgConfigState] = useState(() => {
-    if (typeof window === 'undefined') return null;
-    try { const r = localStorage.getItem('__pg_config__'); return r ? JSON.parse(r) : null; } catch { return null; }
-  });
-  const savePgConfigState = (cfg) => {
-    _setPgConfigState(cfg);
-    if (typeof window !== 'undefined') {
-      if (cfg) localStorage.setItem('__pg_config__', JSON.stringify(cfg));
-      else localStorage.removeItem('__pg_config__');
-    }
-  };
-  const isPgActive = !!(pgConfig && pgConfig.enabled && pgConfig.host);
+  // pgConfig живёт на сервере, здесь только для отображения статуса в UI
+  const [pgConfig, setPgConfig] = useState(null);
+  const [isPgActive, setIsPgActive] = useState(false);
+  const savePgConfigState = (cfg) => { setPgConfig(cfg); setIsPgActive(!!(cfg?.host)); };
   const [sqliteDisabled, setSqliteDisabledState] = useState(() => {
     if (typeof window === 'undefined') return false;
     return localStorage.getItem('__sqlite_disabled__') === '1';
@@ -417,23 +400,12 @@ function App() {
   const [sqliteInitError, setSqliteInitError] = useState(null);
 
   useEffect(() => {
-    // Если у этого браузера есть pgConfig — сохраняем на сервер (синхронизация)
-    // чтобы все остальные браузеры тоже использовали PostgreSQL
-    const localCfg = _getPgCfg();
-    if (localCfg) {
-      fetch('/api/store', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'savePgConfig', config: localCfg }) }).catch(() => {});
-    }
-
-    // Синхронизируем pgConfig с сервером (один источник правды)
+    // Загружаем pgConfig с сервера для отображения статуса в UI
     fetch('/api/store', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'getPgConfig' }) })
+      body: JSON.stringify({ action: 'pg_get' }) })
       .then(r => r.json())
-      .then(r => {
-        if (r.ok && r.config) {
-          savePgConfigState({ ...r.config, enabled: true });
-        }
-      }).catch(() => {});
+      .then(r => { if (r.ok && r.config) savePgConfigState(r.config); })
+      .catch(() => {});
 
     // Загружаем ВСЕ данные с сервера (PostgreSQL или JSON-файл)
     initStore().then(() => {
@@ -562,24 +534,20 @@ function App() {
 
     const pollInterval = setInterval(async () => {
       try {
-        const pgConfig = _getPgCfg();
         const res = await fetch('/api/store', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ action: 'getAll', pgConfig }),
+          body: JSON.stringify({ action: 'getAll' }),
         });
         const r = await res.json();
         if (r.ok && r.data) {
           const filtered = {};
           Object.keys(r.data).forEach(k => {
-            if (!_pendingWrites.has(k)) {
-              _cache[k] = r.data[k];
-              filtered[k] = r.data[k];
-            }
+            if (!_pendingWrites.has(k)) { _cache[k] = r.data[k]; filtered[k] = r.data[k]; }
           });
           _applyServerData(filtered);
         }
-      } catch(e) { /* polling error — ignore */ }
+      } catch(e) { /* ignore */ }
     }, 2000);
 
     return () => clearInterval(pollInterval);
@@ -4132,10 +4100,8 @@ function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbC
   const runDiag = async () => {
     setDebugLoading(true); setDebugInfo(null);
     try {
-      const pgConfig = typeof localStorage !== 'undefined'
-        ? (() => { try { const r = localStorage.getItem('__pg_config__'); if (!r) return null; const c = JSON.parse(r); return (c && c.enabled && c.host) ? c : null; } catch { return null; } })()
-        : null;
-      const r = await fetch('/api/debug', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pgConfig }) });
+      const r = await fetch('/api/store', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'pg_diag' }) });
       setDebugInfo(await r.json());
     } catch(e) { setDebugInfo({ error: e.message }); }
     setDebugLoading(false);
@@ -4153,10 +4119,6 @@ function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbC
   const [pgStatsLoading, setPgStatsLoading] = useState(false);
   const [dbSubTab, setDbSubTab] = useState(() => {
     if (typeof window === 'undefined') return 'postgres';
-    try {
-      const cfg = localStorage.getItem('__pg_config__');
-      if (cfg) { const c = JSON.parse(cfg); if (c && c.enabled && c.host) return 'postgres'; }
-    } catch {}
     const disabled = localStorage.getItem('__sqlite_disabled__') === '1';
     return disabled ? 'postgres' : 'sqlite';
   });
@@ -4164,10 +4126,10 @@ function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbC
   const testPgConnection = async (cfg) => {
     setPgTesting(true); setPgTestResult(null);
     try {
-      const res = await fetch('/api/pg?action=test', {
+      const res = await fetch('/api/store', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ config: cfg || pgForm }),
+        body: JSON.stringify({ action: 'pg_test', config: cfg || pgForm }),
       });
       const data = await res.json();
       setPgTestResult(data);
@@ -4180,11 +4142,12 @@ function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbC
       notify("Заполните хост, базу данных и пользователя", "err"); return;
     }
     const cfg = { ...pgForm };
-    // Save to server (shared for all browsers)
-    await fetch('/api/store', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'savePgConfig', config: cfg }) });
-    savePgConfig(cfg); // also save locally for UI state
-    notify("Настройки PostgreSQL сохранены ✓");
+    const r = await fetch('/api/store', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'pg_save', config: cfg }) });
+    const result = await r.json();
+    if (!result.ok) { notify("Ошибка сохранения: " + (result.error||''), "err"); return; }
+    savePgConfig(cfg);
+    notify("Настройки PostgreSQL сохранены на сервере ✓");
     await testPgConnection(cfg);
   };
 
@@ -4192,36 +4155,31 @@ function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbC
     if (!pgForm.host || !pgForm.database || !pgForm.user) {
       notify("Сначала заполните настройки", "err"); return;
     }
+    setPgTesting(true);
     const cfg = { ...pgForm, enabled: true };
-    const testRes = await new Promise(async (res) => {
-      setPgTesting(true);
-      try {
-        const r = await fetch('/api/pg?action=test', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ config: cfg }),
-        });
-        res(await r.json());
-      } catch(e) { res({ ok: false, error: e.message }); }
-      setPgTesting(false);
-    });
-    if (!testRes.ok) { notify("Не удалось подключиться: " + testRes.error, "err"); return; }
-    // Save to server — ALL browsers will now use PostgreSQL
-    await fetch('/api/store', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'savePgConfig', config: cfg }) });
-    savePgConfig(cfg);
-    setPgForm(cfg);
-    notify("PostgreSQL активирована! Перезагрузите страницу.", "ok");
-    setTimeout(() => window.location.reload(), 1500);
+    try {
+      const r = await fetch('/api/store', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'pg_test', config: cfg }) });
+      const testRes = await r.json();
+      if (!testRes.ok) { notify("Не удалось подключиться: " + testRes.error, "err"); setPgTesting(false); return; }
+      const r2 = await fetch('/api/store', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'pg_save', config: cfg }) });
+      const saved = await r2.json();
+      if (!saved.ok) { notify("Ошибка сохранения конфига: " + (saved.error||''), "err"); setPgTesting(false); return; }
+      savePgConfig(cfg);
+      setPgForm(cfg);
+      notify("PostgreSQL активирована! Перезагрузите страницу.", "ok");
+      setTimeout(() => window.location.reload(), 1500);
+    } catch(e) { notify("Ошибка: " + e.message, "err"); }
+    setPgTesting(false);
   };
 
   const disablePg = async () => {
-    // Remove server-side config so all clients fall back to JSON
     await fetch('/api/store', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'clearPgConfig' }) });
-    const cfg = { ...pgForm, enabled: false };
-    savePgConfig(cfg);
-    setPgForm(cfg);
-    notify("PostgreSQL отключена. Используется JSON-хранилище.");
+      body: JSON.stringify({ action: 'pg_save', config: null }) });
+    savePgConfig(null);
+    setPgForm({ host: "", port: "5432", database: "", user: "", password: "", ssl: false, enabled: false });
+    notify("PostgreSQL отключена.");
     setTimeout(() => window.location.reload(), 1200);
   };
 
@@ -4230,12 +4188,10 @@ function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbC
     setPgMigrating(true);
     try {
       const all = storage.all();
-      const res = await fetch('/api/pg?action=migrate', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ config: pgConfig || pgForm, data: all }),
-      });
+      const res = await fetch('/api/store', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'setMany', data: all }) });
       const data = await res.json();
-      if (data.ok) { notify("Мигрировано " + data.migrated + " ключей в PostgreSQL ✓"); }
+      if (data.ok) { notify("Мигрировано " + Object.keys(all).length + " ключей ✓"); }
       else { notify("Ошибка миграции: " + data.error, "err"); }
     } catch(err) { notify("Ошибка: " + err.message, "err"); }
     setPgMigrating(false);
@@ -4244,12 +4200,12 @@ function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbC
   const loadPgStats = async () => {
     setPgStatsLoading(true);
     try {
-      const res = await fetch('/api/pg?action=stats', {
+      const res = await fetch('/api/store', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ config: pgConfig }),
+        body: JSON.stringify({ action: 'pg_diag' }),
       });
       const data = await res.json();
-      if (data.ok) setPgStats(data);
+      if (data.ok) setPgStats({ ok: true, total: data.pgTest?.rows ?? 0, size: '—', rowCounts: { '_total_keys': data.pgTest?.rows ?? 0 } });
       else notify("Ошибка загрузки статистики: " + data.error, "err");
     } catch(err) { notify("Ошибка: " + err.message, "err"); }
     setPgStatsLoading(false);
@@ -4258,11 +4214,16 @@ function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbC
   const runPgSql = async () => {
     setPgSqlError(""); setPgSqlResult(null);
     try {
-      const res = await fetch('/api/pg?action=query', {
+      const res = await fetch('/api/store', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ config: pgConfig, sql: pgSqlConsole.trim() }),
+        body: JSON.stringify({ action: 'pg_test', config: pgForm }),
       });
-      const data = await res.json();
+      // For SQL console, use pg.js which still accepts explicit config
+      const res2 = await fetch('/api/pg?action=query', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sql: pgSqlConsole.trim() }),
+      });
+      const data = await res2.json();
       if (data.ok) setPgSqlResult(data);
       else setPgSqlError(data.error);
     } catch(err) { setPgSqlError(err.message); }
@@ -4347,9 +4308,6 @@ function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbC
   const clearDatabase = async () => {
     if (!confirm("Полностью очистить серверную базу данных? Все данные будут удалены без возможности восстановления!")) return;
     try {
-      const pgConfig = typeof localStorage !== 'undefined'
-        ? (() => { try { const r = localStorage.getItem('__pg_config__'); if (!r) return null; const c = JSON.parse(r); return (c && c.enabled && c.host) ? c : null; } catch { return null; } })()
-        : null;
       const allKeys = Object.keys(storage.all());
       await Promise.all(allKeys.map(k =>
         fetch('/api/store', { method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -5079,20 +5037,7 @@ function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbC
                     <div style={{marginTop:"16px",display:"flex",gap:"10px",flexWrap:"wrap"}}>
                       <button className="btn btn-secondary" onClick={() => { refreshDbConfig(); notify("Статистика обновлена ✓"); }}>🔄 Обновить статистику</button>
                     </div>
-                    {debugInfo && (
-                      <div style={{marginTop:"14px",background:"#0f172a",color:"#e2e8f0",borderRadius:"10px",padding:"14px 16px",fontSize:"12px",fontFamily:"monospace",lineHeight:1.7,overflowX:"auto"}}>
-                        <div style={{color:"#94a3b8",marginBottom:"8px",fontWeight:700}}>── ДИАГНОСТИКА СЕРВЕРА ──</div>
-                        <div><span style={{color:"#7dd3fc"}}>pg-config.json существует:</span> {String(debugInfo.pgCfgFileExists)}</div>
-                        <div><span style={{color:"#7dd3fc"}}>Серверный конфиг (файл):</span> {debugInfo.serverPgCfgFile ? JSON.stringify(debugInfo.serverPgCfgFile) : "❌ нет"}</div>
-                        <div><span style={{color:"#7dd3fc"}}>ENV (PG_HOST):</span> {debugInfo.envPg?.PG_HOST || "❌ не задан"}</div>
-                        <div><span style={{color:"#7dd3fc"}}>ENV (DATABASE_URL):</span> {debugInfo.envPg?.DATABASE_URL || "❌ не задан"}</div>
-                        <div><span style={{color:"#7dd3fc"}}>pgConfig от браузера:</span> {debugInfo.clientCfgReceived ? JSON.stringify(debugInfo.clientCfgReceived) : "❌ не передан"}</div>
-                        <div><span style={{color:"#7dd3fc"}}>Тест подключения PG:</span> {debugInfo.pgConnectionTest ? (debugInfo.pgConnectionTest.ok ? `✅ ок, строк в kv: ${debugInfo.pgConnectionTest.rows}` : `❌ ${debugInfo.pgConnectionTest.error}`) : "⚠️ конфиг не найден"}</div>
-                        <div><span style={{color:"#7dd3fc"}}>JSON store ключи:</span> {debugInfo.jsonStoreKeys?.length ? debugInfo.jsonStoreKeys.join(", ") : "пусто"}</div>
-                        <div><span style={{color:"#7dd3fc"}}>Рабочая папка:</span> {debugInfo.cwd}</div>
-                        {debugInfo.error && <div style={{color:"#f87171"}}>Ошибка: {debugInfo.error}</div>}
-                      </div>
-                    )}
+
                   </div>
                   <div className="settings-card">
                     <div className="settings-section-title">📦 Резервное копирование</div>
@@ -5302,14 +5247,14 @@ function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbC
                     {debugInfo && (
                       <div style={{marginTop:"12px",background:"#0f172a",color:"#e2e8f0",borderRadius:"10px",padding:"14px 16px",fontSize:"12px",fontFamily:"monospace",lineHeight:1.8,overflowX:"auto"}}>
                         <div style={{color:"#94a3b8",marginBottom:"8px",fontWeight:700}}>── РЕЗУЛЬТАТ ──</div>
-                        <div><span style={{color:"#7dd3fc"}}>pg-config.json на сервере:</span> {debugInfo.pgCfgFileExists ? "✅ существует" : "❌ нет"}</div>
-                        <div><span style={{color:"#7dd3fc"}}>Серверный конфиг:</span> {debugInfo.serverPgCfgFile ? `✅ host=${debugInfo.serverPgCfgFile.host} db=${debugInfo.serverPgCfgFile.database} enabled=${debugInfo.serverPgCfgFile.enabled}` : "❌ не найден"}</div>
-                        <div><span style={{color:"#7dd3fc"}}>ENV PG_HOST:</span> {debugInfo.envPg?.PG_HOST || "❌ не задан"}</div>
-                        <div><span style={{color:"#7dd3fc"}}>ENV DATABASE_URL:</span> {debugInfo.envPg?.DATABASE_URL || "❌ не задан"}</div>
-                        <div><span style={{color:"#7dd3fc"}}>pgConfig от этого браузера:</span> {debugInfo.clientCfgReceived ? `✅ host=${debugInfo.clientCfgReceived.host}` : "❌ не передан"}</div>
-                        <div><span style={{color:"#7dd3fc"}}>Тест подключения PG:</span> {debugInfo.pgConnectionTest ? (debugInfo.pgConnectionTest.ok ? `✅ подключено, строк в kv: ${debugInfo.pgConnectionTest.rows}` : `❌ ${debugInfo.pgConnectionTest.error}`) : "⚠️ конфиг не найден — тест пропущен"}</div>
-                        <div><span style={{color:"#7dd3fc"}}>JSON store ключи:</span> {debugInfo.jsonStoreKeys?.length ? debugInfo.jsonStoreKeys.join(", ") : "пусто"}</div>
-                        <div><span style={{color:"#7dd3fc"}}>Рабочая папка сервера:</span> {debugInfo.cwd}</div>
+                        <div><span style={{color:"#7dd3fc"}}>Источник конфига:</span> {debugInfo.cfgSource==="env" ? "✅ ENV переменные" : debugInfo.cfgSource==="file" ? "✅ файл pg-config.json" : "❌ конфиг не найден"}</div>
+                        <div><span style={{color:"#7dd3fc"}}>pg-config.json существует:</span> {debugInfo.hasPgCfgFile ? "✅ да" : "❌ нет"}</div>
+                        <div><span style={{color:"#7dd3fc"}}>ENV PG_HOST задан:</span> {debugInfo.hasEnvPg ? "✅ да" : "❌ нет"}</div>
+                        <div><span style={{color:"#7dd3fc"}}>ENV DATABASE_URL задан:</span> {debugInfo.hasEnvDbUrl ? "✅ да" : "❌ нет"}</div>
+                        <div><span style={{color:"#7dd3fc"}}>Хост / БД:</span> {debugInfo.cfgHost ? `${debugInfo.cfgHost} / ${debugInfo.cfgDb}` : "—"}</div>
+                        <div><span style={{color:"#7dd3fc"}}>Подключение к PG:</span> {debugInfo.pgTest ? (debugInfo.pgTest.ok ? `✅ ок, строк в kv: ${debugInfo.pgTest.rows}` : `❌ ${debugInfo.pgTest.error}`) : "⚠️ конфиг не найден"}</div>
+                        <div><span style={{color:"#7dd3fc"}}>JSON store ключи:</span> {debugInfo.jsonKeys?.length ? debugInfo.jsonKeys.join(", ") : "пусто"}</div>
+                        <div><span style={{color:"#7dd3fc"}}>Рабочая папка:</span> {debugInfo.cwd}</div>
                         {debugInfo.error && <div style={{color:"#f87171",marginTop:"6px"}}>❌ Ошибка: {debugInfo.error}</div>}
                       </div>
                     )}
