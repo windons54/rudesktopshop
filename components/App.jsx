@@ -372,7 +372,7 @@ function App() {
     if (appearance.currency && appearance.currency.logo) return <img src={appearance.currency.logo} alt="" style={{width:"16px",height:"16px",objectFit:"contain",verticalAlign:"middle"}} />;
     return <span>{(appearance.currency && appearance.currency.icon) ? appearance.currency.icon : "🪙"}</span>;
   };
-  const [appearance, setAppearance] = useState({ logo: null, theme: "default", headerBg: "", footerBg: "", pageBg: "", accentColor: "", socials: { telegram: "", max: "", vk: "", rutube: "", vkvideo: "" }, birthdayBonus: 100, birthdayEnabled: true, integrations: { tgEnabled: true, tgBotToken: "8531808857:AAFkxXESkMlOEPXb9rVLk7yY8Es1O4Z77s4", tgChatId: "-1001003849989820" }, currency: { name: "RuDeCoin", icon: "🪙", logo: "" }, seo: { title: "", description: "", favicon: "" } });
+  const [appearance, setAppearance] = useState({ logo: null, theme: "default", headerBg: "", footerBg: "", pageBg: "", accentColor: "", socials: { telegram: "", max: "", vk: "", rutube: "", vkvideo: "" }, birthdayBonus: 100, birthdayEnabled: true, integrations: { tgEnabled: false, tgBotToken: "", tgChatId: "" }, currency: { name: "RuDeCoin", icon: "🪙", logo: "" }, seo: { title: "", description: "", favicon: "" } });
   const [currentUser, setCurrentUser] = useState(null);
   const [cart, setCart] = useState([]);
   const [page, setPage] = useState("shop");
@@ -636,9 +636,9 @@ function App() {
     const ap = storage.get("cm_appearance") || {};
     const saved = ap.integrations || {};
     const integ = {
-      tgEnabled: true,
-      tgBotToken: "8531808857:AAFkxXESkMlOEPXb9rVLk7yY8Es1O4Z77s4",
-      tgChatId: "-1001003849989820",
+      tgEnabled: false,
+      tgBotToken: "",
+      tgChatId: "",
       ...saved
     };
     if (!integ.tgEnabled || !integ.tgBotToken || !integ.tgChatId) return;
@@ -4080,9 +4080,9 @@ function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbC
   const [bdBonus, setBdBonus] = useState(String(appearance.birthdayBonus ?? 100));
   const [bdEnabled, setBdEnabled] = useState(appearance.birthdayEnabled !== false);
   const [integ, setInteg] = useState(() => ({
-    tgEnabled: true,
-    tgBotToken: "8531808857:AAFkxXESkMlOEPXb9rVLk7yY8Es1O4Z77s4",
-    tgChatId: "-1001003849989820",
+    tgEnabled: false,
+    tgBotToken: "",
+    tgChatId: "",
     ...((appearance.integrations) || {})
   }));
   useEffect(() => {
