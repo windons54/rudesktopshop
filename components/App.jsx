@@ -63,10 +63,11 @@ function _getPgCfg() {
 }
 
 async function _apiCall(action, body = {}) {
+  const pgConfig = _getPgCfg(); // send as fallback if server has no config saved
   const res = await fetch('/api/store', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ action, ...body }),
+    body: JSON.stringify({ action, pgConfig, ...body }),
   });
   return res.json();
 }
@@ -416,13 +417,20 @@ function App() {
   const [sqliteInitError, setSqliteInitError] = useState(null);
 
   useEffect(() => {
+    // Если у этого браузера есть pgConfig — сохраняем на сервер (синхронизация)
+    // чтобы все остальные браузеры тоже использовали PostgreSQL
+    const localCfg = _getPgCfg();
+    if (localCfg) {
+      fetch('/api/store', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'savePgConfig', config: localCfg }) }).catch(() => {});
+    }
+
     // Синхронизируем pgConfig с сервером (один источник правды)
     fetch('/api/store', { method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action: 'getPgConfig' }) })
       .then(r => r.json())
       .then(r => {
         if (r.ok && r.config) {
-          // Сервер использует PG — обновляем локальный state
           savePgConfigState({ ...r.config, enabled: true });
         }
       }).catch(() => {});
@@ -554,14 +562,14 @@ function App() {
 
     const pollInterval = setInterval(async () => {
       try {
+        const pgConfig = _getPgCfg();
         const res = await fetch('/api/store', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ action: 'getAll' }),
+          body: JSON.stringify({ action: 'getAll', pgConfig }),
         });
         const r = await res.json();
         if (r.ok && r.data) {
-          // Обновляем кэш и state — пропускаем ключи которые сейчас пишутся
           const filtered = {};
           Object.keys(r.data).forEach(k => {
             if (!_pendingWrites.has(k)) {
@@ -4325,10 +4333,13 @@ function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbC
   const clearDatabase = async () => {
     if (!confirm("Полностью очистить серверную базу данных? Все данные будут удалены без возможности восстановления!")) return;
     try {
+      const pgConfig = typeof localStorage !== 'undefined'
+        ? (() => { try { const r = localStorage.getItem('__pg_config__'); if (!r) return null; const c = JSON.parse(r); return (c && c.enabled && c.host) ? c : null; } catch { return null; } })()
+        : null;
       const allKeys = Object.keys(storage.all());
       await Promise.all(allKeys.map(k =>
         fetch('/api/store', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ action: 'delete', key: k }) })
+          body: JSON.stringify({ action: 'delete', key: k, pgConfig }) })
       ));
       notify("Серверная база очищена. Перезагрузите страницу.");
       setTimeout(() => window.location.reload(), 1500);

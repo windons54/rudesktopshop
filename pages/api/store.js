@@ -1,12 +1,12 @@
 // pages/api/store.js
-// Серверное хранилище — PostgreSQL (приоритет) или JSON-файл на диске
+// Единое хранилище: PostgreSQL (приоритет) или JSON-файл
 
 import fs from 'fs';
 import path from 'path';
 
-const DATA_DIR     = path.join(process.cwd(), 'data');
-const STORE_FILE   = path.join(DATA_DIR, 'store.json');
-const PG_CFG_FILE  = path.join(DATA_DIR, 'pg-config.json');
+const DATA_DIR    = path.join(process.cwd(), 'data');
+const STORE_FILE  = path.join(DATA_DIR, 'store.json');
+const PG_CFG_FILE = path.join(DATA_DIR, 'pg-config.json');
 
 // ── JSON-file helpers ─────────────────────────────────────────────────────────
 let _writeLock = Promise.resolve();
@@ -32,25 +32,22 @@ function withLock(fn) {
   return result;
 }
 
-// ── Server-side PG config (saved once by admin, used by all clients) ──────────
-function readPgConfig() {
-  // 1. Environment variables take highest priority
+// ── PG config: env > file ─────────────────────────────────────────────────────
+function readServerPgConfig() {
   if (process.env.PG_HOST) {
-    return {
-      host:     process.env.PG_HOST,
-      port:     process.env.PG_PORT || '5432',
-      database: process.env.PG_DATABASE || process.env.PG_DB || 'postgres',
-      user:     process.env.PG_USER,
-      password: process.env.PG_PASSWORD,
-      ssl:      process.env.PG_SSL === 'true',
-      enabled:  true,
-    };
+    return { host: process.env.PG_HOST, port: process.env.PG_PORT||'5432',
+      database: process.env.PG_DATABASE||process.env.PG_DB||'postgres',
+      user: process.env.PG_USER, password: process.env.PG_PASSWORD,
+      ssl: process.env.PG_SSL==='true', enabled: true };
   }
-  // 2. Config file saved by admin
+  if (process.env.DATABASE_URL) {
+    // Support common DATABASE_URL format
+    return { connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false }, enabled: true };
+  }
   try {
     if (fs.existsSync(PG_CFG_FILE)) {
-      const cfg = JSON.parse(fs.readFileSync(PG_CFG_FILE, 'utf8'));
-      if (cfg && cfg.enabled && cfg.host) return cfg;
+      const c = JSON.parse(fs.readFileSync(PG_CFG_FILE, 'utf8'));
+      if (c && c.host && c.enabled !== false) return c;
     }
   } catch {}
   return null;
@@ -59,11 +56,8 @@ function readPgConfig() {
 function savePgConfig(cfg) {
   try {
     if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
-    if (cfg) {
-      fs.writeFileSync(PG_CFG_FILE, JSON.stringify(cfg), 'utf8');
-    } else {
-      if (fs.existsSync(PG_CFG_FILE)) fs.unlinkSync(PG_CFG_FILE);
-    }
+    if (cfg) fs.writeFileSync(PG_CFG_FILE, JSON.stringify(cfg), 'utf8');
+    else if (fs.existsSync(PG_CFG_FILE)) fs.unlinkSync(PG_CFG_FILE);
   } catch (e) { console.error('PG config save error:', e); }
 }
 
@@ -76,12 +70,14 @@ async function getPgPool(config) {
   if (_pgPool && _pgConfigKey === key) return _pgPool;
   const { Pool } = await import('pg');
   if (_pgPool) try { await _pgPool.end(); } catch {}
-  _pgPool = new Pool({
-    host: config.host, port: parseInt(config.port) || 5432,
-    database: config.database, user: config.user, password: config.password,
-    ssl: config.ssl ? { rejectUnauthorized: false } : false,
-    connectionTimeoutMillis: 5000, max: 10,
-  });
+  _pgPool = new Pool(
+    config.connectionString
+      ? { connectionString: config.connectionString, ssl: config.ssl, connectionTimeoutMillis: 5000, max: 10 }
+      : { host: config.host, port: parseInt(config.port)||5432, database: config.database,
+          user: config.user, password: config.password,
+          ssl: config.ssl ? { rejectUnauthorized: false } : false,
+          connectionTimeoutMillis: 5000, max: 10 }
+  );
   _pgConfigKey = key;
   await _pgPool.query(`CREATE TABLE IF NOT EXISTS kv (
     key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TIMESTAMPTZ DEFAULT NOW()
@@ -96,40 +92,45 @@ async function pgGet(pool, key) {
 }
 
 async function pgSet(pool, key, value) {
+  const serialized = typeof value === 'string' ? value : JSON.stringify(value);
   await pool.query(
     `INSERT INTO kv(key,value,updated_at) VALUES($1,$2,NOW())
      ON CONFLICT(key) DO UPDATE SET value=$2,updated_at=NOW()`,
-    [key, JSON.stringify(value)]
+    [key, serialized]
   );
 }
 
 async function pgGetAll(pool) {
   const r = await pool.query('SELECT key, value FROM kv');
   const out = {};
-  r.rows.forEach(({ key, value }) => { try { out[key] = JSON.parse(value); } catch {} });
+  r.rows.forEach(({ key, value }) => { try { out[key] = JSON.parse(value); } catch { out[key] = value; } });
   return out;
+}
+
+// Resolve which PG config to use: server-side first, client-supplied as fallback
+function resolvePgConfig(clientCfg) {
+  const server = readServerPgConfig();
+  if (server) return server;
+  // Fallback: client sent its localStorage config (legacy mode)
+  if (clientCfg && clientCfg.enabled && clientCfg.host) return clientCfg;
+  return null;
 }
 
 // ── main handler ─────────────────────────────────────────────────────────────
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).end();
 
-  const { action, key, value, data } = req.body || {};
+  const { action, key, value, data, pgConfig: clientPgConfig } = req.body || {};
 
-  // Special actions: save/get/clear pg config (called by admin UI)
+  // ── Admin: save/get/clear server-side pg config ──
   if (action === 'savePgConfig') {
     savePgConfig(req.body.config || null);
-    // Reset pool so next request picks up new config
     if (_pgPool) { try { await _pgPool.end(); } catch {} _pgPool = null; _pgConfigKey = null; }
     return res.json({ ok: true });
   }
   if (action === 'getPgConfig') {
-    const cfg = readPgConfig();
-    // Never return password to client
-    if (cfg) {
-      const { password, ...safe } = cfg;
-      return res.json({ ok: true, config: safe });
-    }
+    const cfg = readServerPgConfig();
+    if (cfg) { const { password, ...safe } = cfg; return res.json({ ok: true, config: safe, source: process.env.PG_HOST ? 'env' : 'file' }); }
     return res.json({ ok: true, config: null });
   }
   if (action === 'clearPgConfig') {
@@ -138,9 +139,9 @@ export default async function handler(req, res) {
     return res.json({ ok: true });
   }
 
-  // Determine backend from SERVER-SIDE config (not from client)
-  const pgCfg = readPgConfig();
-  const usePg = !!(pgCfg && pgCfg.host);
+  // ── Resolve backend ──
+  const pgCfg = resolvePgConfig(clientPgConfig);
+  const usePg = !!pgCfg;
 
   try {
     if (usePg) {
@@ -155,10 +156,11 @@ export default async function handler(req, res) {
         try {
           await client.query('BEGIN');
           for (const [k, v] of Object.entries(data || {})) {
+            const s = typeof v === 'string' ? v : JSON.stringify(v);
             await client.query(
               `INSERT INTO kv(key,value,updated_at) VALUES($1,$2,NOW())
                ON CONFLICT(key) DO UPDATE SET value=$2,updated_at=NOW()`,
-              [k, JSON.stringify(v)]
+              [k, s]
             );
           }
           await client.query('COMMIT');
