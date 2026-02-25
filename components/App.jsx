@@ -4126,6 +4126,20 @@ function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbC
   const [sqlResult, setSqlResult] = useState(null);
   const [sqlError, setSqlError] = useState("");
   const [importing, setImporting] = useState(false);
+  const [debugInfo, setDebugInfo] = useState(null);
+  const [debugLoading, setDebugLoading] = useState(false);
+
+  const runDiag = async () => {
+    setDebugLoading(true); setDebugInfo(null);
+    try {
+      const pgConfig = typeof localStorage !== 'undefined'
+        ? (() => { try { const r = localStorage.getItem('__pg_config__'); if (!r) return null; const c = JSON.parse(r); return (c && c.enabled && c.host) ? c : null; } catch { return null; } })()
+        : null;
+      const r = await fetch('/api/debug', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pgConfig }) });
+      setDebugInfo(await r.json());
+    } catch(e) { setDebugInfo({ error: e.message }); }
+    setDebugLoading(false);
+  };
 
   // PostgreSQL state
   const [pgForm, setPgForm] = useState(() => pgConfig || { host: "", port: "5432", database: "", user: "", password: "", ssl: false, enabled: false });
@@ -5064,7 +5078,24 @@ function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbC
                     )}
                     <div style={{marginTop:"16px",display:"flex",gap:"10px",flexWrap:"wrap"}}>
                       <button className="btn btn-secondary" onClick={() => { refreshDbConfig(); notify("Статистика обновлена ✓"); }}>🔄 Обновить статистику</button>
+                      <button className="btn btn-secondary" onClick={runDiag} disabled={debugLoading} style={{background:"#7c3aed",color:"#fff",border:"none"}}>
+                        {debugLoading ? "⏳ Диагностика…" : "🔍 Диагностика соединения"}
+                      </button>
                     </div>
+                    {debugInfo && (
+                      <div style={{marginTop:"14px",background:"#0f172a",color:"#e2e8f0",borderRadius:"10px",padding:"14px 16px",fontSize:"12px",fontFamily:"monospace",lineHeight:1.7,overflowX:"auto"}}>
+                        <div style={{color:"#94a3b8",marginBottom:"8px",fontWeight:700}}>── ДИАГНОСТИКА СЕРВЕРА ──</div>
+                        <div><span style={{color:"#7dd3fc"}}>pg-config.json существует:</span> {String(debugInfo.pgCfgFileExists)}</div>
+                        <div><span style={{color:"#7dd3fc"}}>Серверный конфиг (файл):</span> {debugInfo.serverPgCfgFile ? JSON.stringify(debugInfo.serverPgCfgFile) : "❌ нет"}</div>
+                        <div><span style={{color:"#7dd3fc"}}>ENV (PG_HOST):</span> {debugInfo.envPg?.PG_HOST || "❌ не задан"}</div>
+                        <div><span style={{color:"#7dd3fc"}}>ENV (DATABASE_URL):</span> {debugInfo.envPg?.DATABASE_URL || "❌ не задан"}</div>
+                        <div><span style={{color:"#7dd3fc"}}>pgConfig от браузера:</span> {debugInfo.clientCfgReceived ? JSON.stringify(debugInfo.clientCfgReceived) : "❌ не передан"}</div>
+                        <div><span style={{color:"#7dd3fc"}}>Тест подключения PG:</span> {debugInfo.pgConnectionTest ? (debugInfo.pgConnectionTest.ok ? `✅ ок, строк в kv: ${debugInfo.pgConnectionTest.rows}` : `❌ ${debugInfo.pgConnectionTest.error}`) : "⚠️ конфиг не найден"}</div>
+                        <div><span style={{color:"#7dd3fc"}}>JSON store ключи:</span> {debugInfo.jsonStoreKeys?.length ? debugInfo.jsonStoreKeys.join(", ") : "пусто"}</div>
+                        <div><span style={{color:"#7dd3fc"}}>Рабочая папка:</span> {debugInfo.cwd}</div>
+                        {debugInfo.error && <div style={{color:"#f87171"}}>Ошибка: {debugInfo.error}</div>}
+                      </div>
+                    )}
                   </div>
                   <div className="settings-card">
                     <div className="settings-section-title">📦 Резервное копирование</div>
