@@ -49,8 +49,8 @@ const compressImage = (dataUrl, maxW = 800, maxH = 800, quality = 0.7) => {
 };
 
 // ══════════════════════════════════════════════════════════════
-// Серверное хранилище — данные общие для всех браузеров
-// Запись: сразу в API. Чтение: из кэша (обновляется polling каждые 4с)
+// Хранилище: только серверное API (PostgreSQL или JSON-файл)
+// Данные общие для всех браузеров и пользователей
 // ══════════════════════════════════════════════════════════════
 
 function _getPgCfg() {
@@ -72,14 +72,10 @@ async function _apiCall(action, body = {}) {
   return res.json();
 }
 
-// Кэш — синхронный слой, обновляется polling-ом
 const _cache = {};
 let _cacheReady = false;
 let _readyCallbacks = [];
-
-function _applyData(data) {
-  Object.keys(data).forEach(k => { _cache[k] = data[k]; });
-}
+const _pendingWrites = new Set();
 
 function _notifyReady() {
   _cacheReady = true;
@@ -90,25 +86,16 @@ function _notifyReady() {
 async function initStore() {
   try {
     const r = await _apiCall('getAll');
-    if (r.ok && r.data) _applyData(r.data);
+    if (r.ok && r.data) Object.assign(_cache, r.data);
   } catch(e) { console.warn('Store init error', e); }
   _notifyReady();
 }
 
-function whenStoreReady() {
-  if (_cacheReady) return Promise.resolve();
-  return new Promise(res => _readyCallbacks.push(res));
-}
-
-// Ключи, которые хранятся только локально (личные данные браузера)
+// Личные данные — только в localStorage браузера (у каждого свои)
 const _LOCAL_KEYS = new Set(['cm_session','cm_seen_orders','cm_notif_history','cm_notif_unread','cm_favorites','cm_birthday_grant']);
-
-const _lsGet = (k) => { try { const v = localStorage.getItem('_store_'+k); return v !== null ? JSON.parse(v) : null; } catch { return null; } };
-const _lsSet = (k, v) => { try { localStorage.setItem('_store_'+k, JSON.stringify(v)); } catch {} };
-const _lsDel = (k) => { try { localStorage.removeItem('_store_'+k); } catch {} };
-
-// Ключи которые сейчас записываются на сервер — polling не должен их перетирать
-const _pendingWrites = new Set();
+const _lsGet = (k) => { try { const v = localStorage.getItem('_s_'+k); return v !== null ? JSON.parse(v) : null; } catch { return null; } };
+const _lsSet = (k, v) => { try { localStorage.setItem('_s_'+k, JSON.stringify(v)); } catch {} };
+const _lsDel = (k) => { try { localStorage.removeItem('_s_'+k); } catch {} };
 
 const storage = {
   get: (k) => {
@@ -117,7 +104,7 @@ const storage = {
   },
   set: (k, v) => {
     if (_LOCAL_KEYS.has(k)) { _lsSet(k, v); return; }
-    _cache[k] = v; // обновляем кэш немедленно
+    _cache[k] = v;
     _pendingWrites.add(k);
     _apiCall('set', { key: k, value: v })
       .then(() => _pendingWrites.delete(k))
@@ -126,75 +113,11 @@ const storage = {
   delete: (k) => {
     if (_LOCAL_KEYS.has(k)) { _lsDel(k); return; }
     delete _cache[k];
-    _apiCall('delete', { key: k }).catch(e => console.warn('Store delete error', e));
+    _apiCall('delete', { key: k }).catch(() => {});
   },
   all: () => ({ ..._cache }),
-  exportDB: () => null,
-  importDB: async () => {},
-  exec: () => [],
-  run: () => {},
   isReady: () => _cacheReady,
-  flush: () => Promise.resolve(),
-  // Обновить кэш с сервера (вызывается polling-ом)
-  refresh: async () => {
-    try {
-      const r = await _apiCall('getAll');
-      if (r.ok && r.data) _applyData(r.data);
-    } catch(e) { console.warn('Store refresh error', e); }
-  },
 };
-
-// SQLite — только для экспорта/импорта в настройках
-let _sqliteDB = null;
-let _sqlReady = false;
-let _sqlReadyCallbacks = [];
-const DB_NAME = 'merch_store_sqlite';
-const DB_STORE = 'sqlitedb';
-const DB_KEY = 'main';
-function openIDB() {
-  return new Promise((res, rej) => {
-    const req = indexedDB.open(DB_NAME, 1);
-    req.onupgradeneeded = e => e.target.result.createObjectStore(DB_STORE);
-    req.onsuccess = e => res(e.target.result);
-    req.onerror = () => rej(req.error);
-  });
-}
-async function saveDbToIDB() {
-  if (!_sqliteDB) return;
-  try {
-    const data = _sqliteDB.export();
-    const idb = await openIDB();
-    await new Promise((res, rej) => {
-      const tx = idb.transaction(DB_STORE, 'readwrite');
-      const req = tx.objectStore(DB_STORE).put(data, DB_KEY);
-      req.onsuccess = res; req.onerror = () => rej(req.error);
-    });
-  } catch(e) { console.error('SQLite save error', e); }
-}
-async function initSQLite() {
-  if (_sqlReady) return _sqliteDB;
-  try {
-    const initSqlJs = (await import("sql.js")).default;
-    const SQL = await initSqlJs({ locateFile: () => '/sql-wasm.wasm' });
-    const idb = await openIDB();
-    const existing = await new Promise(res => {
-      const tx = idb.transaction(DB_STORE, 'readonly');
-      const req = tx.objectStore(DB_STORE).get(DB_KEY);
-      req.onsuccess = () => res(req.result || null);
-      req.onerror = () => res(null);
-    });
-    _sqliteDB = existing ? new SQL.Database(existing) : new SQL.Database();
-    _sqliteDB.run('CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT NOT NULL)');
-  } catch(e) { console.warn('SQLite init failed:', e); }
-  _sqlReady = true;
-  _sqlReadyCallbacks.forEach(cb => cb());
-  _sqlReadyCallbacks = [];
-  return _sqliteDB;
-}
-function whenSQLReady() {
-  if (_sqlReady) return Promise.resolve();
-  return new Promise(res => _sqlReadyCallbacks.push(res));
-}
 
 // ── HISTORY ────────────────────────────────────────────────────────────────
 
@@ -403,7 +326,6 @@ function App() {
   const clearNotifHistory = () => { setNotifHistory([]); storage.set('cm_notif_history', []); setNotifUnread(0); storage.set('cm_notif_unread', '0'); };
   const [toast, setToast] = useState(null);
   const [loaded, setLoaded] = useState(false);
-  const [sqliteInitError, setSqliteInitError] = useState(null);
 
   useEffect(() => {
     // Загружаем ВСЕ данные с сервера (PostgreSQL или JSON-файл)
@@ -461,7 +383,7 @@ function App() {
       setUsers(base);
       // НЕ вызываем storage.set("cm_users") здесь — не затираем данные других браузеров!
 
-      setDbConfig({ connected: true, dbSize: Object.keys(storage.all()).length, rowCounts: getSQLiteStats() });
+      setDbConfig({ connected: true, dbSize: Object.keys(storage.all()).length, rowCounts: (() => { const a=storage.all(); const c={}; ['cm_users','cm_products','cm_orders','cm_transfers','cm_categories'].forEach(k=>{const v=a[k];c[k]=Array.isArray(v)?v.length:v&&typeof v==='object'?Object.keys(v).length:0;}); c['_total']=Object.keys(a).length; return c; })() });
       setLoaded(true);
 
       // Восстанавливаем сессию из localStorage
@@ -498,11 +420,10 @@ function App() {
       }
     }).catch(err => {
       console.error('Store init failed', err);
-      setSqliteInitError(err.message || String(err));
       setLoaded(true);
     });
 
-    window.addEventListener('beforeunload', () => storage.flush());
+    window.addEventListener('beforeunload', () => {});
 
     // ── Polling: обновляем данные с сервера каждые 4 секунды ──
     const _applyServerData = (data) => {
@@ -560,26 +481,12 @@ function App() {
   }, []);
 
   // Получить статистику по ключам хранилища
-  function getSQLiteStats() {
-    try {
-      const all = storage.all();
-      const total = Object.keys(all).length;
-      const counts = {};
-      ['cm_users','cm_products','cm_orders','cm_transfers','cm_categories','cm_appearance'].forEach(k => {
-        const v = all[k];
-        if (Array.isArray(v)) counts[k] = v.length;
-        else if (v && typeof v === 'object') counts[k] = Object.keys(v).length;
-        else counts[k] = v !== null && v !== undefined ? 1 : 0;
-      });
-      counts['_total_keys'] = total;
-      return counts;
-    } catch { return {}; }
-  }
+
 
   const refreshDbConfig = () => {
     const all = storage.all();
     const totalKeys = Object.keys(all).length;
-    setDbConfig({ connected: storage.isReady(), dbSize: totalKeys, rowCounts: getSQLiteStats() });
+    setDbConfig({ connected: storage.isReady(), dbSize: totalKeys, rowCounts: (() => { const a=storage.all(); const c={}; ['cm_users','cm_products','cm_orders','cm_transfers','cm_categories'].forEach(k=>{const v=a[k];c[k]=Array.isArray(v)?v.length:v&&typeof v==='object'?Object.keys(v).length:0;}); c['_total']=Object.keys(a).length; return c; })() });
   };
 
   const notify = (msg, type = "ok") => { setToast({ msg, type }); setTimeout(() => setToast(null), 3200); pushNotif(msg, type); };
@@ -700,20 +607,10 @@ function App() {
   if (!loaded) return (
     <div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",height:"100vh",gap:"16px",color:"var(--rd-gray-text)"}}>
       <div style={{fontSize:"32px"}}>🗄️</div>
-      <div style={{fontWeight:700,fontSize:"16px",color:"var(--rd-dark)"}}>Инициализация SQLite…</div>
-      <div style={{fontSize:"13px"}}>Загружается WebAssembly движок базы данных</div>
+      <div style={{fontWeight:700,fontSize:"16px",color:"var(--rd-dark)"}}>Загрузка данных с сервера…</div>
+      <div style={{fontSize:"13px"}}>Подключение к хранилищу…</div>
     </div>
   );
-  if (sqliteInitError) return (
-    <div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",height:"100vh",gap:"12px",padding:"24px",textAlign:"center"}}>
-      <div style={{fontSize:"32px"}}>⚠️</div>
-      <div style={{fontWeight:700,fontSize:"16px",color:"var(--rd-red)"}}>Ошибка инициализации SQLite</div>
-      <div style={{fontSize:"13px",color:"var(--rd-gray-text)",maxWidth:"400px"}}>{sqliteInitError}</div>
-      <div style={{fontSize:"12px",color:"var(--rd-gray-text)"}}>Убедитесь, что браузер поддерживает WebAssembly и IndexedDB. Попробуйте перезагрузить страницу.</div>
-      <button className="btn btn-primary" onClick={() => window.location.reload()}>🔄 Перезагрузить</button>
-    </div>
-  );
-
   return (
     <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", background: appearance.pageBg || undefined }}>
       {toast && <div className={`toast toast-${toast.type}`}>{toast.msg}</div>}
@@ -4096,10 +3993,6 @@ function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbC
   const user = users[currentUser] || {};
   const [form, setForm] = useState({ email: user.email || "", firstName: user.firstName || "", lastName: user.lastName || "", currentPassword: "", newPassword: "", confirmPassword: "", avatar: user.avatar || "" });
   const [ap, setAp] = useState({ ...appearance });
-  const [sqlConsole, setSqlConsole] = useState("");
-  const [sqlResult, setSqlResult] = useState(null);
-  const [sqlError, setSqlError] = useState("");
-  const [importing, setImporting] = useState(false);
 
   // PostgreSQL state
   const [pgForm, setPgForm] = useState(() => pgConfig || { host: "", port: "5432", database: "", user: "", password: "", ssl: false, enabled: false });
@@ -4111,7 +4004,6 @@ function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbC
   const [pgSqlError, setPgSqlError] = useState("");
   const [pgStats, setPgStats] = useState(null);
   const [pgStatsLoading, setPgStatsLoading] = useState(false);
-  const [dbSubTab, setDbSubTab] = useState("sqlite");
 
   const testPgConnection = async (cfg) => {
     setPgTesting(true); setPgTestResult(null);
@@ -4164,12 +4056,12 @@ function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbC
     const cfg = { ...pgForm, enabled: false };
     savePgConfig(cfg);
     setPgForm(cfg);
-    notify("PostgreSQL отключена. Используется SQLite.");
+    notify("PostgreSQL отключена.");
     setTimeout(() => window.location.reload(), 1200);
   };
 
   const migrateToPg = async () => {
-    if (!confirm("Мигрировать все данные из SQLite в PostgreSQL? Данные в PG будут перезаписаны.")) return;
+    if (!confirm("Мигрировать текущие данные в PostgreSQL? Данные в PG будут перезаписаны.")) return;
     setPgMigrating(true);
     try {
       const all = storage.all();
@@ -4225,35 +4117,6 @@ function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbC
     setForm(f => ({ ...f, currentPassword: "", newPassword: "", confirmPassword: "" }));
   };
 
-  // Экспорт SQLite базы как .sqlite файл
-  const exportSQLite = () => {
-    const data = storage.exportDB();
-    if (!data) { notify("База данных не инициализирована", "err"); return; }
-    const blob = new Blob([data], { type: "application/octet-stream" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url; a.download = "merch_store.sqlite";
-    a.click(); URL.revokeObjectURL(url);
-    notify("База данных скачана ✓");
-  };
-
-  // Импорт SQLite файла
-  const importSQLite = async (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-    setImporting(true);
-    try {
-      const buf = await file.arrayBuffer();
-      await storage.importDB(new Uint8Array(buf));
-      // Перезагружаем данные
-      window.location.reload();
-    } catch(err) {
-      notify("Ошибка импорта: " + err.message, "err");
-      setImporting(false);
-    }
-    e.target.value = "";
-  };
-
   // Экспорт как JSON
   const exportJSON = () => {
     const all = storage.all();
@@ -4277,14 +4140,7 @@ function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbC
   };
 
   // Выполнить SQL из консоли
-  const runSql = () => {
-    setSqlError(""); setSqlResult(null);
-    try {
-      const res = storage.exec(sqlConsole.trim());
-      setSqlResult(res);
-      refreshDbConfig();
-    } catch(err) { setSqlError(err.message); }
-  };
+;
 
   // Очистить базу (сбросить все данные)
   const clearDatabase = async () => {
@@ -4304,24 +4160,7 @@ function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbC
     } catch(err) { notify("Ошибка: " + err.message, "err"); }
   };
 
-  const clearLocalSQLite = async () => {
-    if (!confirm("Удалить локальную копию SQLite из этого браузера?\nСерверные данные (PostgreSQL) не будут затронуты.")) return;
-    try {
-      // Удаляем IndexedDB
-      await new Promise((res, rej) => {
-        const req = indexedDB.deleteDatabase('merch_store_sqlite');
-        req.onsuccess = res;
-        req.onerror = () => rej(req.error);
-        req.onblocked = res;
-      });
-      // Удаляем localStorage ключи (уведомления, сессия и т.д.)
-      Object.keys(localStorage)
-        .filter(k => k.startsWith('_store_'))
-        .forEach(k => localStorage.removeItem(k));
-      notify("SQLite браузера очищен. Страница перезагружается...");
-      setTimeout(() => window.location.reload(), 1200);
-    } catch(err) { notify("Ошибка: " + err.message, "err"); }
-  };
+;
 
   const applyAndSave = (newAp) => { setAp(newAp); saveAppearance(newAp); notify("Внешний вид сохранён ✓"); };
 
@@ -4959,454 +4798,7 @@ function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbC
           {tab === "database" && (
             <div>
               {/* Sub-tabs */}
-              <div style={{display:"flex",gap:"0",marginBottom:"20px",borderBottom:"2px solid var(--rd-gray-border)"}}>
-                {[["sqlite","🗄️ SQLite"],["postgres","🐘 PostgreSQL"]].map(([id,label]) => (
-                  <button key={id} onClick={() => setDbSubTab(id)} style={{padding:"9px 20px",fontWeight:700,fontSize:"13px",background:"none",border:"none",cursor:"pointer",borderBottom:dbSubTab===id?"2.5px solid var(--rd-red)":"2.5px solid transparent",color:dbSubTab===id?"var(--rd-red)":"var(--rd-gray-text)",marginBottom:"-2px",transition:"color 0.15s",display:"flex",alignItems:"center",gap:"6px"}}>
-                    {label}
-                    {id==="postgres" && isPgActive && <span style={{fontSize:"10px",background:"#22c55e",color:"#fff",padding:"1px 7px",borderRadius:"10px",fontWeight:700}}>АКТИВНА</span>}
-                  </button>
-                ))}
-              </div>
-
-              {/* ══ SQLite Tab ══ */}
-              {dbSubTab === "sqlite" && (
-                <div>
-                  <div className={"db-status-bar " + (dbConfig.connected ? "connected" : "disconnected")}>
-                    <div className={"db-status-dot " + (dbConfig.connected ? "connected" : "disconnected")}></div>
-                    {dbConfig.connected ? "SQLite активна · " + (dbConfig.dbSize ? (dbConfig.dbSize/1024).toFixed(1)+" КБ" : "0 КБ") : "SQLite инициализируется…"}
-                    {isPgActive && <span style={{marginLeft:"12px",fontSize:"11px",background:"rgba(234,179,8,0.15)",color:"#b45309",border:"1px solid rgba(234,179,8,0.3)",padding:"2px 8px",borderRadius:"10px",fontWeight:700}}>⚠️ PostgreSQL активна — SQLite не используется</span>}
-                  </div>
-                  <div className="settings-card">
-                    <div className="settings-section-title">🗄️ SQLite — встроенная база данных</div>
-                    <div style={{fontSize:"13px",color:"var(--rd-gray-text)",marginBottom:"16px",lineHeight:"1.7"}}>
-                      Данные хранятся локально в браузере через <strong>sql.js</strong> (SQLite в WebAssembly) и персистируются в <strong>IndexedDB</strong>. Никакого сервера не требуется.
-                    </div>
-                    {dbConfig.rowCounts && Object.keys(dbConfig.rowCounts).length > 0 && (
-                      <div>
-                        <div style={{fontSize:"12px",fontWeight:700,textTransform:"uppercase",color:"var(--rd-gray-text)",marginBottom:"10px"}}>Содержимое базы</div>
-                        <div className="db-tables-grid">
-                          {[["cm_users","👥 Пользователи"],["cm_products","🛍️ Товары"],["cm_orders","📦 Заказы"],["cm_transfers","🪙 Переводы"],["cm_categories","🏷️ Категории"],["_total_keys","🔑 Всего ключей"]].map(([k,label]) => (
-                            <div key={k} className="db-table-card">
-                              <div className="db-table-name">{label}</div>
-                              <div className="db-table-count">{dbConfig.rowCounts[k] ?? "—"}</div>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                    <div style={{marginTop:"16px",display:"flex",gap:"10px",flexWrap:"wrap"}}>
-                      <button className="btn btn-secondary" onClick={() => { refreshDbConfig(); notify("Статистика обновлена ✓"); }}>🔄 Обновить статистику</button>
-                    </div>
-                  </div>
-                  <div className="settings-card">
-                    <div className="settings-section-title">📦 Резервное копирование</div>
-                    <div style={{display:"flex",flexDirection:"column",gap:"16px"}}>
-                      <div>
-                        <div style={{fontWeight:700,fontSize:"13px",marginBottom:"6px"}}>Экспорт</div>
-                        <div style={{display:"flex",gap:"10px",flexWrap:"wrap"}}>
-                          <button className="btn btn-primary" onClick={exportSQLite}>⬇️ Скачать .sqlite</button>
-                          <button className="btn btn-secondary" onClick={exportJSON}>⬇️ Скачать JSON-бэкап</button>
-                        </div>
-                        <div style={{fontSize:"12px",color:"var(--rd-gray-text)",marginTop:"6px"}}>.sqlite — полный дамп базы, совместим с DB Browser for SQLite.</div>
-                      </div>
-                      <div style={{height:"1px",background:"var(--rd-gray-border)"}}></div>
-                      <div>
-                        <div style={{fontWeight:700,fontSize:"13px",marginBottom:"6px"}}>Импорт</div>
-                        <div style={{display:"flex",gap:"10px",flexWrap:"wrap"}}>
-                          <label className="btn btn-secondary" style={{cursor:"pointer",position:"relative"}}>
-                            {importing ? "⏳ Импорт..." : "⬆️ Загрузить .sqlite"}
-                            <input type="file" accept=".sqlite,.db" style={{position:"absolute",inset:0,opacity:0,cursor:"pointer"}} onChange={importSQLite} disabled={importing} />
-                          </label>
-                          <label className="btn btn-ghost" style={{cursor:"pointer",position:"relative"}}>
-                            ⬆️ Загрузить JSON
-                            <input type="file" accept=".json" style={{position:"absolute",inset:0,opacity:0,cursor:"pointer"}} onChange={importJSON} />
-                          </label>
-                        </div>
-                        <div style={{fontSize:"12px",color:"var(--rd-red)",marginTop:"6px"}}>⚠️ Импорт заменит все текущие данные.</div>
-                      </div>
-                    </div>
-                  </div>
-                  {isAdmin && (
-                    <div className="settings-card">
-                      <div className="settings-section-title">💻 SQL-консоль (SQLite)</div>
-                      <div style={{fontSize:"13px",color:"var(--rd-gray-text)",marginBottom:"10px"}}>Таблица <code style={{background:"var(--rd-gray-bg)",padding:"2px 6px",borderRadius:"4px",fontFamily:"monospace",fontSize:"11px"}}>kv</code> содержит поля <code style={{background:"var(--rd-gray-bg)",padding:"2px 6px",borderRadius:"4px",fontFamily:"monospace",fontSize:"11px"}}>key</code> и <code style={{background:"var(--rd-gray-bg)",padding:"2px 6px",borderRadius:"4px",fontFamily:"monospace",fontSize:"11px"}}>value</code>.</div>
-                      <textarea style={{width:"100%",minHeight:"90px",fontFamily:"monospace",fontSize:"13px",padding:"10px 12px",border:"1.5px solid var(--rd-gray-border)",borderRadius:"var(--rd-radius-sm)",resize:"vertical",background:"#1a1a1a",color:"#e5e7eb",outline:"none"}} placeholder={"SELECT key, length(value) as bytes FROM kv ORDER BY bytes DESC LIMIT 10;"} value={sqlConsole} onChange={e => setSqlConsole(e.target.value)} onKeyDown={e => { if ((e.ctrlKey||e.metaKey)&&e.key==="Enter"){e.preventDefault();runSql();}}} />
-                      <div style={{display:"flex",gap:"10px",marginTop:"8px",alignItems:"center"}}>
-                        <button className="btn btn-primary" onClick={runSql}>▶ Выполнить <span style={{fontSize:"11px",opacity:0.7,marginLeft:"4px"}}>(Ctrl+Enter)</span></button>
-                        <button className="btn btn-ghost" onClick={() => { setSqlResult(null); setSqlError(""); setSqlConsole(""); }}>Очистить</button>
-                      </div>
-                      {sqlError && <div style={{marginTop:"10px",padding:"10px 14px",background:"rgba(199,22,24,0.08)",border:"1px solid rgba(199,22,24,0.2)",borderRadius:"var(--rd-radius-sm)",fontSize:"13px",color:"var(--rd-red)",fontFamily:"monospace"}}>{sqlError}</div>}
-                      {sqlResult && sqlResult.length > 0 && (
-                        <div style={{marginTop:"10px",overflowX:"auto"}}>
-                          {sqlResult.map((res, ri) => (
-                            <table key={ri} style={{borderCollapse:"collapse",width:"100%",fontSize:"12px",fontFamily:"monospace"}}>
-                              <thead><tr>{res.columns.map(c => <th key={c} style={{padding:"6px 10px",textAlign:"left",background:"var(--rd-gray-bg)",border:"1px solid var(--rd-gray-border)",fontWeight:700,whiteSpace:"nowrap"}}>{c}</th>)}</tr></thead>
-                              <tbody>{res.values.slice(0,100).map((row,i) => <tr key={i} style={{background:i%2===0?"#fff":"var(--rd-gray-bg)"}}>{row.map((cell,j) => <td key={j} style={{padding:"5px 10px",border:"1px solid var(--rd-gray-border)",maxWidth:"300px",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{cell===null?<em style={{color:"var(--rd-gray-text)"}}>NULL</em>:String(cell).length>80?String(cell).substring(0,80)+"…":String(cell)}</td>)}</tr>)}</tbody>
-                            </table>
-                          ))}
-                          <div style={{fontSize:"11px",color:"var(--rd-gray-text)",marginTop:"6px"}}>{sqlResult.reduce((s,r)=>s+r.values.length,0)} строк</div>
-                        </div>
-                      )}
-                      {sqlResult && sqlResult.length === 0 && <div style={{marginTop:"10px",fontSize:"13px",color:"var(--rd-green)"}}>✓ Запрос выполнен (0 строк)</div>}
-                    </div>
-                  )}
-                  {isAdmin && (
-                    <div className="settings-card" style={{border:"1.5px solid rgba(199,22,24,0.25)"}}>
-                      <div className="settings-section-title" style={{color:"var(--rd-red)"}}>⚠️ Опасная зона</div>
-                      <div style={{fontSize:"13px",color:"var(--rd-gray-text)",marginBottom:"14px"}}>Очистка базы данных удалит всех пользователей, товары, заказы и остальные данные без возможности восстановления.</div>
-                      <div style={{display:"flex",gap:"10px",flexWrap:"wrap"}}>
-                        <button className="btn" style={{background:"var(--rd-red)",color:"#fff",fontWeight:700}} onClick={clearDatabase}>🗑️ Очистить серверную БД</button>
-                        <button className="btn" style={{background:"#7c3aed",color:"#fff",fontWeight:700}} onClick={clearLocalSQLite}>🧹 Очистить SQLite браузера</button>
-                      </div>
-                      <div style={{fontSize:"12px",color:"var(--rd-gray-text)",marginTop:"8px"}}>
-                        «Очистить SQLite браузера» — удаляет локальную копию IndexedDB в <em>этом</em> браузере. Серверные данные не затрагиваются. Используйте если браузер показывает устаревшие данные.
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* ══ PostgreSQL Tab ══ */}
-              {dbSubTab === "postgres" && (
-                <div>
-                  {/* Status bar */}
-                  <div className={"db-status-bar " + (isPgActive ? "connected" : "disconnected")}>
-                    <div className={"db-status-dot " + (isPgActive ? "connected" : "disconnected")}></div>
-                    {isPgActive ? "PostgreSQL активна · " + (pgConfig.host + ":" + (pgConfig.port||5432) + "/" + pgConfig.database) : "PostgreSQL не подключена — используется SQLite"}
-                  </div>
-
-                  {/* Connection settings */}
-                  <div className="settings-card">
-                    <div className="settings-section-title">🐘 Настройки подключения PostgreSQL</div>
-                    <div style={{display:"grid",gridTemplateColumns:"1fr 120px",gap:"12px",marginBottom:"12px"}}>
-                      <div>
-                        <div style={{fontSize:"12px",fontWeight:700,marginBottom:"4px",color:"var(--rd-gray-text)"}}>Хост</div>
-                        <input className="form-input" placeholder="localhost или IP-адрес" value={pgForm.host} onChange={e => setPgForm(f => ({...f,host:e.target.value}))} />
-                      </div>
-                      <div>
-                        <div style={{fontSize:"12px",fontWeight:700,marginBottom:"4px",color:"var(--rd-gray-text)"}}>Порт</div>
-                        <input className="form-input" placeholder="5432" value={pgForm.port} onChange={e => setPgForm(f => ({...f,port:e.target.value}))} />
-                      </div>
-                    </div>
-                    <div style={{marginBottom:"12px"}}>
-                      <div style={{fontSize:"12px",fontWeight:700,marginBottom:"4px",color:"var(--rd-gray-text)"}}>База данных</div>
-                      <input className="form-input" placeholder="postgres" value={pgForm.database} onChange={e => setPgForm(f => ({...f,database:e.target.value}))} />
-                    </div>
-                    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"12px",marginBottom:"12px"}}>
-                      <div>
-                        <div style={{fontSize:"12px",fontWeight:700,marginBottom:"4px",color:"var(--rd-gray-text)"}}>Пользователь</div>
-                        <input className="form-input" placeholder="postgres" value={pgForm.user} onChange={e => setPgForm(f => ({...f,user:e.target.value}))} />
-                      </div>
-                      <div>
-                        <div style={{fontSize:"12px",fontWeight:700,marginBottom:"4px",color:"var(--rd-gray-text)"}}>Пароль</div>
-                        <input className="form-input" type="password" placeholder="••••••••" value={pgForm.password} onChange={e => setPgForm(f => ({...f,password:e.target.value}))} />
-                      </div>
-                    </div>
-                    <div style={{marginBottom:"16px",display:"flex",alignItems:"center",gap:"8px"}}>
-                      <input type="checkbox" id="pg-ssl" checked={!!pgForm.ssl} onChange={e => setPgForm(f => ({...f,ssl:e.target.checked}))} style={{width:"16px",height:"16px",cursor:"pointer"}} />
-                      <label htmlFor="pg-ssl" style={{fontSize:"13px",cursor:"pointer",fontWeight:600}}>Использовать SSL</label>
-                      <span style={{fontSize:"12px",color:"var(--rd-gray-text)"}}>(для облачных БД: Supabase, Neon, Railway и др.)</span>
-                    </div>
-                    {/* Test result */}
-                    {pgTestResult && (
-                      <div style={{marginBottom:"14px",padding:"10px 14px",borderRadius:"var(--rd-radius-sm)",fontSize:"13px",background:pgTestResult.ok?"rgba(34,197,94,0.08)":"rgba(199,22,24,0.08)",border:pgTestResult.ok?"1px solid rgba(34,197,94,0.25)":"1px solid rgba(199,22,24,0.25)",color:pgTestResult.ok?"#15803d":"var(--rd-red)"}}>
-                        {pgTestResult.ok ? (
-                          <div>✅ Подключение успешно!<br/><span style={{fontSize:"12px",opacity:0.8}}>БД: <strong>{pgTestResult.database}</strong> · Размер: {pgTestResult.size}<br/>{pgTestResult.version?.split(" ").slice(0,2).join(" ")}</span></div>
-                        ) : (
-                          <div>❌ Ошибка подключения:<br/><code style={{fontSize:"12px"}}>{pgTestResult.error}</code></div>
-                        )}
-                      </div>
-                    )}
-                    <div style={{display:"flex",gap:"10px",flexWrap:"wrap"}}>
-                      <button className="btn btn-secondary" onClick={() => testPgConnection()} disabled={pgTesting}>{pgTesting ? "⏳ Проверка…" : "🔌 Проверить подключение"}</button>
-                      <button className="btn btn-primary" onClick={savePgSettings}>💾 Сохранить</button>
-                    </div>
-                  </div>
-
-                  {/* Enable / Disable */}
-                  <div className="settings-card">
-                    <div className="settings-section-title">⚡ Активация</div>
-                    <div style={{fontSize:"13px",color:"var(--rd-gray-text)",marginBottom:"14px",lineHeight:"1.6"}}>
-                      После активации приложение будет хранить и читать все данные из PostgreSQL. SQLite останется как резервная копия до следующей загрузки страницы.
-                    </div>
-                    <div style={{display:"flex",gap:"10px",flexWrap:"wrap",alignItems:"center"}}>
-                      {!isPgActive ? (
-                        <button className="btn btn-primary" style={{background:"#16a34a",border:"none"}} onClick={enablePg} disabled={pgTesting}>{pgTesting ? "⏳ Проверка…" : "🟢 Активировать PostgreSQL"}</button>
-                      ) : (
-                        <button className="btn" style={{background:"var(--rd-red)",color:"#fff",fontWeight:700}} onClick={disablePg}>🔴 Отключить PostgreSQL</button>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Migration */}
-                  <div className="settings-card">
-                    <div className="settings-section-title">🔄 Миграция данных</div>
-                    <div style={{fontSize:"13px",color:"var(--rd-gray-text)",marginBottom:"14px",lineHeight:"1.6"}}>
-                      Скопировать все текущие данные из SQLite (браузер) в PostgreSQL. Используйте это при первом переходе на PG чтобы не потерять существующие данные.
-                    </div>
-                    <button className="btn btn-secondary" onClick={migrateToPg} disabled={pgMigrating || !pgConfig?.host}>{pgMigrating ? "⏳ Миграция…" : "📤 Мигрировать SQLite → PostgreSQL"}</button>
-                    {!pgConfig?.host && <div style={{fontSize:"12px",color:"var(--rd-gray-text)",marginTop:"6px"}}>Сначала сохраните настройки подключения.</div>}
-                  </div>
-
-                  {/* Stats */}
-                  {isPgActive && (
-                    <div className="settings-card">
-                      <div className="settings-section-title">📊 Статистика PostgreSQL</div>
-                      {pgStats ? (
-                        <div>
-                          <div style={{fontSize:"13px",color:"var(--rd-gray-text)",marginBottom:"12px"}}>Размер БД: <strong>{pgStats.size}</strong> · Всего ключей: <strong>{pgStats.total}</strong></div>
-                          <div className="db-tables-grid">
-                            {[["cm_users","👥 Пользователи"],["cm_products","🛍️ Товары"],["cm_orders","📦 Заказы"],["cm_transfers","🪙 Переводы"],["cm_categories","🏷️ Категории"],["_total_keys","🔑 Всего ключей"]].map(([k,label]) => (
-                              <div key={k} className="db-table-card">
-                                <div className="db-table-name">{label}</div>
-                                <div className="db-table-count">{pgStats.rowCounts?.[k] ?? "—"}</div>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      ) : (
-                        <div style={{fontSize:"13px",color:"var(--rd-gray-text)"}}>Нажмите кнопку для загрузки статистики.</div>
-                      )}
-                      <div style={{marginTop:"14px"}}>
-                        <button className="btn btn-secondary" onClick={loadPgStats} disabled={pgStatsLoading}>{pgStatsLoading ? "⏳ Загрузка…" : "🔄 Загрузить статистику"}</button>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* PG SQL Console */}
-                  {isAdmin && isPgActive && (
-                    <div className="settings-card">
-                      <div className="settings-section-title">💻 SQL-консоль (PostgreSQL)</div>
-                      <div style={{fontSize:"13px",color:"var(--rd-gray-text)",marginBottom:"10px"}}>Таблица <code style={{background:"var(--rd-gray-bg)",padding:"2px 6px",borderRadius:"4px",fontFamily:"monospace",fontSize:"11px"}}>kv</code> содержит поля <code style={{background:"var(--rd-gray-bg)",padding:"2px 6px",borderRadius:"4px",fontFamily:"monospace",fontSize:"11px"}}>key</code>, <code style={{background:"var(--rd-gray-bg)",padding:"2px 6px",borderRadius:"4px",fontFamily:"monospace",fontSize:"11px"}}>value</code>, <code style={{background:"var(--rd-gray-bg)",padding:"2px 6px",borderRadius:"4px",fontFamily:"monospace",fontSize:"11px"}}>updated_at</code>.</div>
-                      <textarea style={{width:"100%",minHeight:"90px",fontFamily:"monospace",fontSize:"13px",padding:"10px 12px",border:"1.5px solid var(--rd-gray-border)",borderRadius:"var(--rd-radius-sm)",resize:"vertical",background:"#1a1a1a",color:"#e5e7eb",outline:"none"}} placeholder={"SELECT key, updated_at FROM kv ORDER BY updated_at DESC LIMIT 10;"} value={pgSqlConsole} onChange={e => setPgSqlConsole(e.target.value)} onKeyDown={e => { if((e.ctrlKey||e.metaKey)&&e.key==="Enter"){e.preventDefault();runPgSql();}}} />
-                      <div style={{display:"flex",gap:"10px",marginTop:"8px"}}>
-                        <button className="btn btn-primary" onClick={runPgSql}>▶ Выполнить <span style={{fontSize:"11px",opacity:0.7}}>(Ctrl+Enter)</span></button>
-                        <button className="btn btn-ghost" onClick={() => { setPgSqlResult(null); setPgSqlError(""); setPgSqlConsole(""); }}>Очистить</button>
-                      </div>
-                      {pgSqlError && <div style={{marginTop:"10px",padding:"10px 14px",background:"rgba(199,22,24,0.08)",border:"1px solid rgba(199,22,24,0.2)",borderRadius:"var(--rd-radius-sm)",fontSize:"13px",color:"var(--rd-red)",fontFamily:"monospace"}}>{pgSqlError}</div>}
-                      {pgSqlResult && (
-                        <div style={{marginTop:"10px",overflowX:"auto"}}>
-                          <table style={{borderCollapse:"collapse",width:"100%",fontSize:"12px",fontFamily:"monospace"}}>
-                            <thead><tr>{pgSqlResult.columns.map(c => <th key={c} style={{padding:"6px 10px",textAlign:"left",background:"var(--rd-gray-bg)",border:"1px solid var(--rd-gray-border)",fontWeight:700,whiteSpace:"nowrap"}}>{c}</th>)}</tr></thead>
-                            <tbody>{pgSqlResult.rows.slice(0,100).map((row,i) => <tr key={i} style={{background:i%2===0?"#fff":"var(--rd-gray-bg)"}}>{pgSqlResult.columns.map((c,j) => <td key={j} style={{padding:"5px 10px",border:"1px solid var(--rd-gray-border)",maxWidth:"300px",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{row[c]===null||row[c]===undefined?<em style={{color:"var(--rd-gray-text)"}}>NULL</em>:String(row[c]).length>80?String(row[c]).substring(0,80)+"…":String(row[c])}</td>)}</tr>)}</tbody>
-                          </table>
-                          <div style={{fontSize:"11px",color:"var(--rd-gray-text)",marginTop:"6px"}}>{pgSqlResult.rowCount} строк</div>
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {/* PG Info */}
-                  <div className="settings-card" style={{background:"rgba(59,130,246,0.04)",border:"1px solid rgba(59,130,246,0.15)"}}>
-                    <div className="settings-section-title" style={{color:"#2563eb"}}>ℹ️ Поддерживаемые провайдеры</div>
-                    <div style={{fontSize:"13px",color:"var(--rd-gray-text)",lineHeight:"1.8"}}>
-                      Работает с любым PostgreSQL 12+: <strong>Supabase</strong>, <strong>Neon</strong>, <strong>Railway</strong>, <strong>Render</strong>, локальный сервер и др.<br/>
-                      Для облачных сервисов обычно требуется включить <strong>SSL</strong>. Строка подключения вида:<br/>
-                      <code style={{display:"block",marginTop:"6px",background:"#1a1a1a",color:"#86efac",padding:"8px 12px",borderRadius:"6px",fontSize:"12px",fontFamily:"monospace"}}>postgresql://user:password@host:5432/database?sslmode=require</code>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-            </div>
-          )}
-
-          {tab === "shop" && isAdmin && (
-            <div style={{marginTop:"-12px"}}>
-              <AdminPage
-                users={users} saveUsers={saveUsers}
-                orders={orders} saveOrders={saveOrders}
-                products={products} saveProducts={saveProducts}
-                categories={categories} saveCategories={saveCategories}
-                notify={notify} setPage={() => {}} currentUser={currentUser}
-                transfers={transfers} saveTransfers={saveTransfers}
-                embedded={true} activeTab={adminTab} setActiveTab={setAdminTab}
-                faq={faq} saveFaq={saveFaq}
-              />
-            </div>
-          )}
-
-          {tab === "faq" && (
-            <div className="settings-card">
-              <div style={{fontWeight:700,fontSize:"18px",color:"var(--rd-dark)",marginBottom:"20px",paddingBottom:"14px",borderBottom:"1.5px solid var(--rd-gray-border)"}}>
-                ❓ Вопросы и ответы
-              </div>
-              <FaqAdminTab faq={faq} saveFaq={saveFaq} notify={notify} />
-            </div>
-          )}
-
-          {tab === "tasks" && (
-            <div className="settings-card">
-              <div style={{fontWeight:700,fontSize:"18px",color:"var(--rd-dark)",marginBottom:"20px",paddingBottom:"14px",borderBottom:"1.5px solid var(--rd-gray-border)"}}>
-                🎯 Задания
-              </div>
-              <TasksAdminTab tasks={tasks} saveTasks={saveTasks} taskSubmissions={taskSubmissions} saveTaskSubmissions={saveTaskSubmissions} notify={notify} users={users} saveUsers={saveUsers} />
-            </div>
-          )}
-
-          {tab === "auction" && (
-            <div className="settings-card">
-              <div style={{fontWeight:700,fontSize:"18px",color:"var(--rd-dark)",marginBottom:"20px",paddingBottom:"14px",borderBottom:"1.5px solid var(--rd-gray-border)"}}>
-                🔨 Управление аукционами
-              </div>
-              <AuctionAdminTab auctions={auctions} saveAuctions={saveAuctions} notify={notify} />
-            </div>
-          )}
-
-        </div>
-      </div>
-    </div>
-  );
-}
-
-
-// ── TRANSFER ──────────────────────────────────────────────────────────────
-
-// ── TRANSFER ──────────────────────────────────────────────────────────────
-
-function TransferPage({ currentUser, users, saveUsers, transfers, saveTransfers, notify, setPage, currency }) {
-  const cName = getCurrName(currency);
-  const [toInput, setToInput] = useState("");
-  const [amount, setAmount] = useState("");
-  const [comment, setComment] = useState("");
-  const [showSuggest, setShowSuggest] = useState(false);
-  const myBalance = users[currentUser]?.balance || 0;
-
-  const otherUsers = Object.keys(users).filter(u => u !== currentUser && u !== "admin");
-  const suggestions = toInput.length > 0
-    ? otherUsers.filter(u => u.toLowerCase().includes(toInput.toLowerCase())).slice(0, 6)
-    : [];
-
-  const myTransfers = transfers.filter(t => t.from === currentUser || t.to === currentUser)
-    .sort((a, b) => b.date - a.date);
-
-  const doTransfer = () => {
-    const amt = parseInt(amount);
-    if (!toInput.trim()) { notify("Укажите получателя", "err"); return; }
-    if (!users[toInput]) { notify("Пользователь не найден", "err"); return; }
-    if (toInput === currentUser) { notify("Нельзя переводить самому себе", "err"); return; }
-    if (!amt || amt <= 0) { notify("Введите сумму перевода", "err"); return; }
-    if (amt > myBalance) { notify("Недостаточно " + getCurrName(cProps.currency) + " на балансе", "err"); return; }
-
-    const newUsers = {
-      ...users,
-      [currentUser]: { ...users[currentUser], balance: myBalance - amt },
-      [toInput]: { ...users[toInput], balance: (users[toInput].balance || 0) + amt }
-    };
-    saveUsers(newUsers);
-
-    const tr = {
-      id: Date.now(),
-      from: currentUser,
-      to: toInput,
-      amount: amt,
-      comment: comment.trim(),
-      date: Date.now(),
-      dateStr: new Date().toLocaleString("ru-RU")
-    };
-    saveTransfers([tr, ...transfers]);
-
-    notify("Перевод выполнен! " + amt + " " + cName + " → " + toInput);
-    setToInput("");
-    setAmount("");
-    setComment("");
-  };
-
-  return (
-    <div className="transfer-wrap page-fade">
-      <div className="page-eyebrow">{cName}</div>
-      <h2 className="page-title" style={{fontSize:"32px",marginBottom:"24px"}}>{`Перевод ${cName}`}</h2>
-
-      <div className="transfer-card">
-        <div className="transfer-balance">
-          <div className="transfer-balance-icon">🪙</div>
-          <div>
-            <div className="transfer-balance-label">Ваш баланс</div>
-            <div style={{display:"flex",alignItems:"baseline",gap:"6px"}}>
-              <span className="transfer-balance-val">{myBalance}</span>
-              <span className="transfer-balance-unit">{cName}</span>
-            </div>
-          </div>
-        </div>
-
-        <div className="form-field" style={{position:"relative"}}>
-          <label className="form-label">Получатель</label>
-          <input
-            className="form-input"
-            placeholder="Введите логин пользователя"
-            value={toInput}
-            autoComplete="off"
-            onChange={e => { setToInput(e.target.value); setShowSuggest(true); }}
-            onFocus={() => setShowSuggest(true)}
-            onBlur={() => setTimeout(() => setShowSuggest(false), 150)}
-          />
-          {showSuggest && suggestions.length > 0 && (
-            <div className="user-suggest-list">
-              {suggestions.map(u => (
-                <div key={u} className="user-suggest-item" onMouseDown={() => { setToInput(u); setShowSuggest(false); }}>
-                  <div className="user-suggest-avatar">{u[0].toUpperCase()}</div>
-                  <div className="user-suggest-info">
-                    <div className="user-suggest-name">{u}</div>
-                    <div className="user-suggest-balance">{users[u]?.balance || 0} {cName}</div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-
-        <div className="form-field">
-          <label className="form-label">Сумма ({cName})</label>
-          <input
-            className="form-input"
-            type="number"
-            min="1"
-            max={myBalance}
-            placeholder={"Максимум " + myBalance}
-            value={amount}
-            onChange={e => setAmount(e.target.value)}
-          />
-          <div style={{display:"flex",gap:"8px",marginTop:"8px",flexWrap:"wrap"}}>
-            {[10, 25, 50, 100, 250].filter(v => v <= myBalance).map(v => (
-              <button key={v} className="btn btn-ghost btn-sm" onClick={() => setAmount("" + v)}>{v}</button>
-            ))}
-            {myBalance > 0 && <button className="btn btn-ghost btn-sm" onClick={() => setAmount("" + myBalance)}>Всё</button>}
-          </div>
-        </div>
-
-        <div className="form-field">
-          <label className="form-label">Комментарий (необязательно)</label>
-          <input className="form-input" placeholder="За что переводите..." value={comment} onChange={e => setComment(e.target.value)} onKeyDown={e => e.key === "Enter" && doTransfer()} />
-        </div>
-
-        <button className="btn btn-primary btn-block" style={{marginTop:"8px"}} onClick={doTransfer}>
-          Отправить {cName}
-        </button>
-      </div>
-
-      {myTransfers.length > 0 && (
-        <div>
-          <h3 style={{fontWeight:800,fontSize:"18px",marginBottom:"16px",color:"var(--rd-dark)"}}>История переводов</h3>
-          <div className="transfer-card" style={{padding:"8px 24px"}}>
-            {myTransfers.map(t => {
-              const isOut = t.from === currentUser;
-              return (
-                <div key={t.id} className="transfer-history-item">
-                  <div className={"thi-icon " + (isOut ? "out" : "in")}>{isOut ? "↑" : "↓"}</div>
-                  <div className="thi-info">
-                    <div className="thi-title">
-                      {isOut ? ("\u0414\u043b\u044f " + t.to) : ("\u041e\u0442 " + t.from)}
-                      {t.comment ? <span style={{fontWeight:400,color:"var(--rd-gray-text)",marginLeft:"8px",fontSize:"12px"}}>{"\"" + t.comment + "\""}</span> : null}
-                    </div>
-                    <div className="thi-date">{t.dateStr}</div>
-                  </div>
-                  <div className={"thi-amount " + (isOut ? "out" : "in")}>
-                    {isOut ? "-" : "+"}{t.amount}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
+              <div style={{display:"flex",gap:"0",marginBottom:"20px",borderBottom:"2px solid var(--rd-gray-border)"}}>          </div>
         </div>
       )}
 
