@@ -1,3 +1,7 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
 /* ======= CSS VARIABLES (from order-v2_81.html) ======= */
 :root {
   --rd-red: #c71618;
