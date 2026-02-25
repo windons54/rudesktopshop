@@ -646,10 +646,10 @@ function App() {
     const chatId = integ.tgChatId.trim();
     const items = order.items.map(i => `  • ${i.name}${i.size ? " (" + i.size + ")" : ""} x${i.qty || 1} — ${i.price * (i.qty || 1)} RC`).join("\n");
     const text = "🛍️ <b>Новый заказ #" + order.id + "</b>\n\n👤 Покупатель: <code>" + order.user + "</code>\n📅 Дата: " + order.date + "\n\n" + items + "\n\n💰 <b>Итого: " + order.total + "" + currName() + "</b>\n📦 Статус: " + order.status;
-    fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+    fetch('/api/telegram', {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ chat_id: chatId, text, parse_mode: "HTML" })
+      body: JSON.stringify({ token, chat_id: chatId, text, parse_mode: "HTML" })
     })
     .then(r => r.json())
     .then(d => { if (!d.ok) { notify("Telegram: " + (d.description || "Ошибка отправки"), "err"); } })
@@ -1037,9 +1037,9 @@ function TaskSubmitButton({ task, currentUser, taskSubmissions, saveTaskSubmissi
       const tgChat = ap.integrations?.tgChatId;
       if (tgEnabled && tgToken && tgChat) {
         const msg = `🎯 Задание выполнено!\n👤 Пользователь: ${currentUser}\n📋 Задание: ${task.title}\n💰 Награда: ${task.reward} монет\n🕐 ${new Date().toLocaleString("ru-RU")}`;
-        fetch(`https://api.telegram.org/bot${tgToken}/sendMessage`, {
+        fetch('/api/telegram', {
           method: "POST", headers: {"Content-Type":"application/json"},
-          body: JSON.stringify({ chat_id: tgChat, text: msg })
+          body: JSON.stringify({ token: tgToken, chat_id: tgChat, text: msg })
         }).catch(() => {});
       }
     } catch {}
@@ -1126,7 +1126,7 @@ function TasksPage({ tasks, currentUser, taskSubmissions, saveTaskSubmissions, n
         const ap = appearance || {};
         if (ap.integrations?.tgEnabled && ap.integrations?.tgBotToken && ap.integrations?.tgChatId) {
           const msg = `🎯 Задание выполнено!\n👤 Пользователь: ${currentUser}\n📋 Задание: ${task.title}\n💰 Награда: ${task.reward} монет`;
-          fetch(`https://api.telegram.org/bot${ap.integrations.tgBotToken}/sendMessage`, { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify({ chat_id: ap.integrations.tgChatId, text: msg }) }).catch(() => {});
+          fetch('/api/telegram', { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify({ token: ap.integrations.tgBotToken, chat_id: ap.integrations.tgChatId, text: msg }) }).catch(() => {});
         }
       } catch {}
       notify("Задание отправлено на проверку ✓");
@@ -4954,10 +4954,10 @@ function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbC
                     const token = integ.tgBotToken.trim();
                     const chatId = integ.tgChatId.trim();
                     const testText = "✅ <b>Тест уведомлений RuDesktop Shop</b>\nИнтеграция настроена успешно! Новые заказы будут приходить в этот чат.";
-                    fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+                    fetch('/api/telegram', {
                       method: "POST",
                       headers: { "Content-Type": "application/json" },
-                      body: JSON.stringify({ chat_id: chatId, text: testText, parse_mode: "HTML" })
+                      body: JSON.stringify({ token, chat_id: chatId, text: testText, parse_mode: "HTML" })
                     })
                     .then(r => r.json())
                     .then(d => {
