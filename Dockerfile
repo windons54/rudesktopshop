@@ -1,72 +1,60 @@
-# Используем официальный Node.js образ как базовый
-FROM node:24-slim AS base
-
-# Установка зависимостей для Prisma и PostgreSQL
-RUN apt-get update -y && apt-get install -y \
-    openssl \
-    ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
-
-# Установка рабочей директории
+# ── Stage 1: Dependencies ──────────────────────────────────────────────────
+FROM node:20-alpine AS deps
 WORKDIR /app
 
-# Stage 1: Установка зависимостей
-FROM base AS deps
-
-# Копируем файлы для установки зависимостей
-COPY package*.json ./
+COPY package.json package-lock.json* ./
 COPY prisma ./prisma/
 
-# Устанавливаем зависимости
-RUN npm ci
+RUN npm ci --ignore-scripts && \
+    npx prisma generate
 
-# Stage 2: Сборка приложения
-FROM base AS builder
-
+# ── Stage 2: Build ─────────────────────────────────────────────────────────
+FROM node:20-alpine AS builder
 WORKDIR /app
 
-# Копируем зависимости из предыдущего stage
 COPY --from=deps /app/node_modules ./node_modules
-
-# Копируем исходный код
 COPY . .
 
-# Генерируем Prisma Client
-RUN npx prisma generate
+# Copy WASM file for sql.js
+RUN mkdir -p public && \
+    cp node_modules/sql.js/dist/sql-wasm.wasm public/sql-wasm.wasm 2>/dev/null || true
 
-# Собираем Next.js приложение
+# Build Next.js
+ENV NEXT_TELEMETRY_DISABLED=1
+ENV NODE_ENV=production
 RUN npm run build
 
-# Stage 3: Запуск приложения
-FROM base AS runner
-
+# ── Stage 3: Production ───────────────────────────────────────────────────
+FROM node:20-alpine AS runner
 WORKDIR /app
 
-# Создаём непривилегированного пользователя
-RUN groupadd -r nodejs && useradd -r -g nodejs nextjs
+ENV NODE_ENV=production
+ENV NEXT_TELEMETRY_DISABLED=1
+ENV PORT=3000
+ENV HOSTNAME="0.0.0.0"
 
-# Копируем необходимые файлы из builder
-COPY --from=builder /app/next.config.js ./
+RUN addgroup --system --gid 1001 nodejs && \
+    adduser --system --uid 1001 nextjs
+
+# Copy built assets
 COPY --from=builder /app/public ./public
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
+
+# Prisma client
 COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
 COPY --from=builder /app/node_modules/@prisma ./node_modules/@prisma
 COPY --from=builder /app/prisma ./prisma
 
-# Меняем владельца файлов
-RUN chown -R nextjs:nodejs /app
+# Data directory (writable, for JSON fallback)
+RUN mkdir -p data && chown nextjs:nodejs data
 
-# Переключаемся на непривилегированного пользователя
 USER nextjs
 
-# Открываем порт
 EXPOSE 3000
 
-# Устанавливаем переменные окружения
-ENV NODE_ENV=production
-ENV PORT=3000
-ENV HOSTNAME="0.0.0.0"
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+  CMD wget --no-verbose --tries=1 --spider http://localhost:3000/api/health || exit 1
 
-# Запускаем приложение
 CMD ["node", "server.js"]
