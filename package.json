@@ -26,8 +26,5 @@
     "eslint": "^8",
     "eslint-config-next": "14.2.30",
     "prisma": "^5.22.0"
-  },
-"scripts": {
-  "build": "next build && next export"
-}
+  }
 }
