@@ -107,6 +107,9 @@ const _lsGet = (k) => { try { const v = localStorage.getItem('_store_'+k); retur
 const _lsSet = (k, v) => { try { localStorage.setItem('_store_'+k, JSON.stringify(v)); } catch {} };
 const _lsDel = (k) => { try { localStorage.removeItem('_store_'+k); } catch {} };
 
+// Ключи которые сейчас записываются на сервер — polling не должен их перетирать
+const _pendingWrites = new Set();
+
 const storage = {
   get: (k) => {
     if (_LOCAL_KEYS.has(k)) return _lsGet(k);
@@ -115,7 +118,10 @@ const storage = {
   set: (k, v) => {
     if (_LOCAL_KEYS.has(k)) { _lsSet(k, v); return; }
     _cache[k] = v; // обновляем кэш немедленно
-    _apiCall('set', { key: k, value: v }).catch(e => console.warn('Store set error', e));
+    _pendingWrites.add(k);
+    _apiCall('set', { key: k, value: v })
+      .then(() => _pendingWrites.delete(k))
+      .catch(e => { _pendingWrites.delete(k); console.warn('Store set error', e); });
   },
   delete: (k) => {
     if (_LOCAL_KEYS.has(k)) { _lsDel(k); return; }
@@ -501,15 +507,16 @@ function App() {
     // ── Polling: обновляем данные с сервера каждые 4 секунды ──
     const _applyServerData = (data) => {
       if (!data) return;
-      if (data.cm_users)            setUsers(data.cm_users);
-      if (data.cm_orders)           setOrders(data.cm_orders);
-      if (data.cm_products)         setCustomProducts(data.cm_products);
-      if (data.cm_transfers)        setTransfers(data.cm_transfers);
-      if (data.cm_categories)       setCustomCategories(data.cm_categories);
-      if (data.cm_faq)              setFaq(data.cm_faq);
-      if (data.cm_tasks)            setTasks(data.cm_tasks);
-      if (data.cm_task_submissions) setTaskSubmissions(data.cm_task_submissions);
-      if (data.cm_auctions)         setAuctions(data.cm_auctions);
+      // Всегда обновляем — не проверяем truthy, чтобы не пропустить пустые массивы/объекты
+      if ('cm_users'            in data) setUsers(data.cm_users);
+      if ('cm_orders'           in data) setOrders(data.cm_orders);
+      if ('cm_products'         in data) setCustomProducts(data.cm_products);
+      if ('cm_transfers'        in data) setTransfers(data.cm_transfers);
+      if ('cm_categories'       in data) setCustomCategories(data.cm_categories);
+      if ('cm_faq'              in data) setFaq(data.cm_faq);
+      if ('cm_tasks'            in data) setTasks(data.cm_tasks);
+      if ('cm_task_submissions' in data) setTaskSubmissions(data.cm_task_submissions);
+      if ('cm_auctions'         in data) setAuctions(data.cm_auctions);
       if (data.cm_appearance) {
         const ap = data.cm_appearance;
         if (ap.currency) _globalCurrency = { ...ap.currency };
@@ -536,10 +543,15 @@ function App() {
         });
         const r = await res.json();
         if (r.ok && r.data) {
-          // Обновляем кэш
-          Object.keys(r.data).forEach(k => { _cache[k] = r.data[k]; });
-          // Обновляем React state
-          _applyServerData(r.data);
+          // Обновляем кэш и state — пропускаем ключи которые сейчас пишутся
+          const filtered = {};
+          Object.keys(r.data).forEach(k => {
+            if (!_pendingWrites.has(k)) {
+              _cache[k] = r.data[k];
+              filtered[k] = r.data[k];
+            }
+          });
+          _applyServerData(filtered);
         }
       } catch(e) { /* polling error — ignore */ }
     }, 4000);
