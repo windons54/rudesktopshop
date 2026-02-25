@@ -1,136 +1,92 @@
 # Corp Merch Store — Next.js
 
-Корпоративный магазин мерча, конвертированный из HTML в Next.js.
+Корпоративный магазин мерча на Next.js 14 + PostgreSQL.
 
 ## Технологии
-- **Next.js 14** (Pages Router)
+- **Next.js 14** (Pages Router, standalone output)
 - **React 18**
-- **sql.js** — SQLite в браузере (хранение данных в IndexedDB)
+- **Prisma ORM** + PostgreSQL (продакшен)
+- **sql.js** — SQLite в браузере (импорт/экспорт)
 - **xlsx** — экспорт/импорт данных
 
 ## Локальный запуск
 
 ```bash
-# 1. Установить зависимости (скопирует sql-wasm.wasm автоматически)
+cp .env.example .env          # заполнить DATABASE_URL
 npm install
-
-# 2. Запустить dev-сервер
-npm run dev
-
-# 3. Открыть http://localhost:3000
+npm run prisma:migrate         # создать таблицу kv в БД
+npm run dev                    # http://localhost:3000
 ```
 
-## Деплой на Vercel
+## Деплой на Timeweb Cloud
 
-### Способ 1 — через GitHub (рекомендуется)
+### 1. Создать PostgreSQL базу данных
 
-1. Создайте репозиторий на GitHub и загрузите проект:
-   ```bash
-   git init
-   git add .
-   git commit -m "Initial commit"
-   git remote add origin https://github.com/YOUR_USER/YOUR_REPO.git
-   git push -u origin main
+1. Перейдите в [Timeweb Cloud](https://timeweb.cloud/) → **Базы данных** → **Создать**
+2. Выберите **PostgreSQL**, задайте имя, пользователя и пароль
+3. Скопируйте строку подключения вида:
+   ```
+   postgresql://USER:PASSWORD@HOST:PORT/DATABASE
    ```
 
-2. Зайдите на [vercel.com](https://vercel.com) → **New Project**
-
-3. Выберите ваш GitHub репозиторий
-
-4. Настройки оставьте по умолчанию (Vercel автоматически определит Next.js):
-   - **Framework Preset**: Next.js
-   - **Build Command**: `npm run build`
-   - **Install Command**: `npm install`
-
-5. Нажмите **Deploy** — через ~1 минуту сайт будет доступен
-
-### Способ 2 — Vercel CLI
+### 2. Загрузить код в Git-репозиторий
 
 ```bash
-npm i -g vercel
-vercel login
-vercel --prod
+git init
+git add .
+git commit -m "Initial commit"
+git remote add origin https://github.com/YOUR_USER/YOUR_REPO.git
+git push -u origin main
+```
+
+### 3. Создать приложение в App Platform
+
+1. Перейдите в **App Platform** → **Создать**
+2. Тип: **Docker** → **Dockerfile**
+3. Подключите GitHub/GitLab репозиторий
+4. Задайте переменные окружения:
+   - `DATABASE_URL` — строка подключения PostgreSQL из шага 1
+   - `NODE_ENV` — `production`
+5. Путь проверки состояния (Health Check): `/api/health`
+6. Нажмите **Запустить деплой**
+
+Таблица `kv` создаётся автоматически при первом запросе к API.
+
+### Альтернатива: VPS / Cloud Server
+
+```bash
+git clone https://github.com/YOUR_USER/YOUR_REPO.git
+cd YOUR_REPO
+cp .env.example .env           # заполнить DATABASE_URL
+npm install
+npm run build
+npm run prisma:migrate
+npm start                      # или: pm2 start npm --name merch -- start
 ```
 
 ## Структура проекта
 
 ```
+├── Dockerfile              # Docker-сборка для Timeweb App Platform
+├── .dockerignore
 ├── pages/
-│   ├── _app.js          # Глобальные стили
-│   ├── _document.js     # HTML шаблон
-│   └── index.js         # Главная страница
+│   ├── index.js            # Главная страница (CSR)
+│   └── api/
+│       ├── health.js       # Health check для мониторинга
+│       ├── store.js        # CRUD API (Prisma → PG)
+│       ├── pg.js           # PG-утилиты
+│       ├── telegram.js     # Telegram Bot API прокси
+│       └── debug.js        # Диагностика
 ├── components/
-│   └── App.jsx          # Вся логика приложения (SPA)
+│   └── App.jsx             # Логика приложения (SPA)
 ├── lib/
-│   ├── storage.js       # SQLite/IndexedDB слой
-│   └── utils.js         # Утилиты
-├── styles/
-│   └── globals.css      # Все стили
-├── public/
-│   └── sql-wasm.wasm    # WebAssembly для SQLite (копируется при npm install)
-├── scripts/
-│   └── copy-wasm.js     # Postinstall скрипт
-└── next.config.js
+│   └── prisma.js           # Prisma singleton
+├── prisma/
+│   └── schema.prisma       # Схема БД
+└── next.config.js          # standalone output
 ```
-
-## Важно
-
-- Все данные хранятся **в браузере пользователя** (IndexedDB + SQLite in-memory)
-- При очистке кэша браузера данные удаляются — используйте экспорт БД в настройках
-- Это **клиентское SPA**, серверные компоненты не используются
 
 ## Логин администратора
 
 - **Логин**: `admin`
 - **Пароль**: `admin123`
-
----
-
-## Prisma (ORM)
-
-Проект использует **Prisma ORM** для работы с PostgreSQL вместо сырых SQL-запросов.
-
-### Быстрый старт
-
-1. **Скопируй `.env.example` в `.env`** и заполни `DATABASE_URL`:
-   ```
-   cp .env.example .env
-   ```
-
-2. **Установи зависимости** (Prisma Client генерируется автоматически через `postinstall`):
-   ```bash
-   npm install
-   ```
-
-3. **Применить миграции** (создаст таблицу `kv` в БД):
-   ```bash
-   npm run prisma:migrate
-   ```
-
-4. **Запустить проект:**
-   ```bash
-   npm run dev
-   ```
-
-### Команды Prisma
-
-| Команда | Описание |
-|---|---|
-| `npm run prisma:generate` | Сгенерировать Prisma Client |
-| `npm run prisma:migrate` | Применить миграции (prod) |
-| `npm run prisma:migrate:dev` | Создать и применить миграцию (dev) |
-| `npm run prisma:studio` | Открыть Prisma Studio (GUI для БД) |
-
-### Схема базы данных
-
-```prisma
-model Kv {
-  key        String   @id
-  value      String
-  updated_at DateTime @default(now()) @updatedAt
-
-  @@map("kv")
-}
-```
-
-Таблица `kv` используется как универсальное хранилище ключ-значение для настроек и данных магазина. Если `DATABASE_URL` не задан — данные сохраняются в `data/store.json` (режим локальной разработки).

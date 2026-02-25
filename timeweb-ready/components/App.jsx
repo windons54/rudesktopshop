@@ -90,7 +90,7 @@ let _readyCallbacks = [];
 
 function _applyData(data) {
   Object.keys(data).forEach(k => {
-    if (!_pendingWrites.has(k)) _cache[k] = data[k];
+    if (!_pendingWrites.has(k)) { _cache[k] = data[k]; }
   });
 }
 
@@ -525,10 +525,9 @@ function App() {
       setLoaded(true);
     });
 
-    const handleUnload = () => storage.flush();
-    window.addEventListener('beforeunload', handleUnload);
+    window.addEventListener('beforeunload', () => storage.flush());
 
-    // ── Polling: обновляем данные с сервера каждые 4 секунды ──
+    // ── Polling: обновляем данные с сервера каждые 5 секунд ──
     const _applyServerData = (data) => {
       if (!data) return;
       // Всегда обновляем — не проверяем truthy, чтобы не пропустить пустые массивы/объекты
@@ -573,10 +572,7 @@ function App() {
       } catch(e) { /* ignore */ }
     }, 5000);
 
-    return () => {
-      clearInterval(pollInterval);
-      window.removeEventListener('beforeunload', handleUnload);
-    };
+    return () => clearInterval(pollInterval);
   }, []);
 
   // Получить статистику по ключам хранилища
