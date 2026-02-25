@@ -2383,7 +2383,9 @@ function ProductCard({ product, addToCart, onOpen, favorites, toggleFavorite }) 
           {(function() {
             var ss = product.sizeStock || {};
             var hasSS = product.category === CLOTHING_CATEGORY && Object.keys(ss).length > 0;
-            var stockVal = hasSS && selectedSize && ss[selectedSize] !== undefined ? ss[selectedSize]
+            // В карточке размер не выбран — показываем суммарный остаток по всем размерам
+            var stockVal = hasSS
+              ? Object.values(ss).reduce(function(a, b) { return a + b; }, 0)
               : (!hasSS && product.stock !== null && product.stock !== undefined ? product.stock : null);
             if (stockVal === null) return null;
             var clr = stockVal === 0 ? "var(--rd-red)" : stockVal <= 5 ? "#d97706" : "var(--rd-green)";
