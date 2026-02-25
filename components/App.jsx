@@ -49,11 +49,10 @@ const compressImage = (dataUrl, maxW = 800, maxH = 800, quality = 0.7) => {
 };
 
 // ══════════════════════════════════════════════════════════════
-// Серверное хранилище — все данные хранятся на сервере (общие для всех браузеров)
-// Бэкенд: PostgreSQL (если настроен) или JSON-файл на диске
+// Серверное хранилище — данные общие для всех браузеров
+// Запись: сразу в API. Чтение: из кэша (обновляется polling каждые 4с)
 // ══════════════════════════════════════════════════════════════
 
-// Читаем pgConfig из localStorage (задаётся в Settings → База данных)
 function _getPgCfg() {
   try {
     const r = typeof localStorage !== 'undefined' ? localStorage.getItem('__pg_config__') : null;
@@ -61,17 +60,6 @@ function _getPgCfg() {
     const c = JSON.parse(r);
     return (c && c.enabled && c.host) ? c : null;
   } catch { return null; }
-}
-
-// Внутренний кэш — синхронный слой поверх async API
-const _cache = {};
-let _cacheReady = false;
-let _readyCallbacks = [];
-
-function _notifyReady() {
-  _cacheReady = true;
-  _readyCallbacks.forEach(fn => fn());
-  _readyCallbacks = [];
 }
 
 async function _apiCall(action, body = {}) {
@@ -84,32 +72,25 @@ async function _apiCall(action, body = {}) {
   return res.json();
 }
 
-// Debounce запись отдельных ключей
-const _dirtyKeys = new Set();
-let _flushTimer = null;
+// Кэш — синхронный слой, обновляется polling-ом
+const _cache = {};
+let _cacheReady = false;
+let _readyCallbacks = [];
 
-function _scheduleFlush(key, value) {
-  _cache[key] = value;
-  _dirtyKeys.add(key);
-  if (_flushTimer) clearTimeout(_flushTimer);
-  _flushTimer = setTimeout(_flushDirty, 300);
+function _applyData(data) {
+  Object.keys(data).forEach(k => { _cache[k] = data[k]; });
 }
 
-async function _flushDirty() {
-  if (!_dirtyKeys.size) return;
-  const batch = {};
-  _dirtyKeys.forEach(k => { batch[k] = _cache[k]; });
-  _dirtyKeys.clear();
-  try { await _apiCall('setMany', { data: batch }); } catch(e) { console.warn('Store flush error', e); }
+function _notifyReady() {
+  _cacheReady = true;
+  _readyCallbacks.forEach(fn => fn());
+  _readyCallbacks = [];
 }
 
-// Инициализация — загружаем ВСЕ данные с сервера один раз
 async function initStore() {
   try {
     const r = await _apiCall('getAll');
-    if (r.ok && r.data) {
-      Object.assign(_cache, r.data);
-    }
+    if (r.ok && r.data) _applyData(r.data);
   } catch(e) { console.warn('Store init error', e); }
   _notifyReady();
 }
@@ -119,37 +100,51 @@ function whenStoreReady() {
   return new Promise(res => _readyCallbacks.push(res));
 }
 
-// Совместимый storage API (синхронный get из кэша, async set через сервер)
+// Ключи, которые хранятся только локально (личные данные браузера)
+const _LOCAL_KEYS = new Set(['cm_session','cm_seen_orders','cm_notif_history','cm_notif_unread','cm_favorites','cm_birthday_grant']);
+
+const _lsGet = (k) => { try { const v = localStorage.getItem('_store_'+k); return v !== null ? JSON.parse(v) : null; } catch { return null; } };
+const _lsSet = (k, v) => { try { localStorage.setItem('_store_'+k, JSON.stringify(v)); } catch {} };
+const _lsDel = (k) => { try { localStorage.removeItem('_store_'+k); } catch {} };
+
 const storage = {
   get: (k) => {
+    if (_LOCAL_KEYS.has(k)) return _lsGet(k);
     return _cache.hasOwnProperty(k) ? _cache[k] : null;
   },
   set: (k, v) => {
-    _scheduleFlush(k, v);
+    if (_LOCAL_KEYS.has(k)) { _lsSet(k, v); return; }
+    _cache[k] = v; // обновляем кэш немедленно
+    _apiCall('set', { key: k, value: v }).catch(e => console.warn('Store set error', e));
   },
   delete: (k) => {
+    if (_LOCAL_KEYS.has(k)) { _lsDel(k); return; }
     delete _cache[k];
-    _dirtyKeys.delete(k);
     _apiCall('delete', { key: k }).catch(e => console.warn('Store delete error', e));
   },
   all: () => ({ ..._cache }),
   exportDB: () => null,
   importDB: async () => {},
-  exec: () => { console.warn('storage.exec не поддерживается в серверном режиме'); return []; },
-  run: () => { console.warn('storage.run не поддерживается в серверном режиме'); },
+  exec: () => [],
+  run: () => {},
   isReady: () => _cacheReady,
-  // Принудительно сбросить все pending записи (вызывается перед beforeunload)
-  flush: () => _flushDirty(),
+  flush: () => Promise.resolve(),
+  // Обновить кэш с сервера (вызывается polling-ом)
+  refresh: async () => {
+    try {
+      const r = await _apiCall('getAll');
+      if (r.ok && r.data) _applyData(r.data);
+    } catch(e) { console.warn('Store refresh error', e); }
+  },
 };
 
-// SQLite экспорт/импорт — оставляем для совместимости в UI вкладки БД
+// SQLite — только для экспорта/импорта в настройках
 let _sqliteDB = null;
 let _sqlReady = false;
 let _sqlReadyCallbacks = [];
 const DB_NAME = 'merch_store_sqlite';
 const DB_STORE = 'sqlitedb';
 const DB_KEY = 'main';
-
 function openIDB() {
   return new Promise((res, rej) => {
     const req = indexedDB.open(DB_NAME, 1);
@@ -184,7 +179,7 @@ async function initSQLite() {
     });
     _sqliteDB = existing ? new SQL.Database(existing) : new SQL.Database();
     _sqliteDB.run('CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT NOT NULL)');
-  } catch(e) { console.warn('SQLite init failed (non-critical):', e); }
+  } catch(e) { console.warn('SQLite init failed:', e); }
   _sqlReady = true;
   _sqlReadyCallbacks.forEach(cb => cb());
   _sqlReadyCallbacks = [];
@@ -194,29 +189,6 @@ function whenSQLReady() {
   if (_sqlReady) return Promise.resolve();
   return new Promise(res => _sqlReadyCallbacks.push(res));
 }
-
-
-// Ключи, которые хранятся только локально (в localStorage) — личные данные браузера
-const _LOCAL_KEYS = new Set(['cm_session','cm_seen_orders','cm_notif_history','cm_notif_unread','cm_favorites','cm_birthday_grant']);
-
-// Оборачиваем storage: локальные ключи идут в localStorage, общие — на сервер
-const _origStorage = { ...storage };
-const _lsGet = (k) => { try { const v = localStorage.getItem('_store_'+k); return v !== null ? JSON.parse(v) : null; } catch { return null; } };
-const _lsSet = (k, v) => { try { localStorage.setItem('_store_'+k, JSON.stringify(v)); } catch {} };
-const _lsDel = (k) => { try { localStorage.removeItem('_store_'+k); } catch {} };
-
-storage.get = (k) => {
-  if (_LOCAL_KEYS.has(k)) return _lsGet(k);
-  return _origStorage.get(k);
-};
-storage.set = (k, v) => {
-  if (_LOCAL_KEYS.has(k)) { _lsSet(k, v); return; }
-  _origStorage.set(k, v);
-};
-storage.delete = (k) => {
-  if (_LOCAL_KEYS.has(k)) { _lsDel(k); return; }
-  _origStorage.delete(k);
-};
 
 // ── HISTORY ────────────────────────────────────────────────────────────────
 
@@ -518,12 +490,55 @@ function App() {
       setLoaded(true);
     });
 
-    // Flush pending writes when user closes/leaves the page
-    const handleBeforeUnload = () => {
-      storage.flush();
+    window.addEventListener('beforeunload', () => storage.flush());
+
+    // ── Polling: обновляем данные с сервера каждые 4 секунды ──
+    const _applyServerData = (data) => {
+      if (!data) return;
+      if (data.cm_users)            setUsers(data.cm_users);
+      if (data.cm_orders)           setOrders(data.cm_orders);
+      if (data.cm_products)         setCustomProducts(data.cm_products);
+      if (data.cm_transfers)        setTransfers(data.cm_transfers);
+      if (data.cm_categories)       setCustomCategories(data.cm_categories);
+      if (data.cm_faq)              setFaq(data.cm_faq);
+      if (data.cm_tasks)            setTasks(data.cm_tasks);
+      if (data.cm_task_submissions) setTaskSubmissions(data.cm_task_submissions);
+      if (data.cm_auctions)         setAuctions(data.cm_auctions);
+      if (data.cm_appearance) {
+        const ap = data.cm_appearance;
+        if (ap.currency) _globalCurrency = { ...ap.currency };
+        setAppearance(prev => ({ ...prev, ...ap,
+          socials:      { ...(prev.socials||{}),      ...(ap.socials||{}) },
+          integrations: { ...(prev.integrations||{}), ...(ap.integrations||{}) },
+          currency:     { ...(prev.currency||{}),     ...(ap.currency||{}) },
+          seo:          { ...(prev.seo||{}),           ...(ap.seo||{}) },
+        }));
+        applyTheme(ap.theme || 'default', ap);
+        if (ap.seo) applySeo(ap.seo);
+      }
     };
-    window.addEventListener('beforeunload', handleBeforeUnload);
-    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+
+    const pollInterval = setInterval(async () => {
+      try {
+        const pgConfig = typeof localStorage !== 'undefined'
+          ? (() => { try { const r = localStorage.getItem('__pg_config__'); if (!r) return null; const c = JSON.parse(r); return (c && c.enabled && c.host) ? c : null; } catch { return null; } })()
+          : null;
+        const res = await fetch('/api/store', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'getAll', pgConfig }),
+        });
+        const r = await res.json();
+        if (r.ok && r.data) {
+          // Обновляем кэш
+          Object.keys(r.data).forEach(k => { _cache[k] = r.data[k]; });
+          // Обновляем React state
+          _applyServerData(r.data);
+        }
+      } catch(e) { /* polling error — ignore */ }
+    }, 4000);
+
+    return () => clearInterval(pollInterval);
   }, []);
 
   // Получить статистику по ключам хранилища
