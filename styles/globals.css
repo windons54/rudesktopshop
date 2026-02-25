@@ -1865,3 +1865,54 @@ input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; }
   .user-card { flex-direction: column; align-items: flex-start; }
   .user-card-balance { border-left: none; border-top: 1.5px solid var(--rd-gray-border); padding-left: 0; padding-top: 12px; width: 100%; }
 }
+
+/* ======= LINEICONS INTEGRATION ======= */
+/* Inline alignment for all LNI icons */
+.lni {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  vertical-align: middle;
+  line-height: 1;
+}
+
+/* Settings sidebar tabs — larger icon, better alignment */
+.settings-tab .lni {
+  font-size: 16px;
+  flex-shrink: 0;
+}
+
+/* Stat cards — icon styling */
+.sc-icon .lni {
+  font-size: 28px;
+  color: var(--rd-red);
+}
+
+/* Buttons with icons — gap between icon and text */
+.btn .lni {
+  font-size: 14px;
+  margin-right: 4px;
+}
+
+/* btn-icon (icon-only buttons like edit/delete) */
+.btn-icon .lni,
+.btn.btn-ghost .lni {
+  font-size: 15px;
+}
+
+/* User dropdown icon cells */
+.udi-icon .lni {
+  font-size: 15px;
+}
+
+/* Inline text icons */
+.settings-section-title .lni {
+  font-size: 15px;
+  margin-right: 6px;
+}
+
+/* product-form-title icons */
+.product-form-title .lni {
+  font-size: 14px;
+  margin-right: 6px;
+}
