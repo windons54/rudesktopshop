@@ -49,18 +49,106 @@ const compressImage = (dataUrl, maxW = 800, maxH = 800, quality = 0.7) => {
 };
 
 // ══════════════════════════════════════════════════════════════
-// SQLite storage layer (sql.js + IndexedDB для персистентности)
+// Серверное хранилище — все данные хранятся на сервере (общие для всех браузеров)
+// Бэкенд: PostgreSQL (если настроен) или JSON-файл на диске
 // ══════════════════════════════════════════════════════════════
-const DB_NAME = 'merch_store_sqlite';
-const DB_STORE = 'sqlitedb';
-const DB_KEY = 'main';
 
+// Читаем pgConfig из localStorage (задаётся в Settings → База данных)
+function _getPgCfg() {
+  try {
+    const r = typeof localStorage !== 'undefined' ? localStorage.getItem('__pg_config__') : null;
+    if (!r) return null;
+    const c = JSON.parse(r);
+    return (c && c.enabled && c.host) ? c : null;
+  } catch { return null; }
+}
+
+// Внутренний кэш — синхронный слой поверх async API
+const _cache = {};
+let _cacheReady = false;
+let _readyCallbacks = [];
+
+function _notifyReady() {
+  _cacheReady = true;
+  _readyCallbacks.forEach(fn => fn());
+  _readyCallbacks = [];
+}
+
+async function _apiCall(action, body = {}) {
+  const pgConfig = _getPgCfg();
+  const res = await fetch('/api/store', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action, pgConfig, ...body }),
+  });
+  return res.json();
+}
+
+// Debounce запись отдельных ключей
+const _dirtyKeys = new Set();
+let _flushTimer = null;
+
+function _scheduleFlush(key, value) {
+  _cache[key] = value;
+  _dirtyKeys.add(key);
+  if (_flushTimer) clearTimeout(_flushTimer);
+  _flushTimer = setTimeout(_flushDirty, 300);
+}
+
+async function _flushDirty() {
+  if (!_dirtyKeys.size) return;
+  const batch = {};
+  _dirtyKeys.forEach(k => { batch[k] = _cache[k]; });
+  _dirtyKeys.clear();
+  try { await _apiCall('setMany', { data: batch }); } catch(e) { console.warn('Store flush error', e); }
+}
+
+// Инициализация — загружаем ВСЕ данные с сервера один раз
+async function initStore() {
+  try {
+    const r = await _apiCall('getAll');
+    if (r.ok && r.data) {
+      Object.assign(_cache, r.data);
+    }
+  } catch(e) { console.warn('Store init error', e); }
+  _notifyReady();
+}
+
+function whenStoreReady() {
+  if (_cacheReady) return Promise.resolve();
+  return new Promise(res => _readyCallbacks.push(res));
+}
+
+// Совместимый storage API (синхронный get из кэша, async set через сервер)
+const storage = {
+  get: (k) => {
+    return _cache.hasOwnProperty(k) ? _cache[k] : null;
+  },
+  set: (k, v) => {
+    _scheduleFlush(k, v);
+  },
+  delete: (k) => {
+    delete _cache[k];
+    _dirtyKeys.delete(k);
+    _apiCall('delete', { key: k }).catch(e => console.warn('Store delete error', e));
+  },
+  all: () => ({ ..._cache }),
+  exportDB: () => null,
+  importDB: async () => {},
+  exec: () => { console.warn('storage.exec не поддерживается в серверном режиме'); return []; },
+  run: () => { console.warn('storage.run не поддерживается в серверном режиме'); },
+  isReady: () => _cacheReady,
+  // Принудительно сбросить все pending записи (вызывается перед beforeunload)
+  flush: () => _flushDirty(),
+};
+
+// SQLite экспорт/импорт — оставляем для совместимости в UI вкладки БД
 let _sqliteDB = null;
 let _sqlReady = false;
 let _sqlReadyCallbacks = [];
-let _savePending = false;
-// Queue of writes that happened before SQLite was ready
-const _pendingWrites = {};
+const DB_NAME = 'merch_store_sqlite';
+const DB_STORE = 'sqlitedb';
+const DB_KEY = 'main';
 
 function openIDB() {
   return new Promise((res, rej) => {
@@ -70,19 +158,6 @@ function openIDB() {
     req.onerror = () => rej(req.error);
   });
 }
-
-async function loadDbFromIDB() {
-  try {
-    const idb = await openIDB();
-    return await new Promise((res) => {
-      const tx = idb.transaction(DB_STORE, 'readonly');
-      const req = tx.objectStore(DB_STORE).get(DB_KEY);
-      req.onsuccess = () => res(req.result || null);
-      req.onerror = () => res(null);
-    });
-  } catch { return null; }
-}
-
 async function saveDbToIDB() {
   if (!_sqliteDB) return;
   try {
@@ -95,119 +170,52 @@ async function saveDbToIDB() {
     });
   } catch(e) { console.error('SQLite save error', e); }
 }
-
-let _saveTimer = null;
-function scheduleSave() {
-  if (_saveTimer) clearTimeout(_saveTimer);
-  _saveTimer = setTimeout(saveDbToIDB, 400);
-}
-
 async function initSQLite() {
   if (_sqlReady) return _sqliteDB;
-  const initSqlJs = (await import("sql.js")).default;
-  const SQL = await initSqlJs({
-    locateFile: () => '/sql-wasm.wasm'
-  });
-  const existing = await loadDbFromIDB();
-  if (existing) {
-    _sqliteDB = new SQL.Database(existing);
-  } else {
-    _sqliteDB = new SQL.Database();
-  }
-  _sqliteDB.run(`
-    CREATE TABLE IF NOT EXISTS kv (
-      key TEXT PRIMARY KEY,
-      value TEXT NOT NULL
-    );
-  `);
-
-  // Flush any writes that happened before SQLite was ready
-  const pendingKeys = Object.keys(_pendingWrites);
-  if (pendingKeys.length > 0) {
-    pendingKeys.forEach(k => {
-      try {
-        _sqliteDB.run(`INSERT OR REPLACE INTO kv (key, value) VALUES (?, ?)`, [k, JSON.stringify(_pendingWrites[k])]);
-      } catch(e) { console.warn('Flush pending write error', k, e); }
+  try {
+    const initSqlJs = (await import("sql.js")).default;
+    const SQL = await initSqlJs({ locateFile: () => '/sql-wasm.wasm' });
+    const idb = await openIDB();
+    const existing = await new Promise(res => {
+      const tx = idb.transaction(DB_STORE, 'readonly');
+      const req = tx.objectStore(DB_STORE).get(DB_KEY);
+      req.onsuccess = () => res(req.result || null);
+      req.onerror = () => res(null);
     });
-    // Clear pending queue
-    pendingKeys.forEach(k => delete _pendingWrites[k]);
-    saveDbToIDB();
-  }
-
+    _sqliteDB = existing ? new SQL.Database(existing) : new SQL.Database();
+    _sqliteDB.run('CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT NOT NULL)');
+  } catch(e) { console.warn('SQLite init failed (non-critical):', e); }
   _sqlReady = true;
   _sqlReadyCallbacks.forEach(cb => cb());
   _sqlReadyCallbacks = [];
   return _sqliteDB;
 }
-
 function whenSQLReady() {
   if (_sqlReady) return Promise.resolve();
   return new Promise(res => _sqlReadyCallbacks.push(res));
 }
 
-const _cache = {};
 
-const storage = {
-  get: (k) => {
-    if (_cache.hasOwnProperty(k)) return _cache[k];
-    if (!_sqliteDB) return null;
-    try {
-      const res = _sqliteDB.exec(`SELECT value FROM kv WHERE key=?`, [k]);
-      if (res.length && res[0].values.length) {
-        const v = JSON.parse(res[0].values[0][0]);
-        _cache[k] = v;
-        return v;
-      }
-    } catch(e) { console.warn('SQLite get error', k, e); }
-    return null;
-  },
-  set: (k, v) => {
-    _cache[k] = v;
-    if (!_sqliteDB) {
-      // SQLite not ready yet — queue the write
-      _pendingWrites[k] = v;
-      return;
-    }
-    try {
-      _sqliteDB.run(`INSERT OR REPLACE INTO kv (key, value) VALUES (?, ?)`, [k, JSON.stringify(v)]);
-      scheduleSave();
-    } catch(e) { console.warn('SQLite set error', k, e); }
-  },
-  delete: (k) => {
-    delete _cache[k];
-    delete _pendingWrites[k];
-    if (!_sqliteDB) return;
-    try {
-      _sqliteDB.run(`DELETE FROM kv WHERE key=?`, [k]);
-      scheduleSave();
-    } catch(e) {}
-  },
-  all: () => {
-    if (!_sqliteDB) return {};
-    try {
-      const res = _sqliteDB.exec(`SELECT key, value FROM kv`);
-      const out = {};
-      if (res.length) res[0].values.forEach(([k, v]) => { try { out[k] = JSON.parse(v); } catch {} });
-      return out;
-    } catch { return {}; }
-  },
-  exportDB: () => _sqliteDB ? _sqliteDB.export() : null,
-  importDB: async (data) => {
-    const initSqlJs2 = (await import("sql.js")).default; const SQL = await initSqlJs2({ locateFile: () => '/sql-wasm.wasm' });
-    _sqliteDB = new SQL.Database(data);
-    Object.keys(_cache).forEach(k => delete _cache[k]);
-    await saveDbToIDB();
-  },
-  exec: (sql) => {
-    if (!_sqliteDB) throw new Error('SQLite не инициализирован');
-    return _sqliteDB.exec(sql);
-  },
-  run: (sql, params) => {
-    if (!_sqliteDB) throw new Error('SQLite не инициализирован');
-    _sqliteDB.run(sql, params);
-    scheduleSave();
-  },
-  isReady: () => _sqlReady,
+// Ключи, которые хранятся только локально (в localStorage) — личные данные браузера
+const _LOCAL_KEYS = new Set(['cm_session','cm_seen_orders','cm_notif_history','cm_notif_unread','cm_favorites','cm_birthday_grant']);
+
+// Оборачиваем storage: локальные ключи идут в localStorage, общие — на сервер
+const _origStorage = { ...storage };
+const _lsGet = (k) => { try { const v = localStorage.getItem('_store_'+k); return v !== null ? JSON.parse(v) : null; } catch { return null; } };
+const _lsSet = (k, v) => { try { localStorage.setItem('_store_'+k, JSON.stringify(v)); } catch {} };
+const _lsDel = (k) => { try { localStorage.removeItem('_store_'+k); } catch {} };
+
+storage.get = (k) => {
+  if (_LOCAL_KEYS.has(k)) return _lsGet(k);
+  return _origStorage.get(k);
+};
+storage.set = (k, v) => {
+  if (_LOCAL_KEYS.has(k)) { _lsSet(k, v); return; }
+  _origStorage.set(k, v);
+};
+storage.delete = (k) => {
+  if (_LOCAL_KEYS.has(k)) { _lsDel(k); return; }
+  _origStorage.delete(k);
 };
 
 // ── HISTORY ────────────────────────────────────────────────────────────────
@@ -398,12 +406,12 @@ function App() {
   const [page, setPage] = useState("shop");
   const [filterCat, setFilterCat] = useState("Все");
   const [orders, setOrders] = useState([]);
-  const [seenOrdersCount, setSeenOrdersCount] = useState(() => { try { return parseInt(storage.get('cm_seen_orders') || '0'); } catch { return 0; } });
+  const [seenOrdersCount, setSeenOrdersCount] = useState(() => { try { const v = typeof localStorage!=='undefined' ? localStorage.getItem('_store_cm_seen_orders') : null; return v ? parseInt(JSON.parse(v)) : 0; } catch { return 0; } });
   const markOrdersSeen = () => { setSeenOrdersCount(orders.length); storage.set('cm_seen_orders', String(orders.length)); };
-  const [notifHistory, setNotifHistory] = useState(() => { try { return storage.get('cm_notif_history') || []; } catch { return []; } });
+  const [notifHistory, setNotifHistory] = useState(() => { try { const v = typeof localStorage!=='undefined' ? localStorage.getItem('_store_cm_notif_history') : null; return v ? JSON.parse(v) : []; } catch { return []; } });
   const [bellOpen, setBellOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
-  const [notifUnread, setNotifUnread] = useState(() => { try { return parseInt(storage.get('cm_notif_unread') || '0'); } catch { return 0; } });
+  const [notifUnread, setNotifUnread] = useState(() => { try { const v = typeof localStorage!=='undefined' ? localStorage.getItem('_store_cm_notif_unread') : null; return v ? parseInt(JSON.parse(v)) : 0; } catch { return 0; } });
   const pushNotif = (msg, type = "ok") => {
     const entry = { id: Date.now(), msg, type, time: new Date().toLocaleString("ru-RU") };
     setNotifHistory(prev => {
@@ -421,7 +429,7 @@ function App() {
 
   useEffect(() => {
     // Инициализируем SQLite, затем загружаем данные
-    initSQLite().then(() => {
+    initStore().then(() => {
       const u = storage.get("cm_users");
       const o = storage.get("cm_orders");
       const cp = storage.get("cm_products");
@@ -464,8 +472,7 @@ function App() {
       storage.set("cm_users", base);
 
       // Обновляем dbConfig с реальным размером БД
-      const dbBin = storage.exportDB();
-      setDbConfig({ connected: true, dbSize: dbBin ? dbBin.length : 0, rowCounts: getSQLiteStats() });
+      setDbConfig({ connected: true, dbSize: Object.keys(storage.all()).length, rowCounts: getSQLiteStats() });
 
       setLoaded(true);
 
@@ -511,21 +518,19 @@ function App() {
       setLoaded(true);
     });
 
-    // Flush saves immediately when user closes/leaves the page
+    // Flush pending writes when user closes/leaves the page
     const handleBeforeUnload = () => {
-      if (_saveTimer) { clearTimeout(_saveTimer); _saveTimer = null; }
-      saveDbToIDB();
+      storage.flush();
     };
     window.addEventListener('beforeunload', handleBeforeUnload);
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
   }, []);
 
-  // Получить статистику по таблицам SQLite (кол-во ключей)
+  // Получить статистику по ключам хранилища
   function getSQLiteStats() {
     try {
-      const res = storage.exec("SELECT COUNT(*) as cnt FROM kv");
-      const total = res.length ? res[0].values[0][0] : 0;
       const all = storage.all();
+      const total = Object.keys(all).length;
       const counts = {};
       ['cm_users','cm_products','cm_orders','cm_transfers','cm_categories','cm_appearance'].forEach(k => {
         const v = all[k];
@@ -539,8 +544,9 @@ function App() {
   }
 
   const refreshDbConfig = () => {
-    const dbBin = storage.exportDB();
-    setDbConfig({ connected: _sqlReady, dbSize: dbBin ? dbBin.length : 0, rowCounts: getSQLiteStats() });
+    const all = storage.all();
+    const totalKeys = Object.keys(all).length;
+    setDbConfig({ connected: storage.isReady(), dbSize: totalKeys, rowCounts: getSQLiteStats() });
   };
 
   const notify = (msg, type = "ok") => { setToast({ msg, type }); setTimeout(() => setToast(null), 3200); pushNotif(msg, type); };
