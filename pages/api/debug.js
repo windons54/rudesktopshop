@@ -1,4 +1,4 @@
-// pages/api/debug.js — временная диагностика
+// pages/api/debug.js
 import fs from 'fs';
 import path from 'path';
 
@@ -7,53 +7,38 @@ export default async function handler(req, res) {
   const PG_CFG_FILE = path.join(DATA_DIR, 'pg-config.json');
   const STORE_FILE  = path.join(DATA_DIR, 'store.json');
 
-  // Серверный pg-config
-  let pgCfgFile = null;
-  try { if (fs.existsSync(PG_CFG_FILE)) pgCfgFile = JSON.parse(fs.readFileSync(PG_CFG_FILE, 'utf8')); } catch(e) { pgCfgFile = { error: e.message }; }
+  const hasEnvUrl = !!process.env.DATABASE_URL;
+  const hasEnvHost = !!process.env.PG_HOST;
 
-  // ENV
-  const envPg = {
-    PG_HOST: process.env.PG_HOST || null,
-    PG_USER: process.env.PG_USER || null,
-    PG_DATABASE: process.env.PG_DATABASE || null,
-    DATABASE_URL: process.env.DATABASE_URL ? '[SET]' : null,
-  };
+  let pgKeys = [];
+  let pgError = null;
 
-  // JSON store keys
-  let storeKeys = [];
-  try { if (fs.existsSync(STORE_FILE)) storeKeys = Object.keys(JSON.parse(fs.readFileSync(STORE_FILE, 'utf8'))); } catch {}
-
-  // Client pgConfig from request body
-  const clientCfg = req.method === 'POST' ? (req.body?.pgConfig || null) : null;
-
-  // Try PG connection if config available
-  let pgTest = null;
-  const cfg = pgCfgFile && pgCfgFile.host ? pgCfgFile : (envPg.PG_HOST ? { host: envPg.PG_HOST } : null);
-  if (cfg || clientCfg) {
-    try {
-      const activeCfg = cfg || clientCfg;
-      const { Pool } = await import('pg');
-      const pool = new Pool({
-        host: activeCfg.host, port: parseInt(activeCfg.port)||5432,
-        database: activeCfg.database, user: activeCfg.user, password: activeCfg.password,
-        ssl: activeCfg.ssl ? { rejectUnauthorized: false } : false,
-        connectionTimeoutMillis: 3000, max: 1,
-      });
-      const r = await pool.query('SELECT COUNT(*) as cnt FROM kv');
-      pgTest = { ok: true, rows: parseInt(r.rows[0].cnt) };
+  // Connect using DATABASE_URL (priority) or file config
+  try {
+    const { Pool } = await import('pg');
+    let pool;
+    if (process.env.DATABASE_URL) {
+      pool = new Pool({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false }, max: 1, connectionTimeoutMillis: 5000 });
+    } else if (process.env.PG_HOST) {
+      pool = new Pool({ host: process.env.PG_HOST, port: parseInt(process.env.PG_PORT)||5432, database: process.env.PG_DATABASE||'postgres', user: process.env.PG_USER, password: process.env.PG_PASSWORD, ssl: process.env.PG_SSL==='true'?{rejectUnauthorized:false}:false, max: 1, connectionTimeoutMillis: 5000 });
+    } else if (fs.existsSync(PG_CFG_FILE)) {
+      const cfg = JSON.parse(fs.readFileSync(PG_CFG_FILE, 'utf8'));
+      pool = new Pool({ host: cfg.host, port: parseInt(cfg.port)||5432, database: cfg.database, user: cfg.user, password: cfg.password, ssl: cfg.ssl?{rejectUnauthorized:false}:false, max: 1, connectionTimeoutMillis: 5000 });
+    }
+    if (pool) {
+      const r = await pool.query('SELECT key, LEFT(value::text, 80) as val_preview FROM kv ORDER BY key');
+      pgKeys = r.rows.map(row => ({ key: row.key, preview: row.val_preview }));
       await pool.end();
-    } catch(e) { pgTest = { ok: false, error: e.message }; }
-  }
+    }
+  } catch(e) { pgError = e.message; }
+
+  let jsonKeys = [];
+  try { if (fs.existsSync(STORE_FILE)) jsonKeys = Object.keys(JSON.parse(fs.readFileSync(STORE_FILE, 'utf8'))); } catch {}
 
   return res.json({
-    serverPgCfgFile: pgCfgFile ? { host: pgCfgFile.host, database: pgCfgFile.database, user: pgCfgFile.user, enabled: pgCfgFile.enabled, hasPassword: !!pgCfgFile.password } : null,
-    envPg,
-    clientCfgReceived: clientCfg ? { host: clientCfg.host, enabled: clientCfg.enabled } : null,
-    jsonStoreKeys: storeKeys,
-    pgConnectionTest: pgTest,
+    hasEnvUrl, hasEnvHost, hasCfgFile: fs.existsSync(PG_CFG_FILE),
+    pgKeys, pgError,
+    jsonKeys,
     cwd: process.cwd(),
-    dataDir: DATA_DIR,
-    pgCfgFileExists: fs.existsSync(PG_CFG_FILE),
-    storeFileExists: fs.existsSync(STORE_FILE),
   });
 }

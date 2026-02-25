@@ -4100,8 +4100,7 @@ function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbC
   const runDiag = async () => {
     setDebugLoading(true); setDebugInfo(null);
     try {
-      const r = await fetch('/api/store', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'pg_diag' }) });
+      const r = await fetch('/api/debug', { method: 'GET' });
       setDebugInfo(await r.json());
     } catch(e) { setDebugInfo({ error: e.message }); }
     setDebugLoading(false);
@@ -5247,15 +5246,18 @@ function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbC
                     {debugInfo && (
                       <div style={{marginTop:"12px",background:"#0f172a",color:"#e2e8f0",borderRadius:"10px",padding:"14px 16px",fontSize:"12px",fontFamily:"monospace",lineHeight:1.8,overflowX:"auto"}}>
                         <div style={{color:"#94a3b8",marginBottom:"8px",fontWeight:700}}>── РЕЗУЛЬТАТ ──</div>
-                        <div><span style={{color:"#7dd3fc"}}>Источник конфига:</span> {debugInfo.cfgSource==="env" ? "✅ ENV переменные" : debugInfo.cfgSource==="file" ? "✅ файл pg-config.json" : "❌ конфиг не найден"}</div>
-                        <div><span style={{color:"#7dd3fc"}}>pg-config.json существует:</span> {debugInfo.hasPgCfgFile ? "✅ да" : "❌ нет"}</div>
-                        <div><span style={{color:"#7dd3fc"}}>ENV PG_HOST задан:</span> {debugInfo.hasEnvPg ? "✅ да" : "❌ нет"}</div>
-                        <div><span style={{color:"#7dd3fc"}}>ENV DATABASE_URL задан:</span> {debugInfo.hasEnvDbUrl ? "✅ да" : "❌ нет"}</div>
-                        <div><span style={{color:"#7dd3fc"}}>Хост / БД:</span> {debugInfo.cfgHost ? `${debugInfo.cfgHost} / ${debugInfo.cfgDb}` : "—"}</div>
-                        <div><span style={{color:"#7dd3fc"}}>Подключение к PG:</span> {debugInfo.pgTest ? (debugInfo.pgTest.ok ? `✅ ок, строк в kv: ${debugInfo.pgTest.rows}` : `❌ ${debugInfo.pgTest.error}`) : "⚠️ конфиг не найден"}</div>
-                        <div><span style={{color:"#7dd3fc"}}>JSON store ключи:</span> {debugInfo.jsonKeys?.length ? debugInfo.jsonKeys.join(", ") : "пусто"}</div>
-                        <div><span style={{color:"#7dd3fc"}}>Рабочая папка:</span> {debugInfo.cwd}</div>
-                        {debugInfo.error && <div style={{color:"#f87171",marginTop:"6px"}}>❌ Ошибка: {debugInfo.error}</div>}
+                        <div><span style={{color:"#7dd3fc"}}>ENV DATABASE_URL:</span> {debugInfo.hasEnvUrl ? "✅ задан" : "❌ нет"}</div>
+                        <div><span style={{color:"#7dd3fc"}}>ENV PG_HOST:</span> {debugInfo.hasEnvHost ? "✅ задан" : "❌ нет"}</div>
+                        <div><span style={{color:"#7dd3fc"}}>pg-config.json:</span> {debugInfo.hasCfgFile ? "✅ есть" : "❌ нет"}</div>
+                        <div><span style={{color:"#7dd3fc"}}>Ошибка подключения:</span> {debugInfo.pgError || "нет"}</div>
+                        <div style={{marginTop:"6px"}}><span style={{color:"#7dd3fc"}}>Ключи в PG ({(debugInfo.pgKeys||[]).length} шт):</span></div>
+                        {(debugInfo.pgKeys||[]).map(({key, preview}) => (
+                          <div key={key} style={{paddingLeft:"12px",color:"#a3e635"}}>• {key}: <span style={{color:"#94a3b8",fontSize:"11px"}}>{preview}</span></div>
+                        ))}
+                        {!(debugInfo.pgKeys||[]).length && <div style={{paddingLeft:"12px",color:"#f87171"}}>— пусто</div>}
+                        <div style={{marginTop:"6px"}}><span style={{color:"#7dd3fc"}}>Ключи в JSON:</span> {(debugInfo.jsonKeys||[]).join(", ") || "пусто"}</div>
+                        <div><span style={{color:"#7dd3fc"}}>Папка:</span> {debugInfo.cwd}</div>
+                        {debugInfo.error && <div style={{color:"#f87171",marginTop:"6px"}}>❌ {debugInfo.error}</div>}
                       </div>
                     )}
                   </div>

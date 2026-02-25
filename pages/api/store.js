@@ -81,10 +81,24 @@ export default async function handler(req, res) {
   if (action === 'pg_diag') {
     const pool = await getPool();
     const cfg = readPgCfg();
+    const source = process.env.PG_HOST ? 'env_host' : process.env.DATABASE_URL ? 'env_url' : fs.existsSync(PG_CFG_FILE) ? 'file' : 'none';
     let pgTest = null;
-    if (pool) { try { const r = await pool.query('SELECT COUNT(*) as c FROM kv'); pgTest = { ok:true, rows:parseInt(r.rows[0].c) }; } catch(e) { pgTest={ok:false,error:e.message}; } }
+    let pgKeys = [];
+    if (pool) {
+      try {
+        const cnt = await pool.query('SELECT COUNT(*) as c FROM kv');
+        const keys = await pool.query('SELECT key FROM kv ORDER BY key');
+        pgTest = { ok:true, rows:parseInt(cnt.rows[0].c) };
+        pgKeys = keys.rows.map(r => r.key);
+      } catch(e) { pgTest={ok:false,error:e.message}; }
+    }
     const jsonKeys = Object.keys(readJSON());
-    return res.json({ ok:true, hasPgCfgFile: fs.existsSync(PG_CFG_FILE), hasEnvPg: !!process.env.PG_HOST, hasEnvDbUrl: !!process.env.DATABASE_URL, cfgSource: process.env.PG_HOST?'env':fs.existsSync(PG_CFG_FILE)?'file':'none', cfgHost: cfg?.host||null, cfgDb: cfg?.database||null, pgTest, jsonKeys, cwd:process.cwd() });
+    return res.json({ ok:true,
+      usingPg: !!pool, source, hasPgCfgFile: fs.existsSync(PG_CFG_FILE),
+      hasEnvPg: !!process.env.PG_HOST, hasEnvDbUrl: !!process.env.DATABASE_URL,
+      cfgHost: cfg?.host || (cfg?.connectionString ? '(connectionString)' : null),
+      pgTest, pgKeys, jsonKeys, cwd:process.cwd()
+    });
   }
 
   // --- data operations ---
