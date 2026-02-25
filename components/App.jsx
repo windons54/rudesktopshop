@@ -4108,6 +4108,16 @@ function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbC
 
   // PostgreSQL state
   const [pgForm, setPgForm] = useState(() => pgConfig || { host: "", port: "5432", database: "", user: "", password: "", ssl: false, enabled: false });
+  // Sync pgForm when pgConfig loads asynchronously from server
+  useEffect(() => {
+    if (pgConfig && pgConfig.host) {
+      setPgForm(prev => {
+        // Only update if form is still empty (user hasn't started editing)
+        if (!prev.host) return { ...pgConfig };
+        return prev;
+      });
+    }
+  }, [pgConfig]);
   const [pgTesting, setPgTesting] = useState(false);
   const [pgTestResult, setPgTestResult] = useState(null);
   const [pgMigrating, setPgMigrating] = useState(false);
@@ -4141,6 +4151,7 @@ function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbC
       notify("Заполните хост, базу данных и пользователя", "err"); return;
     }
     const cfg = { ...pgForm };
+    delete cfg._passwordSaved; // remove UI meta-flag before saving
     const r = await fetch('/api/store', { method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action: 'pg_save', config: cfg }) });
     const result = await r.json();
@@ -4155,7 +4166,8 @@ function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbC
       notify("Сначала заполните настройки", "err"); return;
     }
     setPgTesting(true);
-    const cfg = { ...pgForm, enabled: true };
+    const { _passwordSaved, ...pgFormClean } = pgForm;
+    const cfg = { ...pgFormClean, enabled: true };
     try {
       const r = await fetch('/api/store', { method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'pg_test', config: cfg }) });
@@ -5139,7 +5151,7 @@ function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbC
                       </div>
                       <div>
                         <div style={{fontSize:"12px",fontWeight:700,marginBottom:"4px",color:"var(--rd-gray-text)"}}>Пароль</div>
-                        <input className="form-input" type="password" placeholder="••••••••" value={pgForm.password} onChange={e => setPgForm(f => ({...f,password:e.target.value}))} />
+                        <input className="form-input" type="password" placeholder={pgForm._passwordSaved && !pgForm.password ? "(пароль сохранён)" : "••••••••"} value={pgForm.password || ""} onChange={e => setPgForm(f => ({...f,password:e.target.value}))} />
                       </div>
                     </div>
                     <div style={{marginBottom:"16px",display:"flex",alignItems:"center",gap:"8px"}}>

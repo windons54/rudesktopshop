@@ -55,7 +55,17 @@ export default async function handler(req, res) {
 
   // --- pg config management ---
   if (action === 'pg_save') {
-    writePgCfg(config || null);
+    let cfgToSave = config || null;
+    // If saving but password is empty, preserve existing password from file
+    if (cfgToSave && !cfgToSave.password) {
+      try {
+        const existing = readPgCfg();
+        if (existing && existing.password) {
+          cfgToSave = { ...cfgToSave, password: existing.password };
+        }
+      } catch {}
+    }
+    writePgCfg(cfgToSave);
     if (_pool) { try { await _pool.end(); } catch {} _pool = null; _poolKey = null; }
     return res.json({ ok:true });
   }
@@ -63,6 +73,7 @@ export default async function handler(req, res) {
     const cfg = readPgCfg();
     if (!cfg) return res.json({ ok:true, config:null, source:'none' });
     const { password, ...safe } = cfg;
+    safe._passwordSaved = !!(password);
     return res.json({ ok:true, config:safe, source: process.env.PG_HOST?'env':'file' });
   }
   if (action === 'pg_test') {
