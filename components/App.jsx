@@ -663,7 +663,8 @@ function App() {
     const newUsers = { ...users, [currentUser]: { ...user, balance: user.balance - cartTotal } };
     const order = { id: Date.now(), user: currentUser, items: [...cart], total: cartTotal, date: new Date().toLocaleString("ru-RU"), status: "Обрабатывается" };
     // Deduct stock per size
-    var updProds = products.map(function(p) {
+    var currentProducts = customProducts !== null ? customProducts : PRODUCTS;
+    var updProds = currentProducts.map(function(p) {
       var item = cart.find(function(c) { return c.id === p.id && c.size; });
       if (item && p.sizeStock && p.sizeStock[item.size] !== undefined) {
         var ss = Object.assign({}, p.sizeStock);
