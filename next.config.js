@@ -35,6 +35,7 @@ copySqlWasm();
 
 const nextConfig = {
   reactStrictMode: false,
+  output: 'standalone',
 
   async headers() {
     return [
