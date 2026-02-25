@@ -8,7 +8,7 @@ import { Chip, Card, CardBody } from '@heroui/react';
 function LniIcon({ name, size, color, className = "", style = {} }) {
   return (
     <i
-      className={\`lni lni-\${name} \${className}\`}
+      className={`lni lni-${name} ${className}`}
       style={{ fontSize: size || "inherit", color: color || "inherit", lineHeight: 1, ...style }}
     />
   );
