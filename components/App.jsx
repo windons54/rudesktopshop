@@ -2712,6 +2712,11 @@ function ProductCard({ product, addToCart, onOpen, favorites, toggleFavorite }) 
           <button className="btn btn-primary btn-sm" style={{flex:1}} onClick={(e) => { e.stopPropagation(); onOpen(product); }}>
             Подробнее
           </button>
+          {addToCart && (
+            <button className="btn btn-primary btn-sm" style={{background:"var(--rd-red)",border:"none",color:"#fff",flexShrink:0,padding:"6px 12px"}} onClick={(e) => { e.stopPropagation(); addToCart(product); }}>
+              🛒 Купить
+            </button>
+          )}
         </div>
       </div>
     </div>
@@ -6658,25 +6663,97 @@ function VoteCountdown({ endsAt }) {
   );
 }
 
+// PollFields is defined OUTSIDE VotingAdminTab to prevent cursor loss on re-render
+function PollFields({ f, onUpdate, onAddOption, onRemoveOption, onImgChange }) {
+  const iS = { width: "100%", padding: "10px 14px", border: "1.5px solid var(--rd-gray-border)", borderRadius: "10px", fontSize: "14px", boxSizing: "border-box", background: "#fff" };
+  const lS = { fontSize: "12px", fontWeight: 700, color: "var(--rd-gray-text)", marginBottom: "6px", display: "block" };
+  return (
+    <div style={{ background: "var(--rd-gray-bg)", borderRadius: "var(--rd-radius-sm)", padding: "20px", marginBottom: "16px", border: "1.5px solid var(--rd-gray-border)" }}>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+        <div style={{ gridColumn: "1/-1" }}>
+          <label style={lS}>Заголовок голосования</label>
+          <input style={iS} value={f.title} onChange={e => onUpdate("title", e.target.value)} placeholder="Лучший проект квартала" />
+        </div>
+        <div style={{ gridColumn: "1/-1" }}>
+          <label style={lS}>Описание голосования</label>
+          <textarea style={{ ...iS, minHeight: "80px", resize: "vertical" }} value={f.description || ""} onChange={e => onUpdate("description", e.target.value)} placeholder="Подробное описание голосования..." />
+        </div>
+        <div>
+          <label style={lS}>Голосов у пользователя</label>
+          <input type="number" min="1" style={iS} value={f.maxVotes} onChange={e => onUpdate("maxVotes", e.target.value)} />
+        </div>
+        <div>
+          <label style={lS}>Победителей (вариантов)</label>
+          <input type="number" min="1" style={iS} value={f.winners} onChange={e => onUpdate("winners", e.target.value)} />
+        </div>
+        <div>
+          <label style={lS}>Монет победителям</label>
+          <input type="number" min="0" style={iS} value={f.prize} onChange={e => onUpdate("prize", e.target.value)} />
+        </div>
+        <div>
+          <label style={lS}>Дата завершения</label>
+          <input type="datetime-local" style={iS} value={f.endsAt} onChange={e => onUpdate("endsAt", e.target.value)} />
+        </div>
+        <div style={{ gridColumn: "1/-1" }}>
+          <label style={lS}>Варианты</label>
+          {f.options.map((opt, idx) => (
+            <div key={idx} style={{ display: "flex", gap: "8px", alignItems: "center", marginBottom: "8px" }}>
+              <input
+                style={{ ...iS, flex: 1 }}
+                value={opt.text}
+                onChange={e => { const opts = [...f.options]; opts[idx] = { ...opts[idx], text: e.target.value }; onUpdate("options", opts); }}
+                placeholder={`Вариант ${idx + 1}`}
+              />
+              {opt.image ? (
+                <div style={{ position: "relative", flexShrink: 0 }}>
+                  <img src={opt.image} alt="" style={{ width: "44px", height: "44px", objectFit: "cover", borderRadius: "8px" }} />
+                  <button onClick={() => { const opts = [...f.options]; opts[idx] = { ...opts[idx], image: "" }; onUpdate("options", opts); }} style={{ position: "absolute", top: "-6px", right: "-6px", background: "var(--rd-red)", border: "none", borderRadius: "50%", width: "18px", height: "18px", color: "#fff", cursor: "pointer", fontSize: "11px", display: "flex", alignItems: "center", justifyContent: "center" }}>✕</button>
+                </div>
+              ) : (
+                <label style={{ width: "44px", height: "44px", border: "1.5px dashed var(--rd-gray-border)", borderRadius: "8px", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "16px", flexShrink: 0 }}>
+                  🖼️<input type="file" accept="image/*" style={{ display: "none" }} onChange={e => { onImgChange(idx, e.target.files[0]); e.target.value = ""; }} />
+                </label>
+              )}
+              {f.options.length > 2 && <button onClick={() => onRemoveOption(idx)} style={{ background: "#fff0f0", border: "1.5px solid #fecaca", borderRadius: "8px", padding: "6px 10px", cursor: "pointer", color: "var(--rd-red)", fontWeight: 700, flexShrink: 0 }}>✕</button>}
+            </div>
+          ))}
+          <button onClick={onAddOption} style={{ background: "var(--rd-gray-bg)", border: "1.5px dashed var(--rd-gray-border)", borderRadius: "8px", padding: "8px 16px", cursor: "pointer", fontSize: "13px", fontWeight: 700, width: "100%" }}>+ Добавить вариант</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function VotingAdminTab({ polls, savePolls, notify, users, saveUsers }) {
   const list = polls || [];
-  const emptyForm = { title: "", options: [{ text: "", image: "" }, { text: "", image: "" }], maxVotes: 1, winners: 1, prize: 100, endsAt: "" };
+  const emptyForm = { title: "", description: "", options: [{ text: "", image: "" }, { text: "", image: "" }], maxVotes: 1, winners: 1, prize: 100, endsAt: "" };
   const [form, setForm] = useState(emptyForm);
   const [editingId, setEditingId] = useState(null);
   const [editForm, setEditForm] = useState(null);
 
-  const setOptImg = async (setter, idx, file) => {
+  const handleImgChange = async (setter, idx, file) => {
     if (!file) return;
     const r = new FileReader();
     r.onload = async ev => { const c = await compressImage(ev.target.result, 800, 600, 0.82); setter(f => { const opts = [...f.options]; opts[idx] = { ...opts[idx], image: c }; return { ...f, options: opts }; }); };
     r.readAsDataURL(file);
   };
 
+  // Stable callbacks via useCallback to prevent focus loss on re-render
+  const formUpdate = React.useCallback((key, val) => setForm(f => ({ ...f, [key]: val })), []);
+  const formAddOpt = React.useCallback(() => setForm(f => ({ ...f, options: [...f.options, { text: "", image: "" }] })), []);
+  const formRemOpt = React.useCallback((idx) => setForm(f => ({ ...f, options: f.options.filter((_, i) => i !== idx) })), []);
+  const formImgChg = React.useCallback((idx, file) => handleImgChange(setForm, idx, file), []);
+
+  const editUpdate = React.useCallback((key, val) => setEditForm(f => f ? ({ ...f, [key]: val }) : f), []);
+  const editAddOpt = React.useCallback(() => setEditForm(f => f ? ({ ...f, options: [...f.options, { text: "", image: "" }] }) : f), []);
+  const editRemOpt = React.useCallback((idx) => setEditForm(f => f ? ({ ...f, options: f.options.filter((_, i) => i !== idx) }) : f), []);
+  const editImgChg = React.useCallback((idx, file) => handleImgChange(setEditForm, idx, file), []);
+
   const createPoll = () => {
     if (!form.title.trim()) { notify("Введите заголовок", "err"); return; }
     if (form.options.some(o => !o.text.trim())) { notify("Заполните все варианты", "err"); return; }
     if (!form.endsAt) { notify("Укажите дату завершения", "err"); return; }
-    const newPoll = { id: Date.now(), title: form.title.trim(), options: form.options.map((o, i) => ({ ...o, id: i, votes: [] })), maxVotes: parseInt(form.maxVotes) || 1, winners: parseInt(form.winners) || 1, prize: parseInt(form.prize) || 0, endsAt: new Date(form.endsAt).getTime(), status: "active", winnersAwarded: false, createdAt: Date.now() };
+    const newPoll = { id: Date.now(), title: form.title.trim(), description: form.description || "", options: form.options.map((o, i) => ({ ...o, id: i, votes: [] })), maxVotes: parseInt(form.maxVotes) || 1, winners: parseInt(form.winners) || 1, prize: parseInt(form.prize) || 0, endsAt: new Date(form.endsAt).getTime(), status: "active", winnersAwarded: false, createdAt: Date.now() };
     savePolls([...list, newPoll]);
     setForm(emptyForm);
     notify("Голосование создано ✓");
@@ -6684,7 +6761,7 @@ function VotingAdminTab({ polls, savePolls, notify, users, saveUsers }) {
 
   const saveEdit = () => {
     if (!editForm || !editForm.title.trim()) { notify("Введите заголовок", "err"); return; }
-    const updated = list.map(p => p.id === editingId ? { ...p, title: editForm.title, options: editForm.options.map((o, i) => ({ ...o, id: i, votes: p.options[i]?.votes || [] })), maxVotes: parseInt(editForm.maxVotes), winners: parseInt(editForm.winners), prize: parseInt(editForm.prize), endsAt: new Date(editForm.endsAt).getTime() } : p);
+    const updated = list.map(p => p.id === editingId ? { ...p, title: editForm.title, description: editForm.description || "", options: editForm.options.map((o, i) => ({ ...o, id: i, votes: p.options[i]?.votes || [] })), maxVotes: parseInt(editForm.maxVotes), winners: parseInt(editForm.winners), prize: parseInt(editForm.prize), endsAt: new Date(editForm.endsAt).getTime() } : p);
     savePolls(updated); setEditingId(null); setEditForm(null); notify("Голосование обновлено ✓");
   };
 
@@ -6707,60 +6784,17 @@ function VotingAdminTab({ polls, savePolls, notify, users, saveUsers }) {
   };
 
   const now = Date.now();
-  const iS = { width: "100%", padding: "10px 14px", border: "1.5px solid var(--rd-gray-border)", borderRadius: "10px", fontSize: "14px", boxSizing: "border-box", background: "#fff" };
-  const lS = { fontSize: "12px", fontWeight: 700, color: "var(--rd-gray-text)", marginBottom: "6px", display: "block" };
-
-  const Fields = ({ f, onUpdate }) => (
-    <div style={{ background: "var(--rd-gray-bg)", borderRadius: "var(--rd-radius-sm)", padding: "20px", marginBottom: "16px", border: "1.5px solid var(--rd-gray-border)" }}>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
-        <div style={{ gridColumn: "1/-1" }}>
-          <label style={lS}>Заголовок голосования</label>
-          <input style={iS} value={f.title} onChange={e => onUpdate({ title: e.target.value })} placeholder="Лучший проект квартала" />
-        </div>
-        <div>
-          <label style={lS}>Голосов у пользователя</label>
-          <input type="number" min="1" style={iS} value={f.maxVotes} onChange={e => onUpdate({ maxVotes: e.target.value })} />
-        </div>
-        <div>
-          <label style={lS}>Победителей (вариантов)</label>
-          <input type="number" min="1" style={iS} value={f.winners} onChange={e => onUpdate({ winners: e.target.value })} />
-        </div>
-        <div>
-          <label style={lS}>Монет победителям</label>
-          <input type="number" min="0" style={iS} value={f.prize} onChange={e => onUpdate({ prize: e.target.value })} />
-        </div>
-        <div>
-          <label style={lS}>Дата завершения</label>
-          <input type="datetime-local" style={iS} value={f.endsAt} onChange={e => onUpdate({ endsAt: e.target.value })} />
-        </div>
-        <div style={{ gridColumn: "1/-1" }}>
-          <label style={lS}>Варианты</label>
-          {f.options.map((opt, idx) => (
-            <div key={idx} style={{ display: "flex", gap: "8px", alignItems: "center", marginBottom: "8px" }}>
-              <input style={{ ...iS, flex: 1 }} value={opt.text} onChange={e => { const opts = [...f.options]; opts[idx] = { ...opts[idx], text: e.target.value }; onUpdate({ options: opts }); }} placeholder={`Вариант ${idx + 1}`} />
-              {opt.image ? (
-                <div style={{ position: "relative", flexShrink: 0 }}>
-                  <img src={opt.image} alt="" style={{ width: "44px", height: "44px", objectFit: "cover", borderRadius: "8px" }} />
-                  <button onClick={() => { const opts = [...f.options]; opts[idx] = { ...opts[idx], image: "" }; onUpdate({ options: opts }); }} style={{ position: "absolute", top: "-6px", right: "-6px", background: "var(--rd-red)", border: "none", borderRadius: "50%", width: "18px", height: "18px", color: "#fff", cursor: "pointer", fontSize: "11px", display: "flex", alignItems: "center", justifyContent: "center" }}>✕</button>
-                </div>
-              ) : (
-                <label style={{ width: "44px", height: "44px", border: "1.5px dashed var(--rd-gray-border)", borderRadius: "8px", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "16px", flexShrink: 0 }}>
-                  🖼️<input type="file" accept="image/*" style={{ display: "none" }} onChange={e => { setOptImg(f === form ? setForm : setEditForm, idx, e.target.files[0]); e.target.value = ""; }} />
-                </label>
-              )}
-              {f.options.length > 2 && <button onClick={() => onUpdate({ options: f.options.filter((_, i) => i !== idx) })} style={{ background: "#fff0f0", border: "1.5px solid #fecaca", borderRadius: "8px", padding: "6px 10px", cursor: "pointer", color: "var(--rd-red)", fontWeight: 700, flexShrink: 0 }}>✕</button>}
-            </div>
-          ))}
-          <button onClick={() => onUpdate({ options: [...f.options, { text: "", image: "" }] })} style={{ background: "var(--rd-gray-bg)", border: "1.5px dashed var(--rd-gray-border)", borderRadius: "8px", padding: "8px 16px", cursor: "pointer", fontSize: "13px", fontWeight: 700, width: "100%" }}>+ Добавить вариант</button>
-        </div>
-      </div>
-    </div>
-  );
 
   return (
     <div>
       <div style={{ fontWeight: 700, fontSize: "15px", marginBottom: "16px" }}>➕ Создать голосование</div>
-      <Fields f={form} onUpdate={upd => setForm(f => ({ ...f, ...upd }))} />
+      <PollFields
+        f={form}
+        onUpdate={formUpdate}
+        onAddOption={formAddOpt}
+        onRemoveOption={formRemOpt}
+        onImgChange={formImgChg}
+      />
       <button onClick={createPoll} style={{ marginBottom: "28px", background: "var(--rd-red)", color: "#fff", border: "none", borderRadius: "10px", padding: "12px 24px", fontWeight: 700, cursor: "pointer", fontSize: "14px" }}>🗳️ Создать голосование</button>
 
       {list.length === 0 && <div style={{ color: "var(--rd-gray-text)", textAlign: "center", padding: "20px", fontSize: "14px" }}>Голосований пока нет</div>}
@@ -6768,7 +6802,13 @@ function VotingAdminTab({ polls, savePolls, notify, users, saveUsers }) {
         <div key={poll.id} style={{ border: "1.5px solid var(--rd-gray-border)", borderRadius: "var(--rd-radius-sm)", padding: "16px", marginBottom: "12px", background: "#fff" }}>
           {editingId === poll.id && editForm ? (
             <div>
-              <Fields f={editForm} onUpdate={upd => setEditForm(f => ({ ...f, ...upd }))} />
+              <PollFields
+                f={editForm}
+                onUpdate={editUpdate}
+                onAddOption={editAddOpt}
+                onRemoveOption={editRemOpt}
+                onImgChange={editImgChg}
+              />
               <div style={{ display: "flex", gap: "8px" }}>
                 <button onClick={saveEdit} style={{ background: "var(--rd-red)", color: "#fff", border: "none", borderRadius: "8px", padding: "10px 20px", fontWeight: 700, cursor: "pointer" }}>Сохранить</button>
                 <button onClick={() => { setEditingId(null); setEditForm(null); }} style={{ background: "var(--rd-gray-bg)", border: "1.5px solid var(--rd-gray-border)", borderRadius: "8px", padding: "10px 20px", fontWeight: 700, cursor: "pointer" }}>Отмена</button>
@@ -6779,6 +6819,7 @@ function VotingAdminTab({ polls, savePolls, notify, users, saveUsers }) {
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "10px" }}>
                 <div style={{ flex: 1 }}>
                   <div style={{ fontWeight: 700, fontSize: "15px" }}>{poll.title}</div>
+                  {poll.description && <div style={{ fontSize: "13px", color: "var(--rd-gray-text)", marginTop: "2px" }}>{poll.description}</div>}
                   <div style={{ fontSize: "12px", color: "var(--rd-gray-text)", marginTop: "4px" }}>📅 {new Date(poll.endsAt).toLocaleString("ru-RU")} · {poll.maxVotes} голос(а) · 🏆 {poll.winners} победителей · 💰 {poll.prize} монет</div>
                   <div style={{ fontSize: "12px", color: poll.status === "active" ? "#22c55e" : "var(--rd-gray-text)", fontWeight: 700, marginTop: "4px" }}>{poll.status === "active" ? "✅ Активно" : "🏁 Завершено"}</div>
                 </div>
@@ -6787,7 +6828,7 @@ function VotingAdminTab({ polls, savePolls, notify, users, saveUsers }) {
                     <button onClick={() => awardWinners(poll)} style={{ background: "var(--rd-red)", color: "#fff", border: "none", borderRadius: "8px", padding: "8px 14px", fontWeight: 700, cursor: "pointer", fontSize: "13px" }}>🏆 Наградить</button>
                   )}
                   {poll.status === "active" && (
-                    <button onClick={() => { const endsAtLocal = new Date(poll.endsAt - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16); setEditingId(poll.id); setEditForm({ title: poll.title, options: poll.options.map(o => ({ text: o.text, image: o.image || "" })), maxVotes: String(poll.maxVotes), winners: String(poll.winners), prize: String(poll.prize), endsAt: endsAtLocal }); }} style={{ background: "var(--rd-gray-bg)", border: "1.5px solid var(--rd-gray-border)", borderRadius: "8px", padding: "8px 12px", cursor: "pointer", fontSize: "13px", fontWeight: 700 }}>✏️</button>
+                    <button onClick={() => { const endsAtLocal = new Date(poll.endsAt - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16); setEditingId(poll.id); setEditForm({ title: poll.title, description: poll.description || "", options: poll.options.map(o => ({ text: o.text, image: o.image || "" })), maxVotes: String(poll.maxVotes), winners: String(poll.winners), prize: String(poll.prize), endsAt: endsAtLocal }); }} style={{ background: "var(--rd-gray-bg)", border: "1.5px solid var(--rd-gray-border)", borderRadius: "8px", padding: "8px 12px", cursor: "pointer", fontSize: "13px", fontWeight: 700 }}>✏️</button>
                   )}
                   <button onClick={() => deletePoll(poll.id)} style={{ background: "#fff0f0", border: "1.5px solid #fecaca", borderRadius: "8px", padding: "8px 12px", cursor: "pointer", fontSize: "13px", color: "var(--rd-red)", fontWeight: 700 }}>🗑️</button>
                 </div>
@@ -6865,23 +6906,31 @@ function VotingPage({ polls, savePolls, currentUser, users, saveUsers, notify, c
               <div key={poll.id} style={{ background: "#fff", border: "1.5px solid var(--rd-gray-border)", borderRadius: "var(--rd-radius)", padding: "24px", marginBottom: "20px", boxShadow: "var(--rd-shadow)" }}>
                 {/* Header */}
                 <div style={{ marginBottom: "16px" }}>
-                  <div style={{ fontWeight: 800, fontSize: "20px", marginBottom: "8px" }}>{poll.title}</div>
-                  <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", alignItems: "center" }}>
+                  <div style={{ fontWeight: 800, fontSize: "20px", marginBottom: poll.description ? "6px" : "8px" }}>{poll.title}</div>
+                  {poll.description && <div style={{ fontSize: "14px", color: "var(--rd-gray-text)", marginBottom: "10px", lineHeight: 1.5 }}>{poll.description}</div>}
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", alignItems: "stretch" }}>
                     {/* Prize badge */}
-                    <div style={{ display: "inline-flex", alignItems: "center", gap: "6px", background: "linear-gradient(135deg, var(--rd-red-light), rgba(199,22,24,0.04))", border: "1.5px solid rgba(199,22,24,0.25)", borderRadius: "20px", padding: "6px 14px" }}>
+                    <div style={{ display: "inline-flex", alignItems: "center", gap: "6px", background: "linear-gradient(135deg, var(--rd-red-light), rgba(199,22,24,0.04))", border: "1.5px solid rgba(199,22,24,0.25)", borderRadius: "8px", padding: "8px 14px" }}>
                       <span style={{ fontSize: "16px" }}>🪙</span>
-                      <span style={{ fontWeight: 900, fontSize: "18px", color: "var(--rd-red)" }}>{poll.prize}</span>
-                      <span style={{ fontSize: "12px", color: "var(--rd-red)", fontWeight: 600 }}>монет победителям</span>
+                      <div>
+                        <div style={{ fontWeight: 900, fontSize: "18px", color: "var(--rd-red)", lineHeight: 1 }}>{poll.prize}</div>
+                        <div style={{ fontSize: "11px", color: "var(--rd-red)", fontWeight: 600, marginTop: "2px" }}>монет победителям</div>
+                      </div>
                     </div>
                     {/* Votes badge */}
-                    <div style={{ display: "inline-flex", alignItems: "center", gap: "6px", background: votesLeft > 0 ? "rgba(34,197,94,0.08)" : "var(--rd-gray-bg)", border: `1.5px solid ${votesLeft > 0 ? "rgba(34,197,94,0.3)" : "var(--rd-gray-border)"}`, borderRadius: "20px", padding: "6px 14px" }}>
+                    <div style={{ display: "inline-flex", alignItems: "center", gap: "6px", background: votesLeft > 0 ? "rgba(34,197,94,0.08)" : "var(--rd-gray-bg)", border: `1.5px solid ${votesLeft > 0 ? "rgba(34,197,94,0.3)" : "var(--rd-gray-border)"}`, borderRadius: "8px", padding: "8px 14px" }}>
                       <span style={{ fontSize: "16px" }}>🗳️</span>
-                      <span style={{ fontWeight: 800, fontSize: "16px", color: votesLeft > 0 ? "#16a34a" : "var(--rd-gray-text)" }}>{votesLeft}</span>
-                      <span style={{ fontSize: "12px", color: "var(--rd-gray-text)", fontWeight: 600 }}>из {poll.maxVotes} голосов доступно</span>
+                      <div>
+                        <div style={{ fontWeight: 900, fontSize: "18px", color: votesLeft > 0 ? "#16a34a" : "var(--rd-gray-text)", lineHeight: 1 }}>{votesLeft} <span style={{ fontSize: "13px", fontWeight: 600 }}>/ {poll.maxVotes}</span></div>
+                        <div style={{ fontSize: "11px", color: "var(--rd-gray-text)", fontWeight: 600, marginTop: "2px" }}>голосов доступно</div>
+                      </div>
                     </div>
-                    <div style={{ display: "inline-flex", alignItems: "center", gap: "8px", background: "var(--rd-gray-bg)", border: "1px solid var(--rd-gray-border)", borderRadius: "10px", padding: "6px 12px", marginLeft: "auto" }}>
-                      <span style={{ fontSize: "11px", color: "var(--rd-gray-text)", fontWeight: 600 }}>⏱ До завершения:</span>
-                      <VoteCountdown endsAt={poll.endsAt} />
+                    {/* Timer badge */}
+                    <div style={{ display: "inline-flex", alignItems: "center", gap: "8px", background: "var(--rd-gray-bg)", border: "1px solid var(--rd-gray-border)", borderRadius: "8px", padding: "8px 14px", marginLeft: "auto" }}>
+                      <div>
+                        <div style={{ fontSize: "11px", color: "var(--rd-gray-text)", fontWeight: 600, marginBottom: "2px" }}>⏱ До завершения</div>
+                        <VoteCountdown endsAt={poll.endsAt} />
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -6939,6 +6988,7 @@ function VotingPage({ polls, savePolls, currentUser, users, saveUsers, notify, c
             return (
               <div key={poll.id} style={{ background: "#fff", border: "1.5px solid var(--rd-gray-border)", borderRadius: "var(--rd-radius)", padding: "24px", marginBottom: "16px", boxShadow: "var(--rd-shadow)" }}>
                 <div style={{ fontWeight: 800, fontSize: "18px", marginBottom: "6px" }}>{poll.title}</div>
+                  {poll.description && <div style={{ fontSize: "13px", color: "var(--rd-gray-text)", marginBottom: "8px" }}>{poll.description}</div>}
                 <div style={{ fontSize: "12px", color: "var(--rd-gray-text)", marginBottom: "12px" }}>📅 Завершено {new Date(poll.endsAt).toLocaleString("ru-RU")}</div>
                 {poll.winnersAwarded && (
                   <div style={{ padding: "10px 14px", background: "rgba(34,197,94,0.06)", border: "1px solid rgba(34,197,94,0.2)", borderRadius: "8px", fontSize: "13px", marginBottom: "14px" }}>

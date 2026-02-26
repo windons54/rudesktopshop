@@ -33,13 +33,55 @@ function readPgConfig() {
       database: process.env.PG_DATABASE || process.env.PG_DB || 'postgres',
       user: process.env.PG_USER, password: process.env.PG_PASSWORD,
       ssl: process.env.PG_SSL === 'true', source: 'env_host' };
+  // Проверяем pg-config.json (создаётся при сохранении через UI)
   try {
     if (fs.existsSync(PG_CFG_FILE)) {
       const c = JSON.parse(fs.readFileSync(PG_CFG_FILE, 'utf8'));
       if (c && (c.host || c.connectionString)) return { ...c, source: 'file' };
     }
   } catch {}
+  // Fallback: читаем из store.json (переживает git deploy если data/ — persistent volume)
+  try {
+    const store = readJSON();
+    if (store[PG_CFG_KEY]) {
+      const c = store[PG_CFG_KEY];
+      if (c && (c.host || c.connectionString)) {
+        // Восстанавливаем pg-config.json из store.json
+        try { ensureDir(); fs.writeFileSync(PG_CFG_FILE, JSON.stringify(c), 'utf8'); } catch {}
+        return { ...c, source: 'store_json' };
+      }
+    }
+  } catch {}
   return null;
+}
+
+// ── Попытка получить конфиг из самой БД (устойчиво к деплоям) ─────────────
+// Если pg-config.json удалён после деплоя с GitHub, пробуем подключиться
+// используя сохранённый в БД конфиг (bootstrapping через временный пул)
+async function tryBootstrapFromDb() {
+  if (g._bootstrapDone) return;
+  g._bootstrapDone = true;
+  // Уже есть конфиг — ничего не делаем
+  if (readPgConfig()) return;
+  // Нет конфига — ищем сохранённый connection string в глобальном кэше
+  const saved = g._savedConnStr;
+  if (!saved) return;
+  try {
+    const { Pool } = await import('pg');
+    const pool = new Pool({ connectionString: saved, ssl: { rejectUnauthorized: false }, max: 1, connectionTimeoutMillis: 5000 });
+    await pool.query('SELECT 1');
+    // Читаем конфиг из kv таблицы
+    const r = await pool.query(`SELECT value FROM kv WHERE key = $1`, [PG_CFG_KEY]);
+    if (r.rows.length) {
+      const cfg = JSON.parse(r.rows[0].value);
+      if (cfg && (cfg.host || cfg.connectionString)) {
+        ensureDir();
+        fs.writeFileSync(PG_CFG_FILE, JSON.stringify(cfg), 'utf8');
+        console.log('[Store] Конфиг БД восстановлен из kv-таблицы');
+      }
+    }
+    await pool.end();
+  } catch {}
 }
 
 // ── pg Pool singleton — хранится в globalThis чтобы пережить hot-reload ──
@@ -48,6 +90,11 @@ function readPgConfig() {
 const g = globalThis;
 
 async function getPool() {
+  // Если конфига нет — пробуем восстановить из БД (после git deploy)
+  if (!readPgConfig()) {
+    await tryBootstrapFromDb();
+  }
+
   const cfg = readPgConfig();
   if (!cfg) return null;
 
@@ -98,6 +145,8 @@ async function getPool() {
 
       g._pgReady = true;
       g._pgInitPromise = null;
+      // Кэшируем строку подключения для bootstrap после деплоя
+      if (poolCfg.connectionString) g._savedConnStr = poolCfg.connectionString;
       return g._pgPool;
     } catch (e) {
       console.error('[PG Pool] Ошибка:', e.message);
@@ -166,10 +215,44 @@ const pgKv = {
 // ── Сохранение конфига ─────────────────────────────────────────────────────
 async function persistPgConfig(cfg) {
   ensureDir();
-  if (cfg) fs.writeFileSync(PG_CFG_FILE, JSON.stringify(cfg), 'utf8');
-  else if (fs.existsSync(PG_CFG_FILE)) fs.unlinkSync(PG_CFG_FILE);
+  if (cfg) {
+    fs.writeFileSync(PG_CFG_FILE, JSON.stringify(cfg), 'utf8');
+    // Также сохраняем в store.json чтобы пережить git deploy (если data/ — persistent volume)
+    try {
+      const store = readJSON();
+      store[PG_CFG_KEY] = cfg;
+      writeJSON(store);
+    } catch {}
+    // Также сохраняем в globalThis чтобы bootstrap мог его использовать
+    g._savedConnStr = cfg.connectionString || null;
+  } else {
+    if (fs.existsSync(PG_CFG_FILE)) fs.unlinkSync(PG_CFG_FILE);
+    // Удаляем из store.json тоже
+    try {
+      const store = readJSON();
+      delete store[PG_CFG_KEY];
+      writeJSON(store);
+    } catch {}
+    g._savedConnStr = null;
+  }
   // Сбрасываем пул чтобы пересоздать с новым конфигом
   g._pgPool = null; g._pgReady = false; g._pgPoolKey = null; g._pgInitPromise = null;
+
+  // Сохраняем конфиг в саму БД (чтобы пережить git deploy)
+  if (cfg) {
+    try {
+      const pool = await getPool();
+      if (pool) {
+        await pool.query(
+          `INSERT INTO kv(key,value,updated_at) VALUES($1,$2,NOW()) ON CONFLICT(key) DO UPDATE SET value=$2, updated_at=NOW()`,
+          [PG_CFG_KEY, JSON.stringify(cfg)]
+        );
+        console.log('[Store] Конфиг БД сохранён в kv-таблицу (устойчиво к деплоям)');
+      }
+    } catch (e) {
+      console.warn('[Store] Не удалось сохранить конфиг в kv:', e.message);
+    }
+  }
 }
 
 // ── Handler ────────────────────────────────────────────────────────────────
