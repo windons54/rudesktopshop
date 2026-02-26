@@ -100,12 +100,17 @@ function _notifyReady() {
   _readyCallbacks = [];
 }
 
+let _initVersion = null;
+
 async function initStore() {
   try {
     // Таймаут 10 секунд — если PG не отвечает, не зависаем
     const timeout = new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 10000));
     const r = await Promise.race([_apiCall('getAll'), timeout]);
-    if (r.ok && r.data) _applyData(r.data);
+    if (r.ok && r.data) {
+      _applyData(r.data);
+      _initVersion = r.version || null;
+    }
   } catch(e) { console.warn('Store init error', e); }
   _notifyReady();
 }
@@ -606,8 +611,20 @@ function App() {
       }
     };
 
+    // Polling с проверкой версии — не тянем данные если ничего не изменилось
+    let _lastKnownVersion = _initVersion;
     const pollInterval = setInterval(async () => {
       try {
+        // Сначала проверяем версию (лёгкий запрос)
+        const vRes = await fetch('/api/store', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'version' }),
+        });
+        const vData = await vRes.json();
+        if (!vData.ok || vData.version === _lastKnownVersion) return; // данные не изменились
+
+        // Версия изменилась — тянем полные данные
         const res = await fetch('/api/store', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -615,6 +632,7 @@ function App() {
         });
         const r = await res.json();
         if (r.ok && r.data) {
+          _lastKnownVersion = r.version || vData.version;
           const filtered = {};
           Object.keys(r.data).forEach(k => {
             if (!_pendingWrites.has(k)) { _cache[k] = r.data[k]; filtered[k] = r.data[k]; }
@@ -622,7 +640,7 @@ function App() {
           _applyServerData(filtered);
         }
       } catch(e) { /* ignore */ }
-    }, 5000);
+    }, 10000);
 
     return () => {
       clearInterval(pollInterval);

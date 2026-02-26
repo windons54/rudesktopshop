@@ -1,11 +1,6 @@
 // pages/api/store.js
-// Слой хранения данных: PostgreSQL (через pg Pool + pg-config.json) с fallback на JSON-файл.
-//
-// Порядок подключения к PostgreSQL:
-//   1. DATABASE_URL (env)
-//   2. PG_HOST (env)
-//   3. data/pg-config.json (сохранённый через UI)
-// Если ни один не настроен — fallback на data/store.json
+// Хранение данных: PostgreSQL (pg Pool) с fallback на JSON-файл.
+// Порядок подключения: DATABASE_URL (env) → PG_HOST (env) → data/pg-config.json
 
 import fs from 'fs';
 import path from 'path';
@@ -15,7 +10,7 @@ const STORE_FILE  = path.join(DATA_DIR, 'store.json');
 const PG_CFG_FILE = path.join(DATA_DIR, 'pg-config.json');
 const PG_CFG_KEY  = '__pg_config__';
 
-// ── JSON-файл fallback ─────────────────────────────────────────────────────
+// ── JSON fallback ──────────────────────────────────────────────────────────
 let _lock = Promise.resolve();
 const lock = fn => { const r = _lock.then(fn); _lock = r.catch(() => {}); return r; };
 const ensureDir = () => {
@@ -29,36 +24,28 @@ function writeJSON(data) {
   try { ensureDir(); fs.writeFileSync(STORE_FILE, JSON.stringify(data), 'utf8'); } catch (e) { console.error(e); }
 }
 
-// ── Читаем конфиг PG (env или файл) ───────────────────────────────────────
+// ── Читаем конфиг PG ───────────────────────────────────────────────────────
 function readPgConfig() {
-  if (process.env.DATABASE_URL) {
+  if (process.env.DATABASE_URL)
     return { connectionString: process.env.DATABASE_URL, source: 'env_url' };
-  }
-  if (process.env.PG_HOST) {
-    return {
-      host: process.env.PG_HOST,
-      port: parseInt(process.env.PG_PORT) || 5432,
+  if (process.env.PG_HOST)
+    return { host: process.env.PG_HOST, port: parseInt(process.env.PG_PORT) || 5432,
       database: process.env.PG_DATABASE || process.env.PG_DB || 'postgres',
-      user: process.env.PG_USER,
-      password: process.env.PG_PASSWORD,
-      ssl: process.env.PG_SSL === 'true',
-      source: 'env_host',
-    };
-  }
+      user: process.env.PG_USER, password: process.env.PG_PASSWORD,
+      ssl: process.env.PG_SSL === 'true', source: 'env_host' };
   try {
     if (fs.existsSync(PG_CFG_FILE)) {
       const c = JSON.parse(fs.readFileSync(PG_CFG_FILE, 'utf8'));
-      if (c && (c.host || c.connectionString)) {
-        return { ...c, source: 'file' };
-      }
+      if (c && (c.host || c.connectionString)) return { ...c, source: 'file' };
     }
   } catch {}
   return null;
 }
 
-// ── pg Pool singleton ──────────────────────────────────────────────────────
-let _pool = null;
-let _poolCfgKey = null;
+// ── pg Pool singleton — хранится в globalThis чтобы пережить hot-reload ──
+// В Next.js каждый API route может переиспользовать один process,
+// поэтому globalThis._pgPool живёт между запросами.
+const g = globalThis;
 
 async function getPool() {
   const cfg = readPgConfig();
@@ -67,77 +54,89 @@ async function getPool() {
   const { source, ...poolCfg } = cfg;
   const cfgKey = JSON.stringify(poolCfg);
 
-  if (_pool && _poolCfgKey === cfgKey) return _pool;
-
-  try {
-    const { Pool } = await import('pg');
-    if (_pool) { try { await _pool.end(); } catch {} }
-
-    const opts = poolCfg.connectionString
-      ? {
-          connectionString: poolCfg.connectionString,
-          ssl: { rejectUnauthorized: false },
-          max: 10,
-          connectionTimeoutMillis: 8000,
-          idleTimeoutMillis: 30000,
-        }
-      : {
-          host: poolCfg.host,
-          port: poolCfg.port || 5432,
-          database: poolCfg.database,
-          user: poolCfg.user,
-          password: poolCfg.password,
-          ssl: poolCfg.ssl ? { rejectUnauthorized: false } : false,
-          max: 10,
-          connectionTimeoutMillis: 8000,
-          idleTimeoutMillis: 30000,
-        };
-
-    _pool = new Pool(opts);
-    _poolCfgKey = cfgKey;
-
-    await _pool.query('SELECT 1');
-    await _pool.query(`
-      CREATE TABLE IF NOT EXISTS kv (
-        key TEXT PRIMARY KEY,
-        value TEXT NOT NULL,
-        updated_at TIMESTAMPTZ DEFAULT NOW()
-      )
-    `);
-    return _pool;
-  } catch (e) {
-    console.error('[PG Pool] Ошибка подключения:', e.message);
-    _pool = null;
-    _poolCfgKey = null;
-    return null;
+  // Переиспользуем существующий пул если конфиг не изменился
+  if (g._pgPool && g._pgPoolKey === cfgKey && g._pgReady) {
+    return g._pgPool;
   }
+
+  // Если уже идёт инициализация — ждём её завершения
+  if (g._pgInitPromise && g._pgPoolKey === cfgKey) {
+    return g._pgInitPromise;
+  }
+
+  // Создаём новый пул
+  g._pgPoolKey = cfgKey;
+  g._pgReady = false;
+
+  g._pgInitPromise = (async () => {
+    try {
+      const { Pool } = await import('pg');
+      if (g._pgPool) { try { await g._pgPool.end(); } catch {} }
+
+      const opts = poolCfg.connectionString
+        ? { connectionString: poolCfg.connectionString,
+            ssl: { rejectUnauthorized: false },
+            max: 5, min: 1,
+            connectionTimeoutMillis: 5000,
+            idleTimeoutMillis: 60000,
+            allowExitOnIdle: false }
+        : { host: poolCfg.host, port: poolCfg.port || 5432,
+            database: poolCfg.database, user: poolCfg.user, password: poolCfg.password,
+            ssl: poolCfg.ssl ? { rejectUnauthorized: false } : false,
+            max: 5, min: 1,
+            connectionTimeoutMillis: 5000,
+            idleTimeoutMillis: 60000,
+            allowExitOnIdle: false };
+
+      g._pgPool = new Pool(opts);
+
+      // Один раз при старте: проверка + создание таблицы
+      await g._pgPool.query('SELECT 1');
+      await g._pgPool.query(`CREATE TABLE IF NOT EXISTS kv (
+        key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TIMESTAMPTZ DEFAULT NOW()
+      )`);
+
+      g._pgReady = true;
+      g._pgInitPromise = null;
+      return g._pgPool;
+    } catch (e) {
+      console.error('[PG Pool] Ошибка:', e.message);
+      g._pgPool = null;
+      g._pgReady = false;
+      g._pgInitPromise = null;
+      return null;
+    }
+  })();
+
+  return g._pgInitPromise;
 }
 
-// ── Утилиты сериализации ───────────────────────────────────────────────────
-function serialize(value) {
-  return typeof value === 'string' ? value : JSON.stringify(value);
-}
-function deserialize(raw) {
-  if (raw == null) return null;
-  try { return JSON.parse(raw); } catch { return raw; }
-}
+// ── Версия данных для polling (ETag) ───────────────────────────────────────
+// Инкрементируется при каждом set/delete/setMany — клиент не тянет данные если версия не изменилась
+if (!g._dataVersion) g._dataVersion = Date.now();
+const bumpVersion = () => { g._dataVersion = Date.now(); };
 
-// ── CRUD через pg Pool ─────────────────────────────────────────────────────
+// ── Утилиты ────────────────────────────────────────────────────────────────
+const serialize   = v => typeof v === 'string' ? v : JSON.stringify(v);
+const deserialize = raw => { if (raw == null) return null; try { return JSON.parse(raw); } catch { return raw; } };
+
+// ── CRUD ────────────────────────────────────────────────────────────────────
 const pgKv = {
   async get(pool, key) {
     const r = await pool.query('SELECT value FROM kv WHERE key=$1', [key]);
     return r.rows.length ? deserialize(r.rows[0].value) : null;
   },
   async set(pool, key, value) {
-    const v = serialize(value);
     await pool.query(
       `INSERT INTO kv(key,value,updated_at) VALUES($1,$2,NOW())
        ON CONFLICT(key) DO UPDATE SET value=$2, updated_at=NOW()`,
-      [key, v]
+      [key, serialize(value)]
     );
+    bumpVersion();
   },
   async delete(pool, key) {
     await pool.query('DELETE FROM kv WHERE key=$1', [key]);
+    bumpVersion();
   },
   async getAll(pool) {
     const r = await pool.query(`SELECT key,value FROM kv WHERE key!=$1 ORDER BY key`, [PG_CFG_KEY]);
@@ -146,37 +145,31 @@ const pgKv = {
     return out;
   },
   async setMany(pool, data) {
+    if (!Object.keys(data || {}).length) return;
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
-      for (const [key, value] of Object.entries(data || {})) {
-        const v = serialize(value);
+      for (const [key, value] of Object.entries(data)) {
         await client.query(
           `INSERT INTO kv(key,value,updated_at) VALUES($1,$2,NOW())
            ON CONFLICT(key) DO UPDATE SET value=$2, updated_at=NOW()`,
-          [key, v]
+          [key, serialize(value)]
         );
       }
       await client.query('COMMIT');
-    } catch (e) {
-      await client.query('ROLLBACK');
-      throw e;
-    } finally {
-      client.release();
-    }
+      bumpVersion();
+    } catch (e) { await client.query('ROLLBACK'); throw e; }
+    finally { client.release(); }
   },
 };
 
-// ── Сохранение конфига PG ──────────────────────────────────────────────────
+// ── Сохранение конфига ─────────────────────────────────────────────────────
 async function persistPgConfig(cfg) {
   ensureDir();
-  if (cfg) {
-    fs.writeFileSync(PG_CFG_FILE, JSON.stringify(cfg), 'utf8');
-  } else {
-    if (fs.existsSync(PG_CFG_FILE)) fs.unlinkSync(PG_CFG_FILE);
-  }
-  _pool = null;
-  _poolCfgKey = null;
+  if (cfg) fs.writeFileSync(PG_CFG_FILE, JSON.stringify(cfg), 'utf8');
+  else if (fs.existsSync(PG_CFG_FILE)) fs.unlinkSync(PG_CFG_FILE);
+  // Сбрасываем пул чтобы пересоздать с новым конфигом
+  g._pgPool = null; g._pgReady = false; g._pgPoolKey = null; g._pgInitPromise = null;
 }
 
 // ── Handler ────────────────────────────────────────────────────────────────
@@ -184,6 +177,7 @@ export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).end();
   const { action, key, value, data, config } = req.body || {};
 
+  // ── Конфиг ──
   if (action === 'pg_save') {
     await persistPgConfig(config || null);
     return res.json({ ok: true });
@@ -196,84 +190,69 @@ export default async function handler(req, res) {
       const { password, source, ...safe } = cfg;
       safe._passwordSaved = !!password;
       return res.json({ ok: true, config: safe, source: source || 'unknown' });
-    } catch (e) {
-      return res.json({ ok: true, config: null, source: 'none', error: e.message });
-    }
+    } catch (e) { return res.json({ ok: true, config: null, source: 'none', error: e.message }); }
   }
 
+  // ── Тест подключения ──
   if (action === 'pg_test') {
     if (!config) return res.json({ ok: false, error: 'Нет конфига' });
     try {
       const { Pool } = await import('pg');
       const opts = config.connectionString
         ? { connectionString: config.connectionString, ssl: { rejectUnauthorized: false }, max: 1, connectionTimeoutMillis: 8000 }
-        : { host: config.host, port: parseInt(config.port) || 5432, database: config.database, user: config.user, password: config.password, ssl: config.ssl ? { rejectUnauthorized: false } : false, max: 1, connectionTimeoutMillis: 8000 };
+        : { host: config.host, port: parseInt(config.port) || 5432, database: config.database,
+            user: config.user, password: config.password,
+            ssl: config.ssl ? { rejectUnauthorized: false } : false, max: 1, connectionTimeoutMillis: 8000 };
       const pool = new Pool(opts);
       const r = await pool.query('SELECT version(), current_database() as db, pg_size_pretty(pg_database_size(current_database())) as sz');
       await pool.query(`CREATE TABLE IF NOT EXISTS kv(key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TIMESTAMPTZ DEFAULT NOW())`);
       const cnt = await pool.query('SELECT COUNT(*) as c FROM kv');
       await pool.end();
       return res.json({ ok: true, version: r.rows[0].version, database: r.rows[0].db, size: r.rows[0].sz, rows: parseInt(cnt.rows[0].c) });
-    } catch (e) {
-      return res.json({ ok: false, error: e.message });
-    }
+    } catch (e) { return res.json({ ok: false, error: e.message }); }
   }
 
+  // ── Диагностика ──
   if (action === 'pg_diag') {
     const cfg = readPgConfig();
     let pgTest = null, pgKeys = [], rowCounts = {}, dbSize = '—', pgError = null;
     const pool = await getPool();
     if (pool) {
       try {
-        const cntRes = await pool.query('SELECT COUNT(*) as c FROM kv');
-        const cnt = parseInt(cntRes.rows[0].c);
         const rows = await pool.query('SELECT key, value FROM kv ORDER BY key');
+        const cnt = rows.rows.length;
         pgKeys = rows.rows.map(r => r.key);
         pgTest = { ok: true, rows: cnt };
-
         for (const row of rows.rows) {
           try {
-            const parsed = JSON.parse(row.value);
-            if (Array.isArray(parsed)) {
-              rowCounts[row.key] = parsed.length;
-            } else if (parsed && typeof parsed === 'object') {
-              rowCounts[row.key] = Object.keys(parsed).length;
-              if (row.key === 'cm_users') {
-                rowCounts['_total_coins'] = Object.values(parsed).reduce((s, u) => s + (u?.balance || 0), 0);
-              }
-            } else {
-              rowCounts[row.key] = 1;
-            }
+            const p = JSON.parse(row.value);
+            if (Array.isArray(p)) rowCounts[row.key] = p.length;
+            else if (p && typeof p === 'object') {
+              rowCounts[row.key] = Object.keys(p).length;
+              if (row.key === 'cm_users')
+                rowCounts['_total_coins'] = Object.values(p).reduce((s, u) => s + (u?.balance || 0), 0);
+            } else rowCounts[row.key] = 1;
           } catch { rowCounts[row.key] = 1; }
         }
         rowCounts['_total_keys'] = cnt;
-
         const szRes = await pool.query('SELECT pg_size_pretty(pg_database_size(current_database())) as size');
         dbSize = szRes.rows[0]?.size || '—';
-      } catch (e) {
-        pgTest = { ok: false, error: e.message };
-        pgError = e.message;
-      }
+      } catch (e) { pgTest = { ok: false, error: e.message }; pgError = e.message; }
     }
-
     const jsonData = readJSON();
-    const jsonKeys = Object.keys(jsonData).filter(k => k !== PG_CFG_KEY);
-
     return res.json({
-      ok: true,
-      usingPg: !!pool,
-      source: cfg?.source || 'none',
+      ok: true, usingPg: !!pool, source: cfg?.source || 'none',
       hasPgCfgFile: fs.existsSync(PG_CFG_FILE),
-      hasEnvPg: !!process.env.PG_HOST,
-      hasEnvDbUrl: !!process.env.DATABASE_URL,
+      hasEnvPg: !!process.env.PG_HOST, hasEnvDbUrl: !!process.env.DATABASE_URL,
       cfgHost: cfg?.host || (cfg?.connectionString ? '(connectionString)' : null),
-      pgTest, pgKeys, rowCounts, dbSize,
-      pgError,
-      jsonKeys,
+      pgTest, pgKeys, rowCounts, dbSize, pgError,
+      jsonKeys: Object.keys(jsonData).filter(k => k !== PG_CFG_KEY),
+      dataVersion: g._dataVersion,
       cwd: process.cwd(),
     });
   }
 
+  // ── Миграция JSON → PG ──
   if (action === 'migrate') {
     const pool = await getPool();
     if (!pool) return res.json({ ok: false, error: 'PostgreSQL не подключён' });
@@ -281,12 +260,15 @@ export default async function handler(req, res) {
       const source = data || readJSON();
       await pgKv.setMany(pool, source);
       return res.json({ ok: true, migrated: Object.keys(source).length });
-    } catch (e) {
-      return res.json({ ok: false, error: e.message });
-    }
+    } catch (e) { return res.json({ ok: false, error: e.message }); }
   }
 
-  // ── Основные CRUD операции ──
+  // ── Версия данных (для polling без лишних запросов) ──
+  if (action === 'version') {
+    return res.json({ ok: true, version: g._dataVersion });
+  }
+
+  // ── Основные CRUD ──
   try {
     const pool = await getPool();
 
@@ -294,14 +276,14 @@ export default async function handler(req, res) {
       if (action === 'get')     return res.json({ ok: true, value: await pgKv.get(pool, key) });
       if (action === 'set')     { await pgKv.set(pool, key, value); return res.json({ ok: true }); }
       if (action === 'delete')  { await pgKv.delete(pool, key); return res.json({ ok: true }); }
-      if (action === 'getAll')  return res.json({ ok: true, data: await pgKv.getAll(pool) });
+      if (action === 'getAll')  return res.json({ ok: true, data: await pgKv.getAll(pool), version: g._dataVersion });
       if (action === 'setMany') { await pgKv.setMany(pool, data); return res.json({ ok: true }); }
     } else {
       if (action === 'get')     { const s = readJSON(); return res.json({ ok: true, value: s[key] !== undefined ? s[key] : null }); }
-      if (action === 'getAll')  return res.json({ ok: true, data: readJSON() });
-      if (action === 'set')     { await lock(() => { const s = readJSON(); s[key] = value; writeJSON(s); }); return res.json({ ok: true }); }
-      if (action === 'delete')  { await lock(() => { const s = readJSON(); delete s[key]; writeJSON(s); }); return res.json({ ok: true }); }
-      if (action === 'setMany') { await lock(() => { const s = readJSON(); Object.assign(s, data || {}); writeJSON(s); }); return res.json({ ok: true }); }
+      if (action === 'getAll')  return res.json({ ok: true, data: readJSON(), version: g._dataVersion });
+      if (action === 'set')     { await lock(() => { const s = readJSON(); s[key] = value; writeJSON(s); bumpVersion(); }); return res.json({ ok: true }); }
+      if (action === 'delete')  { await lock(() => { const s = readJSON(); delete s[key]; writeJSON(s); bumpVersion(); }); return res.json({ ok: true }); }
+      if (action === 'setMany') { await lock(() => { const s = readJSON(); Object.assign(s, data || {}); writeJSON(s); bumpVersion(); }); return res.json({ ok: true }); }
     }
 
     return res.status(400).json({ ok: false, error: 'Unknown action' });
