@@ -515,7 +515,7 @@ function App() {
           Object.entries(base).forEach(([uname, ud]) => {
             if (!ud.birthdate) return;
             const bd = new Date(ud.birthdate);
-            if (bd.getDate() === today.getDate() && bd.getMonth() === today.getMonth()) {
+            if (!isNaN(bd) && bd.getDate() === today.getDate() && bd.getMonth() === today.getMonth()) {
               updatedUsers[uname] = { ...ud, balance: (ud.balance || 0) + bonusAmount };
               grantedAny = true;
             }
@@ -1624,7 +1624,7 @@ function TasksAdminTab({ tasks, saveTasks, taskSubmissions, saveTaskSubmissions,
                 {task.title}
                 {task.taskType === "quiz" && <span style={{fontSize:"11px",background:"var(--rd-blue-light)",color:"var(--rd-blue)",border:"1px solid rgba(37,99,235,0.2)",borderRadius:"6px",padding:"2px 7px",fontWeight:700}}>📝 Квиз · {(task.quizQuestions||[]).length} вопр. · {task.quizPassPct||80}% · попыток: {task.quizMaxFailedAttempts > 0 ? task.quizMaxFailedAttempts : "∞"}</span>}
               </div>
-              <div style={{fontSize:"12px",color:"var(--rd-gray-text)"}}>Награда: <b>{task.reward}</b> монет · {task.active!==false ? <span style={{color:"var(--rd-green)",fontWeight:700}}>Активно</span> : <span style={{color:"var(--rd-gray-text)"}}>Скрыто</span>}{task.deadline && <span> · ⏰ до {new Date(task.deadline).toLocaleString("ru-RU",{day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"})}</span>}</div>
+              <div style={{fontSize:"12px",color:"var(--rd-gray-text)"}}>Награда: <b>{task.reward}</b> монет · {task.active!==false ? <span style={{color:"var(--rd-green)",fontWeight:700}}>Активно</span> : <span style={{color:"var(--rd-gray-text)"}}>Скрыто</span>}{task.deadline && <span> · ⏰ до {(d=>isNaN(d)?"—":d.toLocaleString("ru-RU",{day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"}))(new Date(task.deadline))}</span>}</div>
             </div>
             <div style={{display:"flex",gap:"8px",flexShrink:0}}>
               <button className="btn btn-ghost btn-sm" onClick={() => startEdit(task)}>✏️</button>
@@ -2702,7 +2702,7 @@ function UserEditForm({ username, user, users, saveUsers, notify, onClose, isAdm
       <div className="form-field">
         <label className="form-label">Дата трудоустройства <span style={{fontSize:"11px",color:"var(--rd-red)",fontWeight:600}}>(только для администратора)</span></label>
         <input className="form-input" type="date" value={form.employmentDate} onChange={e => setForm(f => ({...f, employmentDate: e.target.value}))} />
-        {form.employmentDate && <div style={{fontSize:"11px",color:"var(--rd-gray-text)",marginTop:"4px"}}>📅 {new Date(form.employmentDate).toLocaleDateString("ru-RU",{day:"numeric",month:"long",year:"numeric"})}</div>}
+        {form.employmentDate && !isNaN(new Date(form.employmentDate)) && <div style={{fontSize:"11px",color:"var(--rd-gray-text)",marginTop:"4px"}}>📅 {new Date(form.employmentDate).toLocaleDateString("ru-RU",{day:"numeric",month:"long",year:"numeric"})}</div>}
       </div>
       <div style={{height:"1px",background:"var(--rd-gray-border)",margin:"16px 0"}}></div>
       <div style={{fontSize:"12px",fontWeight:700,textTransform:"uppercase",letterSpacing:"0.05em",color:"var(--rd-gray-text)",marginBottom:"12px"}}>Сменить пароль</div>
@@ -2875,7 +2875,7 @@ function WorkdaysTab({ users, currentUser, notify, saveUsers, transfers, saveTra
                             ? <span style={{color:"var(--rd-red)",fontWeight:600}}>⚡ Индивид.: {modeLabel[effectiveMode]}</span>
                             : <span>По умолчанию: {modeLabel[effectiveMode]}</span>
                           }
-                          {days !== null && <span style={{marginLeft:"8px",fontWeight:700,color:"var(--rd-green)"}}>· {days} дн. · +{days*coins} мон.</span>}
+                          {days !== null && <span style={{marginLeft:"8px",fontWeight:700,color:"var(--rd-green)"}}>· {days} дн. · +{(days*(Number(coinsPerDay)||0)).toFixed(0)} мон.</span>}
                           {days === null && <span style={{marginLeft:"8px",color:"#f59e0b",fontWeight:600}}>· дата не задана</span>}
                         </div>
                       </div>
@@ -3781,7 +3781,7 @@ function AdminPage({ users, saveUsers, orders, saveOrders, products, saveProduct
                   </div>
                   <div className="user-card-email">{user.email}</div>
                   <div className="user-card-date">С {user.createdAt ? new Date(user.createdAt).toLocaleDateString("ru-RU") : "—"}</div>
-                  {user.birthdate && <div className="user-card-date" style={{color:"var(--rd-red)"}}>🎂 {new Date(user.birthdate).toLocaleDateString("ru-RU", {day:"numeric",month:"long"})}</div>}
+                  {user.birthdate && !isNaN(new Date(user.birthdate)) && <div className="user-card-date" style={{color:"var(--rd-red)"}}>🎂 {new Date(user.birthdate).toLocaleDateString("ru-RU", {day:"numeric",month:"long"})}</div>}
                 </div>
                 <div className="user-card-balance">
                   <div className="ucb-label">Баланс</div>
@@ -4836,7 +4836,7 @@ function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbC
                       <span style={{fontSize:"18px"}}>🎂</span>
                       <div>
                         <div style={{fontWeight:700,fontSize:"15px",color:"var(--rd-dark)"}}>
-                          {new Date(user.birthdate).toLocaleDateString("ru-RU", {day:"numeric",month:"long",year:"numeric"})}
+                          {!isNaN(new Date(user.birthdate)) ? new Date(user.birthdate).toLocaleDateString("ru-RU", {day:"numeric",month:"long",year:"numeric"}) : "—"}
                         </div>
                         <div style={{fontSize:"11px",color:"var(--rd-gray-text)",marginTop:"1px"}}>Изменить может только администратор</div>
                       </div>
@@ -4853,7 +4853,7 @@ function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbC
                       <span style={{fontSize:"18px"}}>💼</span>
                       <div>
                         <div style={{fontWeight:700,fontSize:"15px",color:"var(--rd-dark)"}}>
-                          {new Date(user.employmentDate).toLocaleDateString("ru-RU",{day:"numeric",month:"long",year:"numeric"})}
+                          {!isNaN(new Date(user.employmentDate)) ? new Date(user.employmentDate).toLocaleDateString("ru-RU",{day:"numeric",month:"long",year:"numeric"}) : "—"}
                         </div>
                         <div style={{fontSize:"11px",color:"var(--rd-gray-text)",marginTop:"1px"}}>Изменить может только администратор</div>
                       </div>
@@ -5128,12 +5128,12 @@ function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbC
             const todayBirthdays = Object.entries(users).filter(([u, ud]) => {
               if (!ud.birthdate) return false;
               const bd = new Date(ud.birthdate);
-              return bd.getDate() === today.getDate() && bd.getMonth() === today.getMonth();
+              return !isNaN(bd) && bd.getDate() === today.getDate() && bd.getMonth() === today.getMonth();
             });
 
             // Upcoming birthdays (next 30 days)
             const upcoming = Object.entries(users)
-              .filter(([u, ud]) => ud.birthdate)
+              .filter(([u, ud]) => ud.birthdate && !isNaN(new Date(ud.birthdate)))
               .map(([uname, ud]) => {
                 const bd = new Date(ud.birthdate);
                 const thisYear = new Date(today.getFullYear(), bd.getMonth(), bd.getDate());
@@ -5212,7 +5212,7 @@ function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbC
                           <div style={{fontWeight:700,fontSize:"14px",color:"var(--rd-dark)"}}>
                             {ud.firstName ? ud.firstName + " " + (ud.lastName || "") : uname}
                           </div>
-                          <div style={{fontSize:"12px",color:"var(--rd-gray-text)"}}>@{uname} · {new Date(ud.birthdate).toLocaleDateString("ru-RU",{day:"numeric",month:"long"})}</div>
+                          <div style={{fontSize:"12px",color:"var(--rd-gray-text)"}}>@{uname} · {!isNaN(new Date(ud.birthdate)) ? new Date(ud.birthdate).toLocaleDateString("ru-RU",{day:"numeric",month:"long"}) : "—"}</div>
                         </div>
                         <div style={{fontSize:"13px",fontWeight:700,color:"var(--rd-green)"}}>
                           🪙 {ud.balance || 0}
