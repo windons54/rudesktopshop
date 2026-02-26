@@ -444,7 +444,7 @@ function App() {
     if (appearance.currency && appearance.currency.logo) return <img src={appearance.currency.logo} alt="" style={{width:"16px",height:"16px",objectFit:"contain",verticalAlign:"middle"}} />;
     return <span>{(appearance.currency && appearance.currency.icon) ? appearance.currency.icon : "🪙"}</span>;
   };
-  const [appearance, setAppearance] = useState({ logo: null, theme: "default", headerBg: "", footerBg: "", pageBg: "", accentColor: "", socials: { telegram: "", max: "", vk: "", rutube: "", vkvideo: "" }, birthdayBonus: 100, birthdayEnabled: true, integrations: { tgEnabled: false, tgBotToken: "", tgChatId: "" }, currency: { name: "RuDeCoin", icon: "🪙", logo: "" }, seo: { title: "", description: "", favicon: "" }, registrationEnabled: true, bitrix24: { enabled: false, clientId: "", clientSecret: "", portalUrl: "" } });
+  const [appearance, setAppearance] = useState({ logo: null, theme: "default", headerBg: "", footerBg: "", pageBg: "", accentColor: "", socials: { telegram: "", max: "", vk: "", rutube: "", vkvideo: "" }, birthdayBonus: 100, birthdayEnabled: true, integrations: { tgEnabled: false, tgBotToken: "", tgChatId: "", maxEnabled: false, maxBotToken: "", maxChatId: "" }, currency: { name: "RuDeCoin", icon: "🪙", logo: "" }, seo: { title: "", description: "", favicon: "" }, registrationEnabled: true, bitrix24: { enabled: false, clientId: "", clientSecret: "", portalUrl: "" } });
   const [currentUser, setCurrentUser] = useState(null);
   const [cart, setCart] = useState([]);
   const [orderSuccess, setOrderSuccess] = useState(false);
@@ -795,19 +795,32 @@ function App() {
   const sendTelegramNotify = (order) => {
     // Use React state (appearance) — it's always up-to-date after save
     const integ = appearance.integrations || {};
-    if (!integ.tgEnabled || !integ.tgBotToken || !integ.tgChatId) return;
-    const token = integ.tgBotToken.trim();
-    const chatId = integ.tgChatId.trim();
     const items = order.items.map(i => `  • ${i.name}${i.size ? " (" + i.size + ")" : ""} x${i.qty || 1} — ${i.price * (i.qty || 1)} RC`).join("\n");
     const text = "🛍️ <b>Новый заказ #" + order.id + "</b>\n\n👤 Покупатель: <code>" + order.user + "</code>\n📅 Дата: " + order.date + "\n\n" + items + "\n\n💰 <b>Итого: " + order.total + "" + currName() + "</b>\n📦 Статус: " + order.status;
-    fetch('/api/telegram', {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ token, chat_id: chatId, text, parse_mode: "HTML" })
-    })
-    .then(r => r.json())
-    .then(d => { if (!d.ok) { notify("Telegram: " + (d.description || "Ошибка отправки"), "err"); } })
-    .catch(e => { notify("Telegram: ошибка сети", "err"); });
+    // Telegram
+    if (integ.tgEnabled && integ.tgBotToken && integ.tgChatId) {
+      const token = integ.tgBotToken.trim();
+      const chatId = integ.tgChatId.trim();
+      fetch('/api/telegram', {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token, chat_id: chatId, text, parse_mode: "HTML" })
+      })
+      .then(r => r.json())
+      .then(d => { if (!d.ok) { notify("Telegram: " + (d.description || "Ошибка отправки"), "err"); } })
+      .catch(e => { notify("Telegram: ошибка сети", "err"); });
+    }
+    // Max
+    if (integ.maxEnabled && integ.maxBotToken && integ.maxChatId) {
+      fetch('/api/max', {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token: integ.maxBotToken.trim(), chat_id: integ.maxChatId.trim(), text })
+      })
+      .then(r => r.json())
+      .then(d => { if (!d.ok) { notify("Max: " + (d.description || "Ошибка отправки"), "err"); } })
+      .catch(e => { notify("Max: ошибка сети", "err"); });
+    }
   };
 
   const checkout = () => {
@@ -1231,6 +1244,17 @@ function TaskSubmitButton({ task, currentUser, taskSubmissions, saveTaskSubmissi
           body: JSON.stringify({ token: tgToken, chat_id: tgChat, text: msg })
         }).catch(() => {});
       }
+      // Max notification
+      const maxEnabled = ap.integrations?.maxEnabled;
+      const maxToken = ap.integrations?.maxBotToken;
+      const maxChat = ap.integrations?.maxChatId;
+      if (maxEnabled && maxToken && maxChat) {
+        const msg = `🎯 Задание выполнено!\n👤 Пользователь: ${currentUser}\n📋 Задание: ${task.title}\n💰 Награда: ${task.reward} монет\n🕐 ${new Date().toLocaleString("ru-RU")}`;
+        fetch('/api/max', {
+          method: "POST", headers: {"Content-Type":"application/json"},
+          body: JSON.stringify({ token: maxToken, chat_id: maxChat, text: msg })
+        }).catch(() => {});
+      }
     } catch {}
 
     if (notify) notify("Задание отправлено на проверку ✓");
@@ -1316,6 +1340,10 @@ function TasksPage({ tasks, currentUser, taskSubmissions, saveTaskSubmissions, n
         if (ap.integrations?.tgEnabled && ap.integrations?.tgBotToken && ap.integrations?.tgChatId) {
           const msg = `🎯 Задание выполнено!\n👤 Пользователь: ${currentUser}\n📋 Задание: ${task.title}\n💰 Награда: ${task.reward} монет`;
           fetch('/api/telegram', { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify({ token: ap.integrations.tgBotToken, chat_id: ap.integrations.tgChatId, text: msg }) }).catch(() => {});
+        }
+        if (ap.integrations?.maxEnabled && ap.integrations?.maxBotToken && ap.integrations?.maxChatId) {
+          const msg = `🎯 Задание выполнено!\n👤 Пользователь: ${currentUser}\n📋 Задание: ${task.title}\n💰 Награда: ${task.reward} монет`;
+          fetch('/api/max', { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify({ token: ap.integrations.maxBotToken, chat_id: ap.integrations.maxChatId, text: msg }) }).catch(() => {});
         }
       } catch {}
       notify("Задание отправлено на проверку ✓");
@@ -1877,14 +1905,21 @@ function AuctionCard({ auction, currentUser, users, saveUsers, saveAuctions, all
       try {
         const ap = storage.get("cm_appearance") || {};
         const integ = ap.integrations || {};
+        const winnerData = users[winner];
+        const winnerName = winnerData ? ((winnerData.firstName || "") + " " + (winnerData.lastName || "")).trim() || winner : winner;
+        const msg = `🏆 <b>Аукцион завершён!</b>\n\n🔨 Лот: <b>${auction.name}</b>\n👤 Победитель: ${winnerName} (<code>${winner}</code>)\n💰 Финальная ставка: <b>${amt}</b> монет\n📅 ${new Date().toLocaleString("ru-RU")}`;
         if (integ.tgEnabled && integ.tgBotToken && integ.tgChatId) {
-          const winnerData = users[winner];
-          const winnerName = winnerData ? ((winnerData.firstName || "") + " " + (winnerData.lastName || "")).trim() || winner : winner;
-          const msg = `🏆 <b>Аукцион завершён!</b>\n\n🔨 Лот: <b>${auction.name}</b>\n👤 Победитель: ${winnerName} (<code>${winner}</code>)\n💰 Финальная ставка: <b>${amt}</b> монет\n📅 ${new Date().toLocaleString("ru-RU")}`;
           fetch('/api/telegram', {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ token: integ.tgBotToken.trim(), chat_id: integ.tgChatId.trim(), text: msg, parse_mode: "HTML" })
+          }).catch(() => {});
+        }
+        if (integ.maxEnabled && integ.maxBotToken && integ.maxChatId) {
+          fetch('/api/max', {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ token: integ.maxBotToken.trim(), chat_id: integ.maxChatId.trim(), text: msg })
           }).catch(() => {});
         }
       } catch {}
@@ -4832,6 +4867,9 @@ function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbC
     tgEnabled: false,
     tgBotToken: "",
     tgChatId: "",
+    maxEnabled: false,
+    maxBotToken: "",
+    maxChatId: "",
     ...((appearance.integrations) || {})
   }));
   useEffect(() => {
@@ -5860,6 +5898,91 @@ function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbC
                 </ol>
               </div>
 
+              {/* Max Messenger */}
+              <div className="settings-card" style={{marginTop:"16px"}}>
+                <div className="settings-section-title" style={{display:"flex",alignItems:"center",gap:"10px"}}>
+                  <span style={{width:"32px",height:"32px",borderRadius:"8px",background:"#7B68EE",display:"inline-flex",alignItems:"center",justifyContent:"center",fontSize:"18px"}}>💬</span>
+                  Max — уведомления
+                </div>
+                <p style={{fontSize:"13px",color:"var(--rd-gray-text)",marginBottom:"20px",lineHeight:1.6}}>
+                  При оформлении нового заказа, завершении аукциона, выполнении задания или розыгрыше лотереи бот автоматически отправит сообщение в указанный чат Max.
+                </p>
+
+                {/* Enable toggle */}
+                <div style={{display:"flex",alignItems:"center",gap:"14px",padding:"14px 16px",background:integ.maxEnabled?"rgba(123,104,238,0.06)":"var(--rd-gray-bg)",borderRadius:"var(--rd-radius-sm)",border:"1.5px solid",borderColor:integ.maxEnabled?"rgba(123,104,238,0.25)":"var(--rd-gray-border)",transition:"all 0.2s",marginBottom:"20px"}}>
+                  <div style={{position:"relative",width:"44px",height:"24px",flexShrink:0}}>
+                    <input type="checkbox" checked={!!integ.maxEnabled} onChange={e => setInteg(prev => ({...prev, maxEnabled: e.target.checked}))}
+                      style={{position:"absolute",inset:0,opacity:0,cursor:"pointer",zIndex:1,width:"100%",height:"100%"}} />
+                    <div style={{width:"44px",height:"24px",borderRadius:"12px",background:integ.maxEnabled?"#7B68EE":"#d1d5db",transition:"background 0.2s",display:"flex",alignItems:"center",padding:"2px"}}>
+                      <div style={{width:"20px",height:"20px",borderRadius:"50%",background:"#fff",transition:"transform 0.2s",transform:integ.maxEnabled?"translateX(20px)":"translateX(0)",boxShadow:"0 1px 3px rgba(0,0,0,0.2)"}}></div>
+                    </div>
+                  </div>
+                  <div>
+                    <div style={{fontWeight:700,fontSize:"14px",color:"var(--rd-dark)"}}>
+                      {integ.maxEnabled ? "Уведомления включены" : "Уведомления отключены"}
+                    </div>
+                    <div style={{fontSize:"12px",color:"var(--rd-gray-text)",marginTop:"2px"}}>
+                      Мессенджер Max
+                    </div>
+                  </div>
+                </div>
+
+                <div className="form-field">
+                  <label className="form-label">Токен бота Max</label>
+                  <input className="form-input" type="password" placeholder="Токен бота Max"
+                    value={integ.maxBotToken || ""}
+                    onChange={e => setInteg(prev => ({...prev, maxBotToken: e.target.value}))} />
+                  <div style={{fontSize:"11px",color:"var(--rd-gray-text)",marginTop:"4px"}}>
+                    Создайте бота в Max и скопируйте токен доступа
+                  </div>
+                </div>
+
+                <div className="form-field">
+                  <label className="form-label">Chat ID (ID чата или канала)</label>
+                  <input className="form-input" placeholder="ID чата Max"
+                    value={integ.maxChatId || ""}
+                    onChange={e => setInteg(prev => ({...prev, maxChatId: e.target.value}))} />
+                  <div style={{fontSize:"11px",color:"var(--rd-gray-text)",marginTop:"4px"}}>
+                    Добавьте бота в чат/канал Max как администратора
+                  </div>
+                </div>
+
+                <div style={{display:"flex",gap:"10px",marginTop:"8px",flexWrap:"wrap"}}>
+                  <button className="btn btn-primary" style={{background:"#7B68EE",borderColor:"#7B68EE"}} onClick={() => {
+                    saveAppearance({ ...appearance, integrations: integ });
+                    notify("Настройки Max сохранены ✓");
+                  }}>Сохранить</button>
+                  <button className="btn btn-secondary" onClick={() => {
+                    if (!integ.maxBotToken || !integ.maxChatId) { notify("Заполните токен и Chat ID", "err"); return; }
+                    const testText = "✅ Тест уведомлений RuDesktop Shop\nИнтеграция с Max настроена успешно! Новые уведомления будут приходить в этот чат.";
+                    fetch('/api/max', {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ token: integ.maxBotToken.trim(), chat_id: integ.maxChatId.trim(), text: testText })
+                    })
+                    .then(r => r.json())
+                    .then(d => {
+                      if (d.ok) notify("✅ Тест успешен! Сообщение отправлено в Max.");
+                      else notify("❌ Ошибка Max: " + (d.description || "Проверьте токен и Chat ID"), "err");
+                    })
+                    .catch(e => notify("❌ Ошибка сети: " + e.message, "err"));
+                  }}>📨 Отправить тест</button>
+                </div>
+              </div>
+
+              {/* Max info card */}
+              <div style={{padding:"16px",background:"rgba(123,104,238,0.06)",border:"1.5px solid rgba(123,104,238,0.2)",borderRadius:"var(--rd-radius-sm)",marginTop:"12px"}}>
+                <div style={{fontWeight:700,fontSize:"13px",color:"#7B68EE",marginBottom:"8px"}}>📋 Как настроить Max</div>
+                <ol style={{fontSize:"12px",color:"var(--rd-gray-text)",lineHeight:1.8,paddingLeft:"16px",margin:0}}>
+                  <li>Создайте бота в мессенджере Max и получите токен</li>
+                  <li>Создайте чат или канал для уведомлений</li>
+                  <li>Добавьте бота в чат как администратора</li>
+                  <li>Узнайте Chat ID чата</li>
+                  <li>Вставьте токен и Chat ID, нажмите «Отправить тест»</li>
+                  <li>Включите уведомления и сохраните</li>
+                </ol>
+              </div>
+
               {/* Bitrix24 */}
               <div className="settings-card" style={{marginTop:"16px"}}>
                 <div className="settings-section-title" style={{display:"flex",alignItems:"center",gap:"10px"}}>
@@ -6395,8 +6518,12 @@ function LotteryAdminTab({ lotteries, saveLotteries, notify, users, saveUsers, a
 
   const sendTg = (text) => {
     const integ = appearance?.integrations || {};
-    if (!integ.tgEnabled || !integ.tgBotToken || !integ.tgChatId) return;
-    fetch('/api/telegram', { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ token: integ.tgBotToken.trim(), chat_id: integ.tgChatId.trim(), text, parse_mode: "HTML" }) }).catch(() => {});
+    if (integ.tgEnabled && integ.tgBotToken && integ.tgChatId) {
+      fetch('/api/telegram', { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ token: integ.tgBotToken.trim(), chat_id: integ.tgChatId.trim(), text, parse_mode: "HTML" }) }).catch(() => {});
+    }
+    if (integ.maxEnabled && integ.maxBotToken && integ.maxChatId) {
+      fetch('/api/max', { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ token: integ.maxBotToken.trim(), chat_id: integ.maxChatId.trim(), text }) }).catch(() => {});
+    }
   };
 
   const doDrawWinners = (lottery, currentList) => {
@@ -6599,7 +6726,7 @@ function LotteryPage({ lotteries, currentUser, currency }) {
         </div>
       </div>
 
-      <div style={{ maxWidth: "900px", margin: "0 auto", padding: "40px 24px 64px" }}>
+      <div className="container" style={{ padding: "40px 24px 64px" }}>
 
       {active.length > 0 && (
         <>
@@ -6807,6 +6934,18 @@ function VotingAdminTab({ polls, savePolls, notify, users, saveUsers }) {
     }
     savePolls(list.map(p => p.id === poll.id ? { ...p, status: "ended", winnersAwarded: true, awardedUsers: unique, prizePerUser } : p));
     notify(`Монеты начислены ${unique.length} победителям (+${prizePerUser} 🪙)`);
+    // Telegram + Max notification
+    try {
+      const ap = storage.get("cm_appearance") || {};
+      const integ2 = ap.integrations || {};
+      const msg = `🗳️ <b>Голосование завершено!</b>\n\n📋 ${poll.title}\n🏆 Победители: ${unique.join(", ")}\n💰 Награда: +${prizePerUser} монет каждому\n📅 ${new Date().toLocaleString("ru-RU")}`;
+      if (integ2.tgEnabled && integ2.tgBotToken && integ2.tgChatId) {
+        fetch('/api/telegram', { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify({ token: integ2.tgBotToken.trim(), chat_id: integ2.tgChatId.trim(), text: msg, parse_mode: "HTML" }) }).catch(() => {});
+      }
+      if (integ2.maxEnabled && integ2.maxBotToken && integ2.maxChatId) {
+        fetch('/api/max', { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify({ token: integ2.maxBotToken.trim(), chat_id: integ2.maxChatId.trim(), text: msg }) }).catch(() => {});
+      }
+    } catch {}
   };
 
   const now = Date.now();
@@ -6923,7 +7062,7 @@ function VotingPage({ polls, savePolls, currentUser, users, saveUsers, notify, c
           <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:"12px"}}>
             <div>
               <h1 style={{fontSize:"clamp(26px,5vw,40px)",fontWeight:900,color:"var(--rd-dark)",letterSpacing:"-0.02em"}}>Голосование</h1>
-              <p style={{fontSize:"15px",color:"var(--rd-gray-text)",marginTop:"6px"}}>Голосуйте и влияйте на решения сообщества</p>
+              <p style={{fontSize:"15px",color:"var(--rd-gray-text)",marginTop:"6px"}}>Голосуй и помогай коллегам побеждать</p>
             </div>
             {list.length > 0 && (
               <div style={{display:"flex",gap:"16px",flexWrap:"wrap"}}>
@@ -6941,7 +7080,7 @@ function VotingPage({ polls, savePolls, currentUser, users, saveUsers, notify, c
         </div>
       </div>
 
-      <div style={{ maxWidth: "900px", margin: "0 auto", padding: "40px 24px 64px" }}>
+      <div className="container" style={{ padding: "40px 24px 64px" }}>
 
       {active.length > 0 && (
         <>
