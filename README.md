@@ -1,92 +1,92 @@
-# Corp Merch Store — Next.js
+# Corp Merch Store — Деплой на Timeweb.cloud
 
-Корпоративный магазин мерча на Next.js 14 + PostgreSQL.
+## Стек
+- **Next.js 14** (стандартный режим, без standalone)
+- **SQLite / sql.js** — хранение данных в браузере (IndexedDB)
+- **JSON-файл** — серверное хранилище настроек (`data/store.json`)
+- **Нет PostgreSQL / Prisma** — БД не требуется
 
-## Технологии
-- **Next.js 14** (Pages Router, standalone output)
-- **React 18**
-- **Prisma ORM** + PostgreSQL (продакшен)
-- **sql.js** — SQLite в браузере (импорт/экспорт)
-- **xlsx** — экспорт/импорт данных
+---
 
-## Локальный запуск
+## Деплой на Timeweb.cloud (Node.js приложение)
+
+### Настройки в панели Timeweb
+
+| Параметр | Значение |
+|---|---|
+| Команда установки | `npm install` |
+| Команда сборки | `npm run build` |
+| Команда запуска | `npm start` |
+| Версия Node.js | 18+ |
+| Корневая папка | `/` (корень репозитория) |
+
+### Переменные окружения
+Добавьте в панели Timeweb (раздел «Переменные окружения»):
+- `NODE_ENV=production` (обычно устанавливается автоматически)
+- `PORT` — Timeweb подставляет автоматически
+
+---
+
+## Локальная разработка
 
 ```bash
-cp .env.example .env          # заполнить DATABASE_URL
 npm install
-npm run prisma:migrate         # создать таблицу kv в БД
-npm run dev                    # http://localhost:3000
+npm run dev       # http://localhost:3000
 ```
 
-## Деплой на Timeweb Cloud
-
-### 1. Создать PostgreSQL базу данных
-
-1. Перейдите в [Timeweb Cloud](https://timeweb.cloud/) → **Базы данных** → **Создать**
-2. Выберите **PostgreSQL**, задайте имя, пользователя и пароль
-3. Скопируйте строку подключения вида:
-   ```
-   postgresql://USER:PASSWORD@HOST:PORT/DATABASE
-   ```
-
-### 2. Загрузить код в Git-репозиторий
+## Сборка и запуск локально
 
 ```bash
-git init
-git add .
-git commit -m "Initial commit"
-git remote add origin https://github.com/YOUR_USER/YOUR_REPO.git
-git push -u origin main
+npm run build     # сборка + копирование sql-wasm.wasm в public/
+npm start         # запуск на PORT=3000
 ```
 
-### 3. Создать приложение в App Platform
-
-1. Перейдите в **App Platform** → **Создать**
-2. Тип: **Docker** → **Dockerfile**
-3. Подключите GitHub/GitLab репозиторий
-4. Задайте переменные окружения:
-   - `DATABASE_URL` — строка подключения PostgreSQL из шага 1
-   - `NODE_ENV` — `production`
-5. Путь проверки состояния (Health Check): `/api/health`
-6. Нажмите **Запустить деплой**
-
-Таблица `kv` создаётся автоматически при первом запросе к API.
-
-### Альтернатива: VPS / Cloud Server
-
-```bash
-git clone https://github.com/YOUR_USER/YOUR_REPO.git
-cd YOUR_REPO
-cp .env.example .env           # заполнить DATABASE_URL
-npm install
-npm run build
-npm run prisma:migrate
-npm start                      # или: pm2 start npm --name merch -- start
-```
+---
 
 ## Структура проекта
 
 ```
-├── Dockerfile              # Docker-сборка для Timeweb App Platform
-├── .dockerignore
 ├── pages/
-│   ├── index.js            # Главная страница (CSR)
+│   ├── index.js          # Главная страница (SPA через dynamic import)
+│   ├── _app.js
+│   ├── _document.js
 │   └── api/
-│       ├── health.js       # Health check для мониторинга
-│       ├── store.js        # CRUD API (Prisma → PG)
-│       ├── pg.js           # PG-утилиты
-│       ├── telegram.js     # Telegram Bot API прокси
-│       └── debug.js        # Диагностика
+│       ├── health.js     # GET /api/health — healthcheck для хостинга
+│       ├── store.js      # POST /api/store — JSON-хранилище (настройки)
+│       └── telegram.js   # POST /api/telegram — прокси Telegram Bot API
 ├── components/
-│   └── App.jsx             # Логика приложения (SPA)
+│   └── App.jsx           # Основное SPA-приложение
 ├── lib/
-│   └── prisma.js           # Prisma singleton
-├── prisma/
-│   └── schema.prisma       # Схема БД
-└── next.config.js          # standalone output
+│   ├── storage.js        # SQLite (браузер) через sql.js + IndexedDB
+│   └── utils.js          # Утилиты, темы, сжатие изображений
+├── scripts/
+│   └── copy-wasm.js      # Копирует sql-wasm.wasm → public/ после сборки
+├── styles/
+│   └── globals.css
+├── public/
+│   └── sql-wasm.wasm     # Генерируется автоматически при npm run build
+├── data/                 # Создаётся автоматически при первом запуске
+│   └── store.json        # Серверное хранилище настроек
+├── next.config.js
+└── package.json
 ```
 
-## Логин администратора
+---
 
-- **Логин**: `admin`
-- **Пароль**: `admin123`
+## Важные замечания
+
+### Почему нет `output: 'standalone'`
+Режим `standalone` генерирует минимальный сервер (`node server.js`) без `node_modules`.
+Timeweb.cloud запускает приложение через `npm start` → `next start`, что несовместимо со standalone.
+Поэтому используется **стандартный режим Next.js**.
+
+### Файл `public/sql-wasm.wasm`
+Копируется автоматически из `node_modules/sql.js/dist/` при:
+- `npm run build`
+- `npm install` (через `postinstall`)
+
+Если файл не появился — запустите вручную: `node scripts/copy-wasm.js`
+
+### Данные `data/store.json`
+Папка `data/` создаётся автоматически. Файл содержит серверные настройки магазина.
+Основные данные (товары, заказы) хранятся в **IndexedDB браузера** через sql.js.

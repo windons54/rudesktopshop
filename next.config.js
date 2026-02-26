@@ -2,7 +2,7 @@
 const fs = require('fs');
 const path = require('path');
 
-// Copy sql-wasm.wasm from node_modules to public/ at build time
+// Копируем sql-wasm.wasm в public/ при сборке
 function copySqlWasm() {
   const dest = path.join(__dirname, 'public', 'sql-wasm.wasm');
   if (!fs.existsSync(path.join(__dirname, 'public'))) {
@@ -18,11 +18,10 @@ function copySqlWasm() {
     return;
   }
   const files = fs.readdirSync(distDir);
-  console.log('sql.js/dist:', files.join(', '));
-  // Prefer browser version, then any wasm
-  const wasm = files.find(f => f === 'sql-wasm.wasm') ||
-               files.find(f => f.includes('browser') && f.endsWith('.wasm')) ||
-               files.find(f => f.endsWith('.wasm'));
+  const wasm =
+    files.find(f => f === 'sql-wasm.wasm') ||
+    files.find(f => f.includes('browser') && f.endsWith('.wasm')) ||
+    files.find(f => f.endsWith('.wasm'));
   if (wasm) {
     fs.copyFileSync(path.join(distDir, wasm), dest);
     console.log('✅ Copied', wasm, '→ public/sql-wasm.wasm');
@@ -34,6 +33,7 @@ function copySqlWasm() {
 copySqlWasm();
 
 const nextConfig = {
+  // standalone — минимальный Node.js-сервер, запуск через: node .next/standalone/server.js
   output: 'standalone',
   reactStrictMode: false,
 

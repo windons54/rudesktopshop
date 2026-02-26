@@ -366,10 +366,6 @@ function App() {
   const [auctions, setAuctions] = useState([]);
   const [taskSubmissions, setTaskSubmissions] = useState([]);
   const [dbConfig, setDbConfig] = useState({ connected: false, dbSize: 0, rowCounts: {} });
-  // pgConfig живёт на сервере, здесь только для отображения статуса в UI
-  const [pgConfig, setPgConfig] = useState(null);
-  const [isPgActive, setIsPgActive] = useState(false);
-  const savePgConfigState = (cfg) => { setPgConfig(cfg); setIsPgActive(!!(cfg?.host)); };
   const [sqliteDisabled, setSqliteDisabledState] = useState(() => {
     if (typeof window === 'undefined') return false;
     return localStorage.getItem('__sqlite_disabled__') === '1';
@@ -422,14 +418,7 @@ function App() {
   const [sqliteInitError, setSqliteInitError] = useState(null);
 
   useEffect(() => {
-    // Загружаем pgConfig с сервера для отображения статуса в UI
-    fetch('/api/store', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'pg_get' }) })
-      .then(r => r.json())
-      .then(r => { if (r.ok && r.config) savePgConfigState(r.config); })
-      .catch(() => {});
-
-    // Загружаем ВСЕ данные с сервера (PostgreSQL или JSON-файл)
+    // Загружаем данные с сервера (JSON-файл)
     initStore().then(() => {
       const u  = storage.get("cm_users");
       const o  = storage.get("cm_orders");
@@ -930,7 +919,7 @@ function App() {
         
         {page === "orders" && currentUser && <OrdersPage orders={orders.filter(o => o.user === currentUser)} currency={appearance.currency} />}
         {page === "transfer" && currentUser && <TransferPage currentUser={currentUser} users={users} saveUsers={saveUsers} transfers={transfers} saveTransfers={saveTransfers} notify={notify} setPage={setPage} currency={appearance.currency} />}
-        {page === "settings" && currentUser && <SettingsPage currentUser={currentUser} users={users} saveUsers={saveUsers} notify={notify} setPage={setPage} dbConfig={dbConfig} saveDbConfig={saveDbConfig} refreshDbConfig={refreshDbConfig} pgConfig={pgConfig} savePgConfig={savePgConfigState} isPgActive={isPgActive} isAdmin={isAdmin} orders={orders} saveOrders={saveOrders} products={allProducts} saveProducts={saveProducts} categories={allCategories} saveCategories={saveCategories} appearance={appearance} saveAppearance={saveAppearance} transfers={transfers} saveTransfers={saveTransfers} markOrdersSeen={markOrdersSeen} faq={faq} saveFaq={saveFaq} tasks={tasks} saveTasks={saveTasks} taskSubmissions={taskSubmissions} saveTaskSubmissions={saveTaskSubmissions} auctions={auctions} saveAuctions={saveAuctions} sqliteDisabled={sqliteDisabled} setSqliteDisabled={setSqliteDisabled} />}
+        {page === "settings" && currentUser && <SettingsPage currentUser={currentUser} users={users} saveUsers={saveUsers} notify={notify} setPage={setPage} dbConfig={dbConfig} saveDbConfig={saveDbConfig} refreshDbConfig={refreshDbConfig} isAdmin={isAdmin} orders={orders} saveOrders={saveOrders} products={allProducts} saveProducts={saveProducts} categories={allCategories} saveCategories={saveCategories} appearance={appearance} saveAppearance={saveAppearance} transfers={transfers} saveTransfers={saveTransfers} markOrdersSeen={markOrdersSeen} faq={faq} saveFaq={saveFaq} tasks={tasks} saveTasks={saveTasks} taskSubmissions={taskSubmissions} saveTaskSubmissions={saveTaskSubmissions} auctions={auctions} saveAuctions={saveAuctions} sqliteDisabled={sqliteDisabled} setSqliteDisabled={setSqliteDisabled} />}
       </main>
 
       <footer className="rd-footer" style={appearance.footerBg ? {background: appearance.footerBg} : {}}>
@@ -4094,7 +4083,7 @@ function CurrencySettingsTab({ appearance, saveAppearance, notify }) {
   );
 }
 
-function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbConfig, refreshDbConfig, pgConfig, savePgConfig, isPgActive, isAdmin, orders, saveOrders, products, saveProducts, categories, saveCategories, appearance, saveAppearance, markOrdersSeen, transfers, saveTransfers, faq, saveFaq, tasks, saveTasks, taskSubmissions, saveTaskSubmissions, auctions, saveAuctions, sqliteDisabled, setSqliteDisabled }) {
+function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbConfig, refreshDbConfig, isAdmin, orders, saveOrders, products, saveProducts, categories, saveCategories, appearance, saveAppearance, markOrdersSeen, transfers, saveTransfers, faq, saveFaq, tasks, saveTasks, taskSubmissions, saveTaskSubmissions, auctions, saveAuctions, sqliteDisabled, setSqliteDisabled }) {
   const [tab, setTab] = useState("profile");
   const setTabSafe = (t) => { if (!isAdmin && t !== "profile") return; setTab(t); };
   const [adminTab, setAdminTab] = useState("users");
@@ -4119,151 +4108,6 @@ function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbC
   const [sqlResult, setSqlResult] = useState(null);
   const [sqlError, setSqlError] = useState("");
   const [importing, setImporting] = useState(false);
-  const [debugInfo, setDebugInfo] = useState(null);
-  const [debugLoading, setDebugLoading] = useState(false);
-
-  const runDiag = async () => {
-    setDebugLoading(true); setDebugInfo(null);
-    try {
-      const r = await fetch('/api/debug', { method: 'GET' });
-      setDebugInfo(await r.json());
-    } catch(e) { setDebugInfo({ error: e.message }); }
-    setDebugLoading(false);
-  };
-
-  // PostgreSQL state
-  const [pgForm, setPgForm] = useState(() => pgConfig || { host: "", port: "5432", database: "", user: "", password: "", ssl: false, enabled: false });
-  // Sync pgForm when pgConfig loads asynchronously from server
-  useEffect(() => {
-    if (pgConfig && pgConfig.host) {
-      setPgForm(prev => {
-        // Only update if form is still empty (user hasn't started editing)
-        if (!prev.host) return { ...pgConfig };
-        return prev;
-      });
-    }
-  }, [pgConfig]);
-  const [pgTesting, setPgTesting] = useState(false);
-  const [pgTestResult, setPgTestResult] = useState(null);
-  const [pgMigrating, setPgMigrating] = useState(false);
-  const [pgSqlConsole, setPgSqlConsole] = useState("");
-  const [pgSqlResult, setPgSqlResult] = useState(null);
-  const [pgSqlError, setPgSqlError] = useState("");
-  const [pgStats, setPgStats] = useState(null);
-  const [pgStatsLoading, setPgStatsLoading] = useState(false);
-  const [dbSubTab, setDbSubTab] = useState(() => {
-    if (typeof window === 'undefined') return 'postgres';
-    const disabled = localStorage.getItem('__sqlite_disabled__') === '1';
-    return disabled ? 'postgres' : 'sqlite';
-  });
-
-  const testPgConnection = async (cfg) => {
-    setPgTesting(true); setPgTestResult(null);
-    try {
-      const res = await fetch('/api/store', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'pg_test', config: cfg || pgForm }),
-      });
-      const data = await res.json();
-      setPgTestResult(data);
-    } catch(err) { setPgTestResult({ ok: false, error: err.message }); }
-    setPgTesting(false);
-  };
-
-  const savePgSettings = async () => {
-    if (!pgForm.host || !pgForm.database || !pgForm.user) {
-      notify("Заполните хост, базу данных и пользователя", "err"); return;
-    }
-    const cfg = { ...pgForm };
-    delete cfg._passwordSaved; // remove UI meta-flag before saving
-    const r = await fetch('/api/store', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'pg_save', config: cfg }) });
-    const result = await r.json();
-    if (!result.ok) { notify("Ошибка сохранения: " + (result.error||''), "err"); return; }
-    savePgConfig(cfg);
-    notify("Настройки PostgreSQL сохранены на сервере ✓");
-    await testPgConnection(cfg);
-  };
-
-  const enablePg = async () => {
-    if (!pgForm.host || !pgForm.database || !pgForm.user) {
-      notify("Сначала заполните настройки", "err"); return;
-    }
-    setPgTesting(true);
-    const { _passwordSaved, ...pgFormClean } = pgForm;
-    const cfg = { ...pgFormClean, enabled: true };
-    try {
-      const r = await fetch('/api/store', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'pg_test', config: cfg }) });
-      const testRes = await r.json();
-      if (!testRes.ok) { notify("Не удалось подключиться: " + testRes.error, "err"); setPgTesting(false); return; }
-      const r2 = await fetch('/api/store', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'pg_save', config: cfg }) });
-      const saved = await r2.json();
-      if (!saved.ok) { notify("Ошибка сохранения конфига: " + (saved.error||''), "err"); setPgTesting(false); return; }
-      savePgConfig(cfg);
-      setPgForm(cfg);
-      notify("PostgreSQL активирована! Перезагрузите страницу.", "ok");
-      setTimeout(() => window.location.reload(), 1500);
-    } catch(e) { notify("Ошибка: " + e.message, "err"); }
-    setPgTesting(false);
-  };
-
-  const disablePg = async () => {
-    await fetch('/api/store', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'pg_save', config: null }) });
-    savePgConfig(null);
-    setPgForm({ host: "", port: "5432", database: "", user: "", password: "", ssl: false, enabled: false });
-    notify("PostgreSQL отключена.");
-    setTimeout(() => window.location.reload(), 1200);
-  };
-
-  const migrateToPg = async () => {
-    if (!confirm("Мигрировать все данные в PostgreSQL? Данные в PG будут перезаписаны.")) return;
-    setPgMigrating(true);
-    try {
-      const all = storage.all();
-      const res = await fetch('/api/store', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'setMany', data: all }) });
-      const data = await res.json();
-      if (data.ok) { notify("Мигрировано " + Object.keys(all).length + " ключей ✓"); }
-      else { notify("Ошибка миграции: " + data.error, "err"); }
-    } catch(err) { notify("Ошибка: " + err.message, "err"); }
-    setPgMigrating(false);
-  };
-
-  const loadPgStats = async () => {
-    setPgStatsLoading(true);
-    try {
-      const res = await fetch('/api/store', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'pg_diag' }),
-      });
-      const data = await res.json();
-      if (data.ok) setPgStats({ ok: true, total: data.pgTest?.rows ?? 0, size: '—', rowCounts: { '_total_keys': data.pgTest?.rows ?? 0 } });
-      else notify("Ошибка загрузки статистики: " + data.error, "err");
-    } catch(err) { notify("Ошибка: " + err.message, "err"); }
-    setPgStatsLoading(false);
-  };
-
-  const runPgSql = async () => {
-    setPgSqlError(""); setPgSqlResult(null);
-    try {
-      const res = await fetch('/api/store', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'pg_test', config: pgForm }),
-      });
-      // For SQL console, use pg.js which still accepts explicit config
-      const res2 = await fetch('/api/pg?action=query', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sql: pgSqlConsole.trim() }),
-      });
-      const data = await res2.json();
-      if (data.ok) setPgSqlResult(data);
-      else setPgSqlError(data.error);
-    } catch(err) { setPgSqlError(err.message); }
-  };
 
   const saveProfile = () => {
     if (!form.email.trim()) { notify("Email не может быть пустым", "err"); return; }
@@ -4347,7 +4191,7 @@ function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbC
       const allKeys = Object.keys(storage.all());
       await Promise.all(allKeys.map(k =>
         fetch('/api/store', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ action: 'delete', key: k, pgConfig }) })
+          body: JSON.stringify({ action: 'delete', key: k }) })
       ));
       notify("Серверная база очищена. Перезагрузите страницу.");
       setTimeout(() => window.location.reload(), 1500);
@@ -5010,10 +4854,9 @@ function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbC
             <div>
               {/* Sub-tabs */}
               <div style={{display:"flex",gap:"0",marginBottom:"20px",borderBottom:"2px solid var(--rd-gray-border)"}}>
-                {(!sqliteDisabled ? [["sqlite","🗄️ SQLite"],["postgres","🐘 PostgreSQL"]] : [["postgres","🐘 PostgreSQL"]]).map(([id,label]) => (
+                {[["sqlite","🗄️ SQLite"]].map(([id,label]) => (
                   <button key={id} onClick={() => setDbSubTab(id)} style={{padding:"9px 20px",fontWeight:700,fontSize:"13px",background:"none",border:"none",cursor:"pointer",borderBottom:dbSubTab===id?"2.5px solid var(--rd-red)":"2.5px solid transparent",color:dbSubTab===id?"var(--rd-red)":"var(--rd-gray-text)",marginBottom:"-2px",transition:"color 0.15s",display:"flex",alignItems:"center",gap:"6px"}}>
                     {label}
-                    {id==="postgres" && isPgActive && <span style={{fontSize:"10px",background:"#22c55e",color:"#fff",padding:"1px 7px",borderRadius:"10px",fontWeight:700}}>АКТИВНА</span>}
                   </button>
                 ))}
               </div>
@@ -5023,8 +4866,8 @@ function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbC
                 <div style={{marginBottom:"16px",padding:"12px 16px",borderRadius:"10px",background: sqliteDisabled ? "rgba(239,68,68,0.07)" : "rgba(234,179,8,0.07)",border: sqliteDisabled ? "1.5px solid rgba(239,68,68,0.25)" : "1.5px solid rgba(234,179,8,0.3)",display:"flex",alignItems:"center",gap:"14px",flexWrap:"wrap"}}>
                   <div style={{flex:1,minWidth:"200px"}}>
                     {sqliteDisabled
-                      ? <><strong style={{color:"#dc2626"}}>⛔ SQLite отключён</strong> — вкладка SQLite и весь связанный код скрыты. Используется только PostgreSQL.</>
-                      : <><strong style={{color:"#b45309"}}>⚠️ SQLite включён</strong> — браузерная база данных активна. Для полного перехода на PostgreSQL отключите SQLite.</>
+                      ? <><strong style={{color:"#dc2626"}}>⛔ SQLite отключён</strong> — браузерное хранилище отключено.</>
+                      : <><strong style={{color:"#16a34a"}}>✅ SQLite активен</strong> — данные хранятся в браузере (IndexedDB).</>
                     }
                   </div>
                   {sqliteDisabled ? (
@@ -5033,10 +4876,10 @@ function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbC
                     </button>
                   ) : (
                     <button className="btn" style={{background:"#dc2626",color:"#fff",fontWeight:700,whiteSpace:"nowrap"}} onClick={() => {
-                      if (!confirm("Отключить SQLite полностью?\n\nВкладка SQLite будет скрыта, браузерное хранилище не будет использоваться.\nДанные в PostgreSQL останутся. Можно включить обратно.")) return;
+                      if (!confirm("Отключить SQLite? Браузерное хранилище не будет использоваться. Можно включить обратно.")) return;
                       setSqliteDisabled(true);
                       setDbSubTab('postgres');
-                      notify("SQLite отключён. Используется только PostgreSQL.", "ok");
+                      notify("SQLite отключён.", "ok");
                     }}>
                       🚫 Отключить SQLite
                     </button>
@@ -5050,7 +4893,6 @@ function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbC
                   <div className={"db-status-bar " + (dbConfig.connected ? "connected" : "disconnected")}>
                     <div className={"db-status-dot " + (dbConfig.connected ? "connected" : "disconnected")}></div>
                     {dbConfig.connected ? "SQLite активна · " + (dbConfig.dbSize ? (dbConfig.dbSize/1024).toFixed(1)+" КБ" : "0 КБ") : "SQLite инициализируется…"}
-                    {isPgActive && <span style={{marginLeft:"12px",fontSize:"11px",background:"rgba(234,179,8,0.15)",color:"#b45309",border:"1px solid rgba(234,179,8,0.3)",padding:"2px 8px",borderRadius:"10px",fontWeight:700}}>⚠️ PostgreSQL активна — SQLite не используется</span>}
                   </div>
                   <div className="settings-card">
                     <div className="settings-section-title">🗄️ SQLite — встроенная база данных</div>
@@ -5143,173 +4985,6 @@ function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbC
                 </div>
               )}
 
-              {/* ══ PostgreSQL Tab ══ */}
-              {dbSubTab === "postgres" && (
-                <div>
-                  {/* Status bar */}
-                  <div className={"db-status-bar " + (isPgActive ? "connected" : "disconnected")}>
-                    <div className={"db-status-dot " + (isPgActive ? "connected" : "disconnected")}></div>
-                    {isPgActive ? "PostgreSQL активна · " + (pgConfig.host + ":" + (pgConfig.port||5432) + "/" + pgConfig.database) : "PostgreSQL не подключена — используется SQLite"}
-                  </div>
-
-                  {/* Connection settings */}
-                  <div className="settings-card">
-                    <div className="settings-section-title">🐘 Настройки подключения PostgreSQL</div>
-                    <div style={{display:"grid",gridTemplateColumns:"1fr 120px",gap:"12px",marginBottom:"12px"}}>
-                      <div>
-                        <div style={{fontSize:"12px",fontWeight:700,marginBottom:"4px",color:"var(--rd-gray-text)"}}>Хост</div>
-                        <input className="form-input" placeholder="localhost или IP-адрес" value={pgForm.host} onChange={e => setPgForm(f => ({...f,host:e.target.value}))} />
-                      </div>
-                      <div>
-                        <div style={{fontSize:"12px",fontWeight:700,marginBottom:"4px",color:"var(--rd-gray-text)"}}>Порт</div>
-                        <input className="form-input" placeholder="5432" value={pgForm.port} onChange={e => setPgForm(f => ({...f,port:e.target.value}))} />
-                      </div>
-                    </div>
-                    <div style={{marginBottom:"12px"}}>
-                      <div style={{fontSize:"12px",fontWeight:700,marginBottom:"4px",color:"var(--rd-gray-text)"}}>База данных</div>
-                      <input className="form-input" placeholder="postgres" value={pgForm.database} onChange={e => setPgForm(f => ({...f,database:e.target.value}))} />
-                    </div>
-                    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"12px",marginBottom:"12px"}}>
-                      <div>
-                        <div style={{fontSize:"12px",fontWeight:700,marginBottom:"4px",color:"var(--rd-gray-text)"}}>Пользователь</div>
-                        <input className="form-input" placeholder="postgres" value={pgForm.user} onChange={e => setPgForm(f => ({...f,user:e.target.value}))} />
-                      </div>
-                      <div>
-                        <div style={{fontSize:"12px",fontWeight:700,marginBottom:"4px",color:"var(--rd-gray-text)"}}>Пароль</div>
-                        <input className="form-input" type="password" placeholder={pgForm._passwordSaved && !pgForm.password ? "(пароль сохранён)" : "••••••••"} value={pgForm.password || ""} onChange={e => setPgForm(f => ({...f,password:e.target.value}))} />
-                      </div>
-                    </div>
-                    <div style={{marginBottom:"16px",display:"flex",alignItems:"center",gap:"8px"}}>
-                      <input type="checkbox" id="pg-ssl" checked={!!pgForm.ssl} onChange={e => setPgForm(f => ({...f,ssl:e.target.checked}))} style={{width:"16px",height:"16px",cursor:"pointer"}} />
-                      <label htmlFor="pg-ssl" style={{fontSize:"13px",cursor:"pointer",fontWeight:600}}>Использовать SSL</label>
-                      <span style={{fontSize:"12px",color:"var(--rd-gray-text)"}}>(для облачных БД: Supabase, Neon, Railway и др.)</span>
-                    </div>
-                    {/* Test result */}
-                    {pgTestResult && (
-                      <div style={{marginBottom:"14px",padding:"10px 14px",borderRadius:"var(--rd-radius-sm)",fontSize:"13px",background:pgTestResult.ok?"rgba(34,197,94,0.08)":"rgba(199,22,24,0.08)",border:pgTestResult.ok?"1px solid rgba(34,197,94,0.25)":"1px solid rgba(199,22,24,0.25)",color:pgTestResult.ok?"#15803d":"var(--rd-red)"}}>
-                        {pgTestResult.ok ? (
-                          <div>✅ Подключение успешно!<br/><span style={{fontSize:"12px",opacity:0.8}}>БД: <strong>{pgTestResult.database}</strong> · Размер: {pgTestResult.size}<br/>{pgTestResult.version?.split(" ").slice(0,2).join(" ")}</span></div>
-                        ) : (
-                          <div>❌ Ошибка подключения:<br/><code style={{fontSize:"12px"}}>{pgTestResult.error}</code></div>
-                        )}
-                      </div>
-                    )}
-                    <div style={{display:"flex",gap:"10px",flexWrap:"wrap"}}>
-                      <button className="btn btn-secondary" onClick={() => testPgConnection()} disabled={pgTesting}>{pgTesting ? "⏳ Проверка…" : "🔌 Проверить подключение"}</button>
-                      <button className="btn btn-primary" onClick={savePgSettings}>💾 Сохранить</button>
-                    </div>
-                  </div>
-
-                  {/* Enable / Disable */}
-                  <div className="settings-card">
-                    <div className="settings-section-title">⚡ Активация</div>
-                    <div style={{fontSize:"13px",color:"var(--rd-gray-text)",marginBottom:"14px",lineHeight:"1.6"}}>
-                      После активации приложение будет хранить и читать все данные из PostgreSQL. SQLite останется как резервная копия до следующей загрузки страницы.
-                    </div>
-                    <div style={{display:"flex",gap:"10px",flexWrap:"wrap",alignItems:"center"}}>
-                      {!isPgActive ? (
-                        <button className="btn btn-primary" style={{background:"#16a34a",border:"none"}} onClick={enablePg} disabled={pgTesting}>{pgTesting ? "⏳ Проверка…" : "🟢 Активировать PostgreSQL"}</button>
-                      ) : (
-                        <button className="btn" style={{background:"var(--rd-red)",color:"#fff",fontWeight:700}} onClick={disablePg}>🔴 Отключить PostgreSQL</button>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Migration */}
-                  <div className="settings-card">
-                    <div className="settings-section-title">🔄 Миграция данных</div>
-                    <div style={{fontSize:"13px",color:"var(--rd-gray-text)",marginBottom:"14px",lineHeight:"1.6"}}>
-                      Скопировать все текущие данные из SQLite (браузер) в PostgreSQL. Используйте это при первом переходе на PG чтобы не потерять существующие данные.
-                    </div>
-                    <button className="btn btn-secondary" onClick={migrateToPg} disabled={pgMigrating || !pgConfig?.host}>{pgMigrating ? "⏳ Миграция…" : "📤 Мигрировать SQLite → PostgreSQL"}</button>
-                    {!pgConfig?.host && <div style={{fontSize:"12px",color:"var(--rd-gray-text)",marginTop:"6px"}}>Сначала сохраните настройки подключения.</div>}
-                  </div>
-
-                  {/* Stats */}
-                  {isPgActive && (
-                    <div className="settings-card">
-                      <div className="settings-section-title">📊 Статистика PostgreSQL</div>
-                      {pgStats ? (
-                        <div>
-                          <div style={{fontSize:"13px",color:"var(--rd-gray-text)",marginBottom:"12px"}}>Размер БД: <strong>{pgStats.size}</strong> · Всего ключей: <strong>{pgStats.total}</strong></div>
-                          <div className="db-tables-grid">
-                            {[["cm_users","👥 Пользователи"],["cm_products","🛍️ Товары"],["cm_orders","📦 Заказы"],["cm_transfers","🪙 Переводы"],["cm_categories","🏷️ Категории"],["_total_keys","🔑 Всего ключей"]].map(([k,label]) => (
-                              <div key={k} className="db-table-card">
-                                <div className="db-table-name">{label}</div>
-                                <div className="db-table-count">{pgStats.rowCounts?.[k] ?? "—"}</div>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      ) : (
-                        <div style={{fontSize:"13px",color:"var(--rd-gray-text)"}}>Нажмите кнопку для загрузки статистики.</div>
-                      )}
-                      <div style={{marginTop:"14px"}}>
-                        <button className="btn btn-secondary" onClick={loadPgStats} disabled={pgStatsLoading}>{pgStatsLoading ? "⏳ Загрузка…" : "🔄 Загрузить статистику"}</button>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* PG SQL Console */}
-                  {isAdmin && isPgActive && (
-                    <div className="settings-card">
-                      <div className="settings-section-title">💻 SQL-консоль (PostgreSQL)</div>
-                      <div style={{fontSize:"13px",color:"var(--rd-gray-text)",marginBottom:"10px"}}>Таблица <code style={{background:"var(--rd-gray-bg)",padding:"2px 6px",borderRadius:"4px",fontFamily:"monospace",fontSize:"11px"}}>kv</code> содержит поля <code style={{background:"var(--rd-gray-bg)",padding:"2px 6px",borderRadius:"4px",fontFamily:"monospace",fontSize:"11px"}}>key</code>, <code style={{background:"var(--rd-gray-bg)",padding:"2px 6px",borderRadius:"4px",fontFamily:"monospace",fontSize:"11px"}}>value</code>, <code style={{background:"var(--rd-gray-bg)",padding:"2px 6px",borderRadius:"4px",fontFamily:"monospace",fontSize:"11px"}}>updated_at</code>.</div>
-                      <textarea style={{width:"100%",minHeight:"90px",fontFamily:"monospace",fontSize:"13px",padding:"10px 12px",border:"1.5px solid var(--rd-gray-border)",borderRadius:"var(--rd-radius-sm)",resize:"vertical",background:"#1a1a1a",color:"#e5e7eb",outline:"none"}} placeholder={"SELECT key, updated_at FROM kv ORDER BY updated_at DESC LIMIT 10;"} value={pgSqlConsole} onChange={e => setPgSqlConsole(e.target.value)} onKeyDown={e => { if((e.ctrlKey||e.metaKey)&&e.key==="Enter"){e.preventDefault();runPgSql();}}} />
-                      <div style={{display:"flex",gap:"10px",marginTop:"8px"}}>
-                        <button className="btn btn-primary" onClick={runPgSql}>▶ Выполнить <span style={{fontSize:"11px",opacity:0.7}}>(Ctrl+Enter)</span></button>
-                        <button className="btn btn-ghost" onClick={() => { setPgSqlResult(null); setPgSqlError(""); setPgSqlConsole(""); }}>Очистить</button>
-                      </div>
-                      {pgSqlError && <div style={{marginTop:"10px",padding:"10px 14px",background:"rgba(199,22,24,0.08)",border:"1px solid rgba(199,22,24,0.2)",borderRadius:"var(--rd-radius-sm)",fontSize:"13px",color:"var(--rd-red)",fontFamily:"monospace"}}>{pgSqlError}</div>}
-                      {pgSqlResult && (
-                        <div style={{marginTop:"10px",overflowX:"auto"}}>
-                          <table style={{borderCollapse:"collapse",width:"100%",fontSize:"12px",fontFamily:"monospace"}}>
-                            <thead><tr>{pgSqlResult.columns.map(c => <th key={c} style={{padding:"6px 10px",textAlign:"left",background:"var(--rd-gray-bg)",border:"1px solid var(--rd-gray-border)",fontWeight:700,whiteSpace:"nowrap"}}>{c}</th>)}</tr></thead>
-                            <tbody>{pgSqlResult.rows.slice(0,100).map((row,i) => <tr key={i} style={{background:i%2===0?"#fff":"var(--rd-gray-bg)"}}>{pgSqlResult.columns.map((c,j) => <td key={j} style={{padding:"5px 10px",border:"1px solid var(--rd-gray-border)",maxWidth:"300px",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{row[c]===null||row[c]===undefined?<em style={{color:"var(--rd-gray-text)"}}>NULL</em>:String(row[c]).length>80?String(row[c]).substring(0,80)+"…":String(row[c])}</td>)}</tr>)}</tbody>
-                          </table>
-                          <div style={{fontSize:"11px",color:"var(--rd-gray-text)",marginTop:"6px"}}>{pgSqlResult.rowCount} строк</div>
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {/* Diagnostics */}
-                  <div className="settings-card">
-                    <div className="settings-section-title">🔍 Диагностика соединения</div>
-                    <div style={{fontSize:"13px",color:"var(--rd-gray-text)",marginBottom:"10px"}}>Проверяет что сервер реально использует PostgreSQL — видит ли он конфиг, подключается ли к БД.</div>
-                    <button className="btn" onClick={runDiag} disabled={debugLoading} style={{background:"#7c3aed",color:"#fff",fontWeight:700,border:"none"}}>
-                      {debugLoading ? "⏳ Диагностика…" : "🔍 Запустить диагностику"}
-                    </button>
-                    {debugInfo && (
-                      <div style={{marginTop:"12px",background:"#0f172a",color:"#e2e8f0",borderRadius:"10px",padding:"14px 16px",fontSize:"12px",fontFamily:"monospace",lineHeight:1.8,overflowX:"auto"}}>
-                        <div style={{color:"#94a3b8",marginBottom:"8px",fontWeight:700}}>── РЕЗУЛЬТАТ ──</div>
-                        <div><span style={{color:"#7dd3fc"}}>ENV DATABASE_URL:</span> {debugInfo.hasEnvUrl ? "✅ задан" : "❌ нет"}</div>
-                        <div><span style={{color:"#7dd3fc"}}>ENV PG_HOST:</span> {debugInfo.hasEnvHost ? "✅ задан" : "❌ нет"}</div>
-                        <div><span style={{color:"#7dd3fc"}}>pg-config.json:</span> {debugInfo.hasCfgFile ? "✅ есть" : "❌ нет"}</div>
-                        <div><span style={{color:"#7dd3fc"}}>Ошибка подключения:</span> {debugInfo.pgError || "нет"}</div>
-                        <div style={{marginTop:"6px"}}><span style={{color:"#7dd3fc"}}>Ключи в PG ({(debugInfo.pgKeys||[]).length} шт):</span></div>
-                        {(debugInfo.pgKeys||[]).map(({key, preview}) => (
-                          <div key={key} style={{paddingLeft:"12px",color:"#a3e635"}}>• {key}: <span style={{color:"#94a3b8",fontSize:"11px"}}>{preview}</span></div>
-                        ))}
-                        {!(debugInfo.pgKeys||[]).length && <div style={{paddingLeft:"12px",color:"#f87171"}}>— пусто</div>}
-                        <div style={{marginTop:"6px"}}><span style={{color:"#7dd3fc"}}>Ключи в JSON:</span> {(debugInfo.jsonKeys||[]).join(", ") || "пусто"}</div>
-                        <div><span style={{color:"#7dd3fc"}}>Папка:</span> {debugInfo.cwd}</div>
-                        {debugInfo.error && <div style={{color:"#f87171",marginTop:"6px"}}>❌ {debugInfo.error}</div>}
-                      </div>
-                    )}
-                  </div>
-
-                  {/* PG Info */}
-                  <div className="settings-card" style={{background:"rgba(59,130,246,0.04)",border:"1px solid rgba(59,130,246,0.15)"}}>
-                    <div className="settings-section-title" style={{color:"#2563eb"}}>ℹ️ Поддерживаемые провайдеры</div>
-                    <div style={{fontSize:"13px",color:"var(--rd-gray-text)",lineHeight:"1.8"}}>
-                      Работает с любым PostgreSQL 12+: <strong>Supabase</strong>, <strong>Neon</strong>, <strong>Railway</strong>, <strong>Render</strong>, локальный сервер и др.<br/>
-                      Для облачных сервисов обычно требуется включить <strong>SSL</strong>. Строка подключения вида:<br/>
-                      <code style={{display:"block",marginTop:"6px",background:"#1a1a1a",color:"#86efac",padding:"8px 12px",borderRadius:"6px",fontSize:"12px",fontFamily:"monospace"}}>postgresql://user:password@host:5432/database?sslmode=require</code>
-                    </div>
-                  </div>
-                </div>
-              )}
 
             </div>
           )}
