@@ -4390,7 +4390,7 @@ function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbC
   }, [pgConfig]);
   const [pgTesting, setPgTesting] = useState(false);
   const [pgTestResult, setPgTestResult] = useState(null);
-  const [pgMigrating, setPgMigrating] = useState(false);
+  const [pgActivationMode, setPgActivationMode] = useState('existing'); // 'existing' or 'new'
   const [pgSqlConsole, setPgSqlConsole] = useState("");
   const [pgSqlResult, setPgSqlResult] = useState(null);
   const [pgSqlError, setPgSqlError] = useState("");
@@ -4435,23 +4435,70 @@ function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbC
     if (!pgForm.host || !pgForm.database || !pgForm.user) {
       notify("Сначала заполните настройки", "err"); return;
     }
+    
+    // Подтверждение в зависимости от режима
+    if (pgActivationMode === 'new') {
+      if (!confirm("⚠️ ВНИМАНИЕ!\n\nВы выбрали режим 'Создать новую БД'.\n\nВсе текущие данные в PostgreSQL будут ПЕРЕЗАПИСАНЫ данными из SQLite!\n\nПродолжить?")) {
+        return;
+      }
+    }
+    
     setPgTesting(true);
     const { _passwordSaved, ...pgFormClean } = pgForm;
     const cfg = { ...pgFormClean, enabled: true };
+    
     try {
+      // 1. Проверяем подключение
       const r = await fetch('/api/store', { method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'pg_test', config: cfg }) });
       const testRes = await r.json();
-      if (!testRes.ok) { notify("Не удалось подключиться: " + testRes.error, "err"); setPgTesting(false); return; }
+      if (!testRes.ok) { 
+        notify("Не удалось подключиться: " + testRes.error, "err"); 
+        setPgTesting(false); 
+        return; 
+      }
+      
+      // 2. Если режим 'new' - мигрируем данные
+      if (pgActivationMode === 'new') {
+        notify("Миграция данных из SQLite в PostgreSQL...", "ok");
+        const all = storage.all();
+        const migrateRes = await fetch('/api/store', { 
+          method: 'POST', 
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'setMany', data: all }) 
+        });
+        const migrateData = await migrateRes.json();
+        if (!migrateData.ok) { 
+          notify("Ошибка миграции: " + migrateData.error, "err"); 
+          setPgTesting(false); 
+          return; 
+        }
+        notify("✓ Мигрировано " + Object.keys(all).length + " ключей", "ok");
+      }
+      
+      // 3. Сохраняем конфиг и активируем PostgreSQL
       const r2 = await fetch('/api/store', { method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'pg_save', config: cfg }) });
       const saved = await r2.json();
-      if (!saved.ok) { notify("Ошибка сохранения конфига: " + (saved.error||''), "err"); setPgTesting(false); return; }
+      if (!saved.ok) { 
+        notify("Ошибка сохранения конфига: " + (saved.error||''), "err"); 
+        setPgTesting(false); 
+        return; 
+      }
+      
       savePgConfig(cfg);
       setPgForm(cfg);
-      notify("PostgreSQL активирована! Перезагрузите страницу.", "ok");
+      
+      if (pgActivationMode === 'existing') {
+        notify("PostgreSQL активирована! Подключено к существующей БД. Перезагрузка...", "ok");
+      } else {
+        notify("PostgreSQL активирована! Данные мигрированы. Перезагрузка...", "ok");
+      }
+      
       setTimeout(() => window.location.reload(), 1500);
-    } catch(e) { notify("Ошибка: " + e.message, "err"); }
+    } catch(e) { 
+      notify("Ошибка: " + e.message, "err"); 
+    }
     setPgTesting(false);
   };
 
@@ -4462,20 +4509,6 @@ function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbC
     setPgForm({ host: "", port: "5432", database: "", user: "", password: "", ssl: false, enabled: false });
     notify("PostgreSQL отключена.");
     setTimeout(() => window.location.reload(), 1200);
-  };
-
-  const migrateToPg = async () => {
-    if (!confirm("Мигрировать все данные в PostgreSQL? Данные в PG будут перезаписаны.")) return;
-    setPgMigrating(true);
-    try {
-      const all = storage.all();
-      const res = await fetch('/api/store', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'setMany', data: all }) });
-      const data = await res.json();
-      if (data.ok) { notify("Мигрировано " + Object.keys(all).length + " ключей ✓"); }
-      else { notify("Ошибка миграции: " + data.error, "err"); }
-    } catch(err) { notify("Ошибка: " + err.message, "err"); }
-    setPgMigrating(false);
   };
 
   const loadPgStats = async () => {
@@ -5470,26 +5503,59 @@ function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbC
                   {/* Enable / Disable */}
                   <div className="settings-card">
                     <div className="settings-section-title">⚡ Активация</div>
-                    <div style={{fontSize:"13px",color:"var(--rd-gray-text)",marginBottom:"14px",lineHeight:"1.6"}}>
+                    <div style={{fontSize:"13px",color:"var(--rd-gray-text)",marginBottom:"16px",lineHeight:"1.6"}}>
                       После активации приложение будет хранить и читать все данные из PostgreSQL. SQLite останется как резервная копия до следующей загрузки страницы.
                     </div>
+                    
+                    {!isPgActive && (
+                      <div style={{marginBottom:"20px"}}>
+                        <div style={{fontSize:"12px",fontWeight:700,textTransform:"uppercase",letterSpacing:"0.05em",color:"var(--rd-gray-text)",marginBottom:"12px"}}>Выберите режим активации</div>
+                        
+                        <div style={{display:"flex",flexDirection:"column",gap:"12px"}}>
+                          {/* Режим: Существующая БД */}
+                          <label style={{display:"flex",alignItems:"flex-start",gap:"12px",padding:"14px",border:"2px solid " + (pgActivationMode === 'existing' ? "var(--rd-red)" : "var(--rd-gray-border)"),borderRadius:"var(--rd-radius-sm)",cursor:"pointer",background:pgActivationMode === 'existing' ? "rgba(199,22,24,0.04)" : "#fff",transition:"all 0.2s"}}>
+                            <input type="radio" name="pgActivationMode" value="existing" checked={pgActivationMode === 'existing'} onChange={e => setPgActivationMode(e.target.value)} style={{marginTop:"2px",cursor:"pointer"}} />
+                            <div style={{flex:1}}>
+                              <div style={{fontWeight:700,fontSize:"14px",marginBottom:"4px",color:pgActivationMode === 'existing' ? "var(--rd-red)" : "var(--rd-dark)"}}>
+                                ✅ Подключиться к существующей БД
+                              </div>
+                              <div style={{fontSize:"12px",color:"var(--rd-gray-text)",lineHeight:"1.5"}}>
+                                Сохранить все данные в PostgreSQL. Безопасно для обновлений приложения. <strong style={{color:"#16a34a"}}>Рекомендуется!</strong>
+                              </div>
+                            </div>
+                          </label>
+                          
+                          {/* Режим: Новая БД */}
+                          <label style={{display:"flex",alignItems:"flex-start",gap:"12px",padding:"14px",border:"2px solid " + (pgActivationMode === 'new' ? "var(--rd-red)" : "var(--rd-gray-border)"),borderRadius:"var(--rd-radius-sm)",cursor:"pointer",background:pgActivationMode === 'new' ? "rgba(199,22,24,0.04)" : "#fff",transition:"all 0.2s"}}>
+                            <input type="radio" name="pgActivationMode" value="new" checked={pgActivationMode === 'new'} onChange={e => setPgActivationMode(e.target.value)} style={{marginTop:"2px",cursor:"pointer"}} />
+                            <div style={{flex:1}}>
+                              <div style={{fontWeight:700,fontSize:"14px",marginBottom:"4px",color:pgActivationMode === 'new' ? "var(--rd-red)" : "var(--rd-dark)"}}>
+                                🔄 Создать новую БД (мигрировать из SQLite)
+                              </div>
+                              <div style={{fontSize:"12px",color:"var(--rd-gray-text)",lineHeight:"1.5",marginBottom:"6px"}}>
+                                Перенести данные из SQLite в PostgreSQL. Текущие данные в PostgreSQL будут перезаписаны.
+                              </div>
+                              {pgActivationMode === 'new' && (
+                                <div style={{fontSize:"11px",background:"rgba(239,68,68,0.1)",color:"#dc2626",padding:"8px 10px",borderRadius:"6px",fontWeight:600,display:"flex",alignItems:"center",gap:"6px"}}>
+                                  <span>⚠️</span>
+                                  <span>ВНИМАНИЕ! Все данные в PostgreSQL будут перезаписаны!</span>
+                                </div>
+                              )}
+                            </div>
+                          </label>
+                        </div>
+                      </div>
+                    )}
+                    
                     <div style={{display:"flex",gap:"10px",flexWrap:"wrap",alignItems:"center"}}>
                       {!isPgActive ? (
-                        <button className="btn btn-primary" style={{background:"#16a34a",border:"none"}} onClick={enablePg} disabled={pgTesting}>{pgTesting ? "⏳ Проверка…" : "🟢 Активировать PostgreSQL"}</button>
+                        <button className="btn btn-primary" style={{background:"#16a34a",border:"none"}} onClick={enablePg} disabled={pgTesting}>
+                          {pgTesting ? "⏳ Подключение…" : "🟢 Активировать PostgreSQL"}
+                        </button>
                       ) : (
                         <button className="btn" style={{background:"var(--rd-red)",color:"#fff",fontWeight:700}} onClick={disablePg}>🔴 Отключить PostgreSQL</button>
                       )}
                     </div>
-                  </div>
-
-                  {/* Migration */}
-                  <div className="settings-card">
-                    <div className="settings-section-title">🔄 Миграция данных</div>
-                    <div style={{fontSize:"13px",color:"var(--rd-gray-text)",marginBottom:"14px",lineHeight:"1.6"}}>
-                      Скопировать все текущие данные из SQLite (браузер) в PostgreSQL. Используйте это при первом переходе на PG чтобы не потерять существующие данные.
-                    </div>
-                    <button className="btn btn-secondary" onClick={migrateToPg} disabled={pgMigrating || !pgConfig?.host}>{pgMigrating ? "⏳ Миграция…" : "📤 Мигрировать SQLite → PostgreSQL"}</button>
-                    {!pgConfig?.host && <div style={{fontSize:"12px",color:"var(--rd-gray-text)",marginTop:"6px"}}>Сначала сохраните настройки подключения.</div>}
                   </div>
 
                   {/* Stats */}
