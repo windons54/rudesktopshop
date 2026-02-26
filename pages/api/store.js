@@ -175,7 +175,7 @@ async function persistPgConfig(cfg) {
 // ── Handler ────────────────────────────────────────────────────────────────
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).end();
-  const { action, key, value, data, config } = req.body || {};
+  const { action, key, value, data, config, intentional_delete } = req.body || {};
 
   // ── Конфиг ──
   if (action === 'pg_save') {
@@ -356,6 +356,41 @@ export default async function handler(req, res) {
   // ── Основные CRUD ──
   try {
     const pool = await getPool();
+
+    // Защита: никогда не сохранять cm_users как пустой объект/null
+    // и никогда не терять пароли пользователей
+    if (action === 'set' && key === 'cm_users') {
+      if (!value || typeof value !== 'object' || Object.keys(value).length === 0) {
+        console.warn('[Store] Попытка сохранить пустой cm_users — отклонено');
+        return res.json({ ok: false, error: 'Cannot save empty users' });
+      }
+      // Мержим с существующими данными на сервере чтобы не терять пользователей
+      const existingUsers = pool 
+        ? await pgKv.get(pool, 'cm_users') 
+        : (readJSON()['cm_users'] || null);
+      if (existingUsers && typeof existingUsers === 'object') {
+        // Проверяем что ни один пользователь не потерял пароль
+        Object.keys(value).forEach(k => {
+          if (value[k] && typeof value[k] === 'object') {
+            if (!value[k].password && existingUsers[k]?.password) {
+              value[k].password = existingUsers[k].password;
+            }
+            if (value[k].balance === undefined && existingUsers[k]?.balance !== undefined) {
+              value[k].balance = existingUsers[k].balance;
+            }
+          }
+        });
+        // Добавляем пользователей которые есть на сервере но отсутствуют в запросе
+        Object.keys(existingUsers).forEach(k => {
+          if (!value[k] && existingUsers[k]) {
+            // Если это intentional delete — не восстанавливаем
+            if (intentional_delete && intentional_delete === k) return;
+            // Пользователь пропал из запроса — сохраняем его
+            value[k] = existingUsers[k];
+          }
+        });
+      }
+    }
 
     if (pool) {
       if (action === 'get')     return res.json({ ok: true, value: await pgKv.get(pool, key) });

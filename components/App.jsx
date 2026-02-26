@@ -143,19 +143,32 @@ const storage = {
     if (_LOCAL_KEYS.has(k)) { _lsSet(k, v); return; }
     _cache[k] = v; // обновляем кэш немедленно
     _pendingWrites.add(k);
-    const p = _apiCall('set', { key: k, value: v })
-      .then(() => {
-        _pendingWrites.delete(k);
-        // убираем завершённый промис из массива
-        const idx = _writePromises.indexOf(p);
-        if (idx !== -1) _writePromises.splice(idx, 1);
-      })
-      .catch(e => {
-        _pendingWrites.delete(k);
-        const idx = _writePromises.indexOf(p);
-        if (idx !== -1) _writePromises.splice(idx, 1);
-        console.warn('Store set error', k, e);
-      });
+    const doWrite = (attempt) => {
+      return _apiCall('set', { key: k, value: v })
+        .then((r) => {
+          _pendingWrites.delete(k);
+          const idx = _writePromises.indexOf(p);
+          if (idx !== -1) _writePromises.splice(idx, 1);
+          if (r && !r.ok && attempt < 3) {
+            console.warn('[Storage] set failed, retrying', k, r.error, 'attempt', attempt+1);
+            return new Promise(res => setTimeout(res, 500 * (attempt + 1))).then(() => doWrite(attempt + 1));
+          }
+          if (r && !r.ok) {
+            console.error('[Storage] set failed permanently', k, r.error);
+          }
+        })
+        .catch(e => {
+          if (attempt < 3) {
+            console.warn('[Storage] set error, retrying', k, e.message, 'attempt', attempt+1);
+            return new Promise(res => setTimeout(res, 1000 * (attempt + 1))).then(() => doWrite(attempt + 1));
+          }
+          _pendingWrites.delete(k);
+          const idx = _writePromises.indexOf(p);
+          if (idx !== -1) _writePromises.splice(idx, 1);
+          console.error('[Storage] set error (final)', k, e.message);
+        });
+    };
+    const p = doWrite(0);
     _writePromises.push(p);
     return p;
   },
@@ -511,16 +524,38 @@ function App() {
 
       // Восстанавливаем сессию из localStorage
       const savedSession = _lsGet("cm_session");
-      if (savedSession && savedSession.user && base[savedSession.user]) {
-        setCurrentUser(savedSession.user);
+      if (savedSession && savedSession.user) {
+        // Восстанавливаем сессию если пользователь найден в базе
+        if (base[savedSession.user]) {
+          setCurrentUser(savedSession.user);
+        } else {
+          // Пользователь не найден — возможно данные ещё загружаются
+          // Устанавливаем таймер для повторной проверки
+          console.warn('[Session] Пользователь', savedSession.user, 'не найден в базе, попробуем позже');
+          setTimeout(() => {
+            const retryUsers = storage.get("cm_users");
+            if (retryUsers && retryUsers[savedSession.user]) {
+              setCurrentUser(savedSession.user);
+            }
+          }, 2000);
+        }
       }
 
       // Начисления (трудодни + дни рождения) — выполняются на сервере атомарно
       _apiCall('daily_grants').then(r => {
         if (r.ok && r.users && (r.grants.workday > 0 || r.grants.birthday > 0)) {
           // Сервер сделал начисления — обновляем локальный кэш и UI
+          // Мержим а не заменяем, чтобы не потерять данные
           _cache['cm_users'] = r.users;
-          setUsers(r.users);
+          setUsers(prev => {
+            const merged = { ...prev };
+            Object.keys(r.users).forEach(k => {
+              merged[k] = { ...(merged[k] || {}), ...r.users[k] };
+              // Гарантируем что пароль не теряется
+              if (!merged[k].password && prev[k]?.password) merged[k].password = prev[k].password;
+            });
+            return merged;
+          });
           _lsSet('cm_workday_grant', new Date().toISOString().slice(0, 10));
           _lsSet('cm_birthday_grant', String(new Date().getFullYear()));
         }
@@ -536,8 +571,37 @@ function App() {
     // ── Polling: обновляем данные с сервера каждые 4 секунды ──
     const _applyServerData = (data) => {
       if (!data) return;
-      // Всегда обновляем — не проверяем truthy, чтобы не пропустить пустые массивы/объекты
-      if ('cm_users'            in data) setUsers(data.cm_users);
+      // Защита: НЕ перезаписываем users пустым объектом если были данные
+      if ('cm_users' in data) {
+        const newUsers = data.cm_users;
+        if (newUsers && typeof newUsers === 'object' && Object.keys(newUsers).length > 0) {
+          // Мержим с текущим состоянием: не теряем пользователей которые уже есть в state
+          setUsers(prev => {
+            const merged = { ...prev };
+            Object.keys(newUsers).forEach(k => {
+              if (newUsers[k] && typeof newUsers[k] === 'object') {
+                // Для каждого пользователя: мержим поля, не теряем password/role/balance
+                merged[k] = {
+                  ...(merged[k] || {}),
+                  ...newUsers[k],
+                };
+                // Гарантируем обязательные поля
+                if (!merged[k].password && prev[k]?.password) merged[k].password = prev[k].password;
+                if (!merged[k].role) merged[k].role = prev[k]?.role || (k === 'admin' ? 'admin' : 'user');
+                if (merged[k].balance === undefined || merged[k].balance === null) {
+                  merged[k].balance = prev[k]?.balance || 0;
+                }
+              }
+            });
+            return merged;
+          });
+          // Восстановление сессии: если currentUser не установлен, но сессия есть в localStorage
+          const savedSession = _lsGet("cm_session");
+          if (savedSession && savedSession.user && newUsers[savedSession.user]) {
+            setCurrentUser(prev => prev || savedSession.user);
+          }
+        }
+      }
       if ('cm_orders'           in data) setOrders(data.cm_orders);
       if ('cm_products'         in data) setCustomProducts(data.cm_products);
       if ('cm_transfers'        in data) setTransfers(data.cm_transfers);
@@ -625,7 +689,28 @@ function App() {
 
   const notify = (msg, type = "ok") => { setToast({ msg, type }); setTimeout(() => setToast(null), 3200); pushNotif(msg, type); };
 
-  const saveUsers = (u) => { setUsers(u); storage.set("cm_users", u); };
+  const saveUsers = (u) => {
+    // Гарантируем что пользовательские данные не потеряются
+    if (!u || typeof u !== 'object') return;
+    
+    // Защита: никогда не сохранять пустой объект если уже есть пользователи
+    if (Object.keys(u).length === 0) {
+      console.warn('[saveUsers] Попытка сохранить пустой объект users — отклонено');
+      return;
+    }
+    
+    // Гарантируем что у каждого пользователя есть обязательные поля
+    const safe = { ...u };
+    Object.keys(safe).forEach(k => {
+      if (safe[k] && typeof safe[k] === 'object') {
+        if (!safe[k].role) safe[k].role = (k === 'admin') ? 'admin' : 'user';
+        if (safe[k].balance === undefined || safe[k].balance === null) safe[k].balance = 0;
+      }
+    });
+    
+    setUsers(safe);
+    storage.set("cm_users", safe);
+  };
   const saveOrders = (o) => { setOrders(o); storage.set("cm_orders", o); };
   const saveProducts = (p) => { setCustomProducts(p); storage.set("cm_products", p); };
   const saveTransfers = (t) => { setTransfers(t); storage.set("cm_transfers", t); };
@@ -864,7 +949,7 @@ function App() {
                             </button>
                           ))}
                           <div className="user-dropdown-divider"></div>
-                          <button className="user-dropdown-item danger" onClick={() => { setCurrentUser(null); storage.set("cm_session", null); setPage("shop"); setMenuOpen(false); }}>
+                          <button className="user-dropdown-item danger" onClick={() => { setCurrentUser(null); _lsSet("cm_session", null); setPage("shop"); setMenuOpen(false); }}>
                             <span className="udi-icon">🚪</span>
                             Выйти
                           </button>
@@ -2530,9 +2615,8 @@ function LoginPage({ users, setCurrentUser, setPage, notify }) {
     if (!u) { notify("Пользователь не найден", "err"); return; }
     if (u.password !== form.password) { notify("Неверный пароль", "err"); return; }
     setCurrentUser(form.username);
-    if (form.remember) {
-      storage.set("cm_session", { user: form.username, ts: Date.now() });
-    }
+    // Всегда сохраняем сессию в localStorage (не зависит от «Запомнить меня»)
+    _lsSet("cm_session", { user: form.username, ts: Date.now() });
     notify(`Добро пожаловать, ${form.username}!`);
     setPage("shop");
   };
@@ -2575,10 +2659,12 @@ function RegisterPage({ users, saveUsers, setCurrentUser, setPage, notify }) {
     if (form.password !== form.confirm) { notify("Пароли не совпадают", "err"); return; }
     if (users[form.username]) { notify("Логин уже занят", "err"); return; }
     if (form.password.length < 6) { notify("Пароль минимум 6 символов", "err"); return; }
-    const newUsers = { ...users, [form.username]: { username: form.username, firstName: form.firstName, lastName: form.lastName, email: form.email, password: form.password, role: "user", balance: 0, createdAt: Date.now() } };
+    // Берём текущее состояние users и добавляем нового — не теряем существующих
+    const newUser = { username: form.username, firstName: form.firstName, lastName: form.lastName, email: form.email, password: form.password, role: "user", balance: 0, createdAt: Date.now() };
+    const newUsers = { ...users, [form.username]: newUser };
     saveUsers(newUsers);
     setCurrentUser(form.username);
-    storage.set("cm_session", { user: form.username, ts: Date.now() });
+    _lsSet("cm_session", { user: form.username, ts: Date.now() });
     notify("Регистрация прошла успешно!");
     setPage("shop");
   };
@@ -2649,9 +2735,32 @@ function UserEditForm({ username, user, users, saveUsers, notify, onClose, isAdm
     if (!form.email.trim()) { notify("Email не может быть пустым", "err"); return; }
     if (form.newPassword && form.newPassword.length < 6) { notify("Пароль минимум 6 символов", "err"); return; }
     if (form.newPassword && form.newPassword !== form.confirmPassword) { notify("Пароли не совпадают", "err"); return; }
-    const updated = { ...safeUser, email: form.email.trim(), avatar: form.avatar || "", birthdate: form.birthdate || "", employmentDate: form.employmentDate || "" };
-    if (form.newPassword) updated.password = form.newPassword;
-    saveUsers({ ...users, [username]: updated });
+    // ВАЖНО: берём АКТУАЛЬНЫЕ данные пользователя из users (не из замыкания safeUser)
+    // чтобы не затереть баланс/роль/пароль и другие поля обновлённые polling-ом
+    const currentUserData = users[username] || safeUser;
+    const updated = {
+      ...currentUserData,
+      email: form.email.trim(),
+      avatar: form.avatar || currentUserData.avatar || "",
+      birthdate: form.birthdate || currentUserData.birthdate || "",
+      employmentDate: form.employmentDate || currentUserData.employmentDate || "",
+    };
+    // Меняем пароль ТОЛЬКО если админ явно ввёл новый пароль
+    if (form.newPassword) {
+      updated.password = form.newPassword;
+    }
+    // Гарантируем что пароль, роль и баланс НИКОГДА не потеряются
+    if (!updated.password) updated.password = currentUserData.password;
+    if (!updated.role) updated.role = currentUserData.role || "user";
+    if (updated.balance === undefined || updated.balance === null) updated.balance = currentUserData.balance || 0;
+    // Сохраняем — берём АКТУАЛЬНЫЙ объект users (не stale) и обновляем ТОЛЬКО этого пользователя
+    const freshUsers = { ...users };
+    // Гарантируем что другие пользователи не потеряются
+    Object.keys(freshUsers).forEach(u => {
+      if (!freshUsers[u]) freshUsers[u] = users[u];
+    });
+    freshUsers[username] = updated;
+    saveUsers(freshUsers);
     notify("Профиль пользователя обновлён ✓");
     onClose();
   };
@@ -3380,9 +3489,15 @@ function AdminPage({ users, saveUsers, orders, saveOrders, products, saveProduct
 
   const deleteUser = (username) => {
     if (!confirm("Удалить пользователя " + username + "? Это действие необратимо.")) return;
+    if (username === "admin") { notify("Нельзя удалить администратора", "err"); return; }
     const nu = {...users};
     delete nu[username];
-    saveUsers(nu);
+    // Напрямую обновляем state и пишем на сервер с флагом intentional_delete
+    setUsers(nu);
+    _pendingWrites.add('cm_users');
+    _apiCall('set', { key: 'cm_users', value: nu, intentional_delete: username }).then(() => {
+      _pendingWrites.delete('cm_users');
+    }).catch(() => { _pendingWrites.delete('cm_users'); });
     notify("Пользователь " + username + " удалён");
   };
 
