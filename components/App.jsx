@@ -2668,13 +2668,14 @@ function RegisterPage({ users, saveUsers, setCurrentUser, setPage, notify }) {
 // ── USER EDIT FORM ────────────────────────────────────────────────────────
 
 function UserEditForm({ username, user, users, saveUsers, notify, onClose, isAdmin }) {
-  const [form, setForm] = useState({ email: user.email || "", newPassword: "", confirmPassword: "", birthdate: user.birthdate || "", employmentDate: user.employmentDate || "" });
+  const safeUser = user || {};
+  const [form, setForm] = useState({ email: safeUser.email || "", newPassword: "", confirmPassword: "", birthdate: safeUser.birthdate || "", employmentDate: safeUser.employmentDate || "", avatar: safeUser.avatar || "" });
 
   const save = () => {
     if (!form.email.trim()) { notify("Email не может быть пустым", "err"); return; }
     if (form.newPassword && form.newPassword.length < 6) { notify("Пароль минимум 6 символов", "err"); return; }
     if (form.newPassword && form.newPassword !== form.confirmPassword) { notify("Пароли не совпадают", "err"); return; }
-    const updated = { ...user, email: form.email.trim(), avatar: form.avatar || "", birthdate: form.birthdate || "", employmentDate: form.employmentDate || "" };
+    const updated = { ...safeUser, email: form.email.trim(), avatar: form.avatar || "", birthdate: form.birthdate || "", employmentDate: form.employmentDate || "" };
     if (form.newPassword) updated.password = form.newPassword;
     saveUsers({ ...users, [username]: updated });
     notify("Профиль пользователя обновлён ✓");
@@ -3782,7 +3783,7 @@ function AdminPage({ users, saveUsers, orders, saveOrders, products, saveProduct
                     {user.role === "admin" && <span style={{marginLeft:"8px",fontSize:"11px",fontWeight:700,background:"var(--rd-red-light)",color:"var(--rd-red)",border:"1.5px solid rgba(199,22,24,0.2)",borderRadius:"20px",padding:"1px 8px"}}>Админ</span>}
                   </div>
                   <div className="user-card-email">{user.email}</div>
-                  <div className="user-card-date">С {new Date(user.createdAt).toLocaleDateString("ru-RU")}</div>
+                  <div className="user-card-date">С {user.createdAt ? new Date(user.createdAt).toLocaleDateString("ru-RU") : "—"}</div>
                   {user.birthdate && <div className="user-card-date" style={{color:"var(--rd-red)"}}>🎂 {new Date(user.birthdate).toLocaleDateString("ru-RU", {day:"numeric",month:"long"})}</div>}
                 </div>
                 <div className="user-card-balance">
@@ -3871,12 +3872,12 @@ function AdminPage({ users, saveUsers, orders, saveOrders, products, saveProduct
         </div>
       )}
 
-      {userEditModal && (
+      {userEditModal && users[userEditModal.username] && (
         <div className="modal-overlay" onClick={() => setUserEditModal(null)}>
           <div className="modal-box" onClick={e => e.stopPropagation()} style={{maxWidth:"440px",padding:"32px 28px"}}>
             <button className="modal-close" onClick={() => setUserEditModal(null)}>✕</button>
             <div style={{fontWeight:800,fontSize:"20px",marginBottom:"20px"}}>Редактировать пользователя</div>
-            <UserEditForm username={userEditModal.username} user={userEditModal.user} users={users} saveUsers={saveUsers} notify={notify} onClose={() => setUserEditModal(null)} isAdmin={isAdmin} />
+            <UserEditForm username={userEditModal.username} user={users[userEditModal.username] || userEditModal.user} users={users} saveUsers={saveUsers} notify={notify} onClose={() => setUserEditModal(null)} isAdmin={isAdmin} />
           </div>
         </div>
       )}
