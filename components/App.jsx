@@ -114,7 +114,7 @@ function whenStoreReady() {
 }
 
 // Ключи, которые хранятся только локально (личные данные браузера)
-const _LOCAL_KEYS = new Set(['cm_session','cm_seen_orders','cm_notif_history','cm_notif_unread','cm_favorites','cm_birthday_grant']);
+const _LOCAL_KEYS = new Set(['cm_session','cm_seen_orders','cm_notif_history','cm_notif_unread','cm_favorites','cm_birthday_grant','cm_workday_grant']);
 
 const _lsGet = (k) => { try { const v = localStorage.getItem('_store_'+k); return v !== null ? JSON.parse(v) : null; } catch { return null; } };
 const _lsSet = (k, v) => { try { localStorage.setItem('_store_'+k, JSON.stringify(v)); } catch {} };
@@ -519,6 +519,43 @@ function App() {
           }
         }
       }
+
+      // Авто-начисление трудодней (1 раз в сутки в 0:00)
+      const todayStr = today.toISOString().slice(0, 10);
+      const lastWorkdayGrant = _lsGet('cm_workday_grant') || '';
+      if (lastWorkdayGrant !== todayStr) {
+        const wdCfg = (ap && ap.workdays) || {};
+        const wdCoins = Number(wdCfg.coinsPerDay || 0);
+        if (wdCoins > 0) {
+          const wdOverrides = wdCfg.userOverrides || {};
+          const wdGlobalMode = wdCfg.globalMode || 'employment';
+          const wdGlobalCustomDate = wdCfg.globalCustomDate || '';
+          let wdGranted = false;
+          const wdUsers = { ...base };
+          Object.entries(base).forEach(([uname, ud]) => {
+            if (ud.role === 'admin') return;
+            const override = wdOverrides[uname];
+            const mode = override?.mode || wdGlobalMode;
+            let startStr = null;
+            if (mode === 'employment') startStr = ud.employmentDate || null;
+            else if (mode === 'activation') startStr = ud.activationDate || ud.createdAt || null;
+            else if (mode === 'custom') startStr = override?.customDate || wdGlobalCustomDate || null;
+            if (!startStr) return;
+            const start = new Date(startStr);
+            if (isNaN(start.getTime()) || start > today) return;
+            const days = Math.floor((today - start) / (1000 * 60 * 60 * 24));
+            if (days <= 0) return;
+            const amount = wdCoins * days;
+            wdUsers[uname] = { ...ud, balance: (ud.balance || 0) + amount };
+            wdGranted = true;
+          });
+          if (wdGranted) {
+            setUsers(wdUsers);
+            storage.set('cm_users', wdUsers);
+            _lsSet('cm_workday_grant', todayStr);
+          }
+        }
+      }
     }).catch(err => {
       console.error('Store init failed', err);
       setSqliteInitError(err.message || String(err));
@@ -658,15 +695,8 @@ function App() {
   const cartCount = cart.reduce((s, i) => s + i.qty, 0);
 
   const sendTelegramNotify = (order) => {
-    // Read from storage first, fallback to hardcoded values
-    const ap = storage.get("cm_appearance") || {};
-    const saved = ap.integrations || {};
-    const integ = {
-      tgEnabled: false,
-      tgBotToken: "",
-      tgChatId: "",
-      ...saved
-    };
+    // Use React state (appearance) — it's always up-to-date after save
+    const integ = appearance.integrations || {};
     if (!integ.tgEnabled || !integ.tgBotToken || !integ.tgChatId) return;
     const token = integ.tgBotToken.trim();
     const chatId = integ.tgChatId.trim();
@@ -1304,6 +1334,7 @@ function TasksPage({ tasks, currentUser, taskSubmissions, saveTaskSubmissions, n
                         <span style={{flexShrink:0,width:"26px",height:"26px",borderRadius:"50%",background:"var(--rd-red)",color:"#fff",display:"flex",alignItems:"center",justifyContent:"center",fontSize:"12px",fontWeight:800}}>{qi+1}</span>
                         {q.question}
                       </div>
+                      {q.image && <div style={{paddingLeft:"36px",marginBottom:"10px"}}><img src={q.image} alt="" style={{maxHeight:"200px",maxWidth:"100%",borderRadius:"10px",border:"1.5px solid var(--rd-gray-border)"}} /></div>}
                       <div style={{display:"flex",flexDirection:"column",gap:"8px",paddingLeft:"36px"}}>
                         {(q.options||[]).map((opt, oi) => {
                           const selected = quizState.answers[qi] === oi;
@@ -1527,6 +1558,7 @@ function TasksAdminTab({ tasks, saveTasks, taskSubmissions, saveTaskSubmissions,
                         value={q.question} onChange={e=>{const qs=[...(form.quizQuestions||[])];qs[qi]={...qs[qi],question:e.target.value};setForm(f=>({...f,quizQuestions:qs}));}} />
                       <button onClick={()=>{const qs=(form.quizQuestions||[]).filter((_,i)=>i!==qi);setForm(f=>({...f,quizQuestions:qs}));}} style={{background:"none",border:"none",cursor:"pointer",color:"var(--rd-red)",fontSize:"18px",flexShrink:0,marginTop:"6px"}}>✕</button>
                     </div>
+                    <div style={{paddingLeft:"34px",marginBottom:"10px"}}>{q.image?(<div style={{position:"relative",display:"inline-block"}}><img src={q.image} alt="" style={{maxHeight:"140px",maxWidth:"100%",borderRadius:"8px",border:"1.5px solid var(--rd-gray-border)",display:"block"}} /><button onClick={()=>{const qs=[...(form.quizQuestions||[])];qs[qi]={...qs[qi],image:""};setForm(f=>({...f,quizQuestions:qs}));}} style={{position:"absolute",top:"4px",right:"4px",background:"rgba(0,0,0,0.6)",border:"none",borderRadius:"50%",width:"22px",height:"22px",color:"#fff",cursor:"pointer",fontSize:"13px",display:"flex",alignItems:"center",justifyContent:"center"}}>✕</button></div>):(<label style={{display:"inline-flex",alignItems:"center",gap:"6px",padding:"6px 14px",border:"1.5px dashed var(--rd-gray-border)",borderRadius:"8px",cursor:"pointer",fontSize:"12px",fontWeight:600,color:"var(--rd-gray-text)",background:"#fff"}}>🖼️ Добавить фото<input type="file" accept="image/*" style={{display:"none"}} onChange={async e=>{const file=e.target.files[0];if(!file)return;const r=new FileReader();r.onload=async ev=>{const c=await compressImage(ev.target.result,800,600,0.82);const qs=[...(form.quizQuestions||[])];qs[qi]={...qs[qi],image:c};setForm(f=>({...f,quizQuestions:qs}));};r.readAsDataURL(file);e.target.value="";}} /></label>)}</div>
                     <div style={{paddingLeft:"34px",display:"flex",flexDirection:"column",gap:"8px"}}>
                       {(q.options||[]).map((opt, oi) => (
                         <div key={oi} style={{display:"flex",alignItems:"center",gap:"8px"}}>
@@ -2615,13 +2647,13 @@ function RegisterPage({ users, saveUsers, setCurrentUser, setPage, notify }) {
 // ── USER EDIT FORM ────────────────────────────────────────────────────────
 
 function UserEditForm({ username, user, users, saveUsers, notify, onClose }) {
-  const [form, setForm] = useState({ email: user.email || "", newPassword: "", confirmPassword: "", birthdate: user.birthdate || "" });
+  const [form, setForm] = useState({ email: user.email || "", newPassword: "", confirmPassword: "", birthdate: user.birthdate || "", employmentDate: user.employmentDate || "" });
 
   const save = () => {
     if (!form.email.trim()) { notify("Email не может быть пустым", "err"); return; }
     if (form.newPassword && form.newPassword.length < 6) { notify("Пароль минимум 6 символов", "err"); return; }
     if (form.newPassword && form.newPassword !== form.confirmPassword) { notify("Пароли не совпадают", "err"); return; }
-    const updated = { ...user, email: form.email.trim(), avatar: form.avatar || "", birthdate: form.birthdate || "" };
+    const updated = { ...user, email: form.email.trim(), avatar: form.avatar || "", birthdate: form.birthdate || "", employmentDate: form.employmentDate || "" };
     if (form.newPassword) updated.password = form.newPassword;
     saveUsers({ ...users, [username]: updated });
     notify("Профиль пользователя обновлён ✓");
@@ -2648,6 +2680,11 @@ function UserEditForm({ username, user, users, saveUsers, notify, onClose }) {
         <input className="form-input" type="date" value={form.birthdate} onChange={e => { if (isAdmin) setForm(f => ({...f, birthdate: e.target.value})); }} disabled={!isAdmin} style={!isAdmin ? {opacity:0.6,cursor:"not-allowed"} : {}} />
         {!isAdmin && <div style={{fontSize:"11px",color:"var(--rd-gray-text)",marginTop:"4px"}}>Редактировать может только администратор</div>}
       </div>
+      <div className="form-field">
+        <label className="form-label">Дата трудоустройства <span style={{fontSize:"11px",color:"var(--rd-red)",fontWeight:600}}>(только для администратора)</span></label>
+        <input className="form-input" type="date" value={form.employmentDate} onChange={e => setForm(f => ({...f, employmentDate: e.target.value}))} />
+        {form.employmentDate && <div style={{fontSize:"11px",color:"var(--rd-gray-text)",marginTop:"4px"}}>📅 {new Date(form.employmentDate).toLocaleDateString("ru-RU",{day:"numeric",month:"long",year:"numeric"})}</div>}
+      </div>
       <div style={{height:"1px",background:"var(--rd-gray-border)",margin:"16px 0"}}></div>
       <div style={{fontSize:"12px",fontWeight:700,textTransform:"uppercase",letterSpacing:"0.05em",color:"var(--rd-gray-text)",marginBottom:"12px"}}>Сменить пароль</div>
       <div className="form-field">
@@ -2668,6 +2705,207 @@ function UserEditForm({ username, user, users, saveUsers, notify, onClose }) {
 const BLANK_PRODUCT = { name: "", price: "", category: "Одежда", emoji: "🛍️", desc: "", images: [], sizes: ["S","M","L","XL","XXL"], sku: "", badge: "", discount: 0, inactive: false, stock: "", sizeStock: {} };
 const ALL_CATEGORIES = ["Одежда", "Аксессуары", "Посуда", "Канцелярия"];
 const EMOJIS = ["🛍️","👕","🧥","🧢","👟","🎒","☕","🍵","📓","✏️","📌","🎨","☂️","🧦","🏅","💼","🕶️","🧤","🧣","⌚"];
+
+
+// ── WORKDAYS TAB ─────────────────────────────────────────────────────────────
+function WorkdaysTab({ users, currentUser, notify, saveUsers, transfers, saveTransfers, appearance, saveAppearance }) {
+  const workdaysCfg = (appearance.workdays) || {};
+  const [coinsPerDay, setCoinsPerDay] = useState(String(workdaysCfg.coinsPerDay || 10));
+  const [globalMode, setGlobalMode] = useState(workdaysCfg.globalMode || "employment"); // "employment"|"activation"|"custom"
+  const [globalCustomDate, setGlobalCustomDate] = useState(workdaysCfg.globalCustomDate || "");
+  const [userOverrides, setUserOverrides] = useState(workdaysCfg.userOverrides || {});
+  const [filterStr, setFilterStr] = useState("");
+
+  const allUsers = Object.entries(users).filter(([u]) => u !== "admin" && u !== currentUser);
+  const filtered = allUsers.filter(([u]) => u.toLowerCase().includes(filterStr.toLowerCase()));
+
+  const saveSettings = () => {
+    const coins = Number(coinsPerDay);
+    if (isNaN(coins) || coins < 0) { notify("Некорректное количество монет", "err"); return; }
+    const cfg = { coinsPerDay: coins, globalMode, globalCustomDate, userOverrides };
+    saveAppearance({ ...appearance, workdays: cfg });
+    notify("Настройки трудодней сохранены ✓");
+  };
+
+  const getUserMode = (u) => userOverrides[u]?.mode || null;
+  const getUserCustomDate = (u) => userOverrides[u]?.customDate || "";
+  const setUserMode = (u, mode) => setUserOverrides(prev => ({ ...prev, [u]: { ...(prev[u]||{}), mode } }));
+  const setUserCustomDate = (u, d) => setUserOverrides(prev => ({ ...prev, [u]: { ...(prev[u]||{}), customDate: d } }));
+  const clearUserOverride = (u) => setUserOverrides(prev => { const n={...prev}; delete n[u]; return n; });
+
+  const getStartDate = (u, ud) => {
+    const override = userOverrides[u];
+    const mode = override?.mode || globalMode;
+    if (mode === "employment") return ud.employmentDate || null;
+    if (mode === "activation") return ud.activationDate || ud.createdAt || null;
+    if (mode === "custom") {
+      const d = override?.customDate || globalCustomDate;
+      return d || null;
+    }
+    return null;
+  };
+
+  const calcDays = (u, ud) => {
+    const startStr = getStartDate(u, ud);
+    if (!startStr) return null;
+    const start = new Date(startStr);
+    const now = new Date();
+    if (isNaN(start.getTime()) || start > now) return 0;
+    return Math.floor((now - start) / (1000 * 60 * 60 * 24));
+  };
+
+  const runAccrual = () => {
+    const coins = Number(coinsPerDay);
+    if (isNaN(coins) || coins <= 0) { notify("Укажите количество монет за день", "err"); return; }
+    const updated = { ...users };
+    const now = new Date().toLocaleString("ru-RU");
+    const newTransfers = [...(transfers || [])];
+    let count = 0;
+    allUsers.forEach(([u, ud]) => {
+      const days = calcDays(u, ud);
+      if (days === null || days <= 0) return;
+      const amount = coins * days;
+      updated[u] = { ...updated[u], balance: (updated[u].balance || 0) + amount };
+      newTransfers.push({ id: Date.now() + Math.random(), from: currentUser, to: u, amount, comment: `Трудодни: ${days} дн. × ${coins} монет`, date: now });
+      count++;
+    });
+    if (count === 0) { notify("Нет пользователей для начисления (не указаны даты)", "err"); return; }
+    saveUsers(updated);
+    if (saveTransfers) saveTransfers(newTransfers);
+    notify(`Трудодни начислены ${count} пользователям ✓`);
+  };
+
+  const modeLabel = { employment: "от даты трудоустройства", activation: "от даты активации", custom: "от указанной даты" };
+
+  return (
+    <div style={{maxWidth:"800px"}}>
+      {/* Settings card */}
+      <div style={{background:"#fff",border:"1.5px solid var(--rd-gray-border)",borderRadius:"var(--rd-radius)",padding:"28px",boxShadow:"var(--rd-shadow-md)",marginBottom:"20px"}}>
+        <div style={{fontSize:"11px",fontWeight:700,textTransform:"uppercase",letterSpacing:"0.07em",color:"var(--rd-gray-text)",marginBottom:"20px",paddingBottom:"10px",borderBottom:"1px solid var(--rd-gray-border)"}}>⚙️ Параметры начисления</div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"20px",marginBottom:"20px"}}>
+          <div>
+            <div style={{fontSize:"12px",fontWeight:700,textTransform:"uppercase",letterSpacing:"0.05em",color:"var(--rd-gray-text)",marginBottom:"6px"}}>Монет за 1 день работы</div>
+            <div style={{position:"relative"}}>
+              <input className="form-input" type="number" min="0" step="0.5" placeholder="10" value={coinsPerDay}
+                onChange={e => setCoinsPerDay(e.target.value)}
+                style={{paddingRight:"64px",fontSize:"20px",fontWeight:700}} />
+              <span style={{position:"absolute",right:"14px",top:"50%",transform:"translateY(-50%)",fontSize:"12px",fontWeight:700,color:"var(--rd-gray-text)"}}>мон./день</span>
+            </div>
+            <div style={{display:"flex",gap:"6px",marginTop:"8px",flexWrap:"wrap"}}>
+              {[1,5,10,25,50].map(v => (
+                <button key={v} onClick={() => setCoinsPerDay(String(v))}
+                  style={{padding:"4px 10px",borderRadius:"20px",border:"1.5px solid var(--rd-gray-border)",background:coinsPerDay==v?"var(--rd-red)":"#fff",color:coinsPerDay==v?"#fff":"var(--rd-gray-text)",fontSize:"12px",fontWeight:700,cursor:"pointer"}}>
+                  {v}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div>
+            <div style={{fontSize:"12px",fontWeight:700,textTransform:"uppercase",letterSpacing:"0.05em",color:"var(--rd-gray-text)",marginBottom:"6px"}}>Способ начисления (по умолчанию)</div>
+            <div style={{display:"flex",flexDirection:"column",gap:"8px"}}>
+              {[["employment","💼 От даты трудоустройства"],["activation","✅ От даты активации"],["custom","📅 От указанной даты"]].map(([v,l]) => (
+                <label key={v} style={{display:"flex",alignItems:"center",gap:"10px",padding:"10px 14px",border:`1.5px solid ${globalMode===v?"var(--rd-red)":"var(--rd-gray-border)"}`,borderRadius:"10px",background:globalMode===v?"var(--rd-red-light)":"#fff",cursor:"pointer",transition:"all 0.12s"}}>
+                  <input type="radio" checked={globalMode===v} onChange={()=>setGlobalMode(v)} style={{accentColor:"var(--rd-red)"}} />
+                  <span style={{fontSize:"13px",fontWeight:globalMode===v?700:400,color:globalMode===v?"var(--rd-red)":"var(--rd-dark)"}}>{l}</span>
+                </label>
+              ))}
+            </div>
+            {globalMode === "custom" && (
+              <div style={{marginTop:"10px"}}>
+                <div style={{fontSize:"12px",fontWeight:600,color:"var(--rd-gray-text)",marginBottom:"4px"}}>Дата начала начисления</div>
+                <input className="form-input" type="date" value={globalCustomDate} onChange={e=>setGlobalCustomDate(e.target.value)} />
+              </div>
+            )}
+          </div>
+        </div>
+        <div style={{display:"flex",gap:"12px"}}>
+          <button className="btn btn-primary" onClick={saveSettings}>💾 Сохранить настройки</button>
+        </div>
+      </div>
+
+      {/* Users list with overrides */}
+      <div style={{background:"#fff",border:"1.5px solid var(--rd-gray-border)",borderRadius:"var(--rd-radius)",padding:"28px",boxShadow:"var(--rd-shadow-md)",marginBottom:"20px"}}>
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:"16px",paddingBottom:"10px",borderBottom:"1px solid var(--rd-gray-border)"}}>
+          <div style={{fontSize:"11px",fontWeight:700,textTransform:"uppercase",letterSpacing:"0.07em",color:"var(--rd-gray-text)"}}>
+            👥 Индивидуальные настройки ({allUsers.length} польз.)
+          </div>
+          <input className="form-input" placeholder="Поиск..." value={filterStr} onChange={e=>setFilterStr(e.target.value)}
+            style={{padding:"6px 12px",fontSize:"13px",width:"160px"}} />
+        </div>
+        <div style={{display:"flex",flexDirection:"column",gap:"10px",maxHeight:"440px",overflowY:"auto"}}>
+          {filtered.length === 0
+            ? <div style={{padding:"24px",textAlign:"center",color:"var(--rd-gray-text)"}}>Пользователи не найдены</div>
+            : filtered.map(([u, ud]) => {
+                const override = userOverrides[u];
+                const days = calcDays(u, ud);
+                const effectiveMode = override?.mode || globalMode;
+                const coins = Number(coinsPerDay) || 0;
+                return (
+                  <div key={u} style={{border:"1.5px solid var(--rd-gray-border)",borderRadius:"12px",padding:"14px 16px",background:override?"rgba(199,22,24,0.03)":"#fff",borderColor:override?"rgba(199,22,24,0.3)":"var(--rd-gray-border)"}}>
+                    <div style={{display:"flex",alignItems:"center",gap:"12px",marginBottom:override?"10px":"0"}}>
+                      {ud.avatar
+                        ? <img src={ud.avatar} style={{width:"36px",height:"36px",borderRadius:"50%",objectFit:"cover",flexShrink:0}} alt="" />
+                        : <div style={{width:"36px",height:"36px",borderRadius:"50%",background:"var(--rd-red-light)",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:800,fontSize:"14px",color:"var(--rd-red)",flexShrink:0}}>{u[0].toUpperCase()}</div>
+                      }
+                      <div style={{flex:1,minWidth:0}}>
+                        <div style={{fontWeight:700,fontSize:"14px",color:"var(--rd-dark)"}}>{u}</div>
+                        <div style={{fontSize:"12px",color:"var(--rd-gray-text)"}}>
+                          {override ? <span style={{color:"var(--rd-red)",fontWeight:600}}>⚡ Индивид.: {modeLabel[effectiveMode]}</span> : <span>По умолчанию: {modeLabel[effectiveMode]}</span>}
+                          {days !== null && <span style={{marginLeft:"8px",fontWeight:700,color:"var(--rd-green)"}}>· {days} дн. · +{days*coins} мон.</span>}
+                          {days === null && <span style={{marginLeft:"8px",color:"#f59e0b",fontWeight:600}}>· дата не задана</span>}
+                        </div>
+                      </div>
+                      <div style={{display:"flex",gap:"6px",flexShrink:0}}>
+                        {override && <button onClick={()=>clearUserOverride(u)} className="btn btn-ghost btn-sm" style={{fontSize:"11px",color:"var(--rd-red)"}}>✕ Сбросить</button>}
+                        <button onClick={()=>setUserOverrides(prev=>({...prev,[u]:{...(prev[u]||{}),mode:override?undefined:globalMode,_open:!(prev[u]?._open)}}))}
+                          className="btn btn-ghost btn-sm" style={{fontSize:"11px"}}>{override?._open?"Скрыть":"⚙️ Настроить":"⚙️ Настроить"}</button>
+                      </div>
+                    </div>
+                    {userOverrides[u]?._open && (
+                      <div style={{paddingTop:"10px",borderTop:"1px solid var(--rd-gray-border)",marginTop:"4px",display:"flex",flexDirection:"column",gap:"8px"}}>
+                        <div style={{fontSize:"12px",fontWeight:700,color:"var(--rd-gray-text)",textTransform:"uppercase",letterSpacing:"0.05em"}}>Способ начисления для {u}</div>
+                        <div style={{display:"flex",gap:"8px",flexWrap:"wrap"}}>
+                          {[["employment","💼 Трудоустройство"],["activation","✅ Активация"],["custom","📅 Своя дата"]].map(([v,l]) => (
+                            <label key={v} style={{display:"inline-flex",alignItems:"center",gap:"6px",padding:"6px 12px",border:`1.5px solid ${effectiveMode===v?"var(--rd-red)":"var(--rd-gray-border)"}`,borderRadius:"8px",background:effectiveMode===v?"var(--rd-red-light)":"#fff",cursor:"pointer",fontSize:"12px",fontWeight:effectiveMode===v?700:400}}>
+                              <input type="radio" checked={effectiveMode===v} onChange={()=>setUserMode(u,v)} style={{accentColor:"var(--rd-red)"}} />
+                              {l}
+                            </label>
+                          ))}
+                        </div>
+                        {effectiveMode==="custom" && (
+                          <div>
+                            <div style={{fontSize:"12px",fontWeight:600,marginBottom:"4px",color:"var(--rd-gray-text)"}}>Дата начала</div>
+                            <input className="form-input" type="date" value={getUserCustomDate(u)} onChange={e=>setUserCustomDate(u,e.target.value)} style={{maxWidth:"200px"}} />
+                          </div>
+                        )}
+                        {effectiveMode==="employment" && !ud.employmentDate && (
+                          <div style={{fontSize:"12px",color:"#f59e0b",fontWeight:600}}>⚠️ Дата трудоустройства не задана в профиле</div>
+                        )}
+                        {effectiveMode==="activation" && !ud.activationDate && !ud.createdAt && (
+                          <div style={{fontSize:"12px",color:"#f59e0b",fontWeight:600}}>⚠️ Дата активации не задана</div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })
+          }
+        </div>
+      </div>
+
+      {/* Accrue button */}
+      <div style={{background:"#fff",border:"1.5px solid var(--rd-gray-border)",borderRadius:"var(--rd-radius)",padding:"20px 28px",boxShadow:"var(--rd-shadow-md)",display:"flex",alignItems:"center",justifyContent:"space-between",gap:"16px"}}>
+        <div>
+          <div style={{fontWeight:700,fontSize:"15px",color:"var(--rd-dark)",marginBottom:"2px"}}>Начислить трудодни вручную</div>
+          <div style={{fontSize:"12px",color:"var(--rd-gray-text)"}}>Начисляется {coinsPerDay} мон. × количество дней для каждого пользователя. Автоматически — в 0:00.</div>
+        </div>
+        <button className="btn btn-primary" style={{minWidth:"180px",fontSize:"14px",flexShrink:0}} onClick={runAccrual}>
+          💼 Начислить трудодни
+        </button>
+      </div>
+    </div>
+  );
+}
 
 function BulkAccrualTab({ users, currentUser, notify, saveUsers, transfers, saveTransfers }) {
   
@@ -4395,6 +4633,7 @@ function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbC
     { id: "currency_settings", icon: "✏️", label: "Настройки" },
     { id: "currency_birthday", icon: "🎂", label: "День рождения" },
     { id: "currency_bulk", icon: "💸", label: "Начисление" },
+    { id: "currency_workdays", icon: "💼", label: "Трудодни" },
   ] : [
     { id: "currency_settings", icon: "✏️", label: "Настройки" },
   ];
@@ -4509,6 +4748,23 @@ function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbC
                       <div>
                         <div style={{fontWeight:700,fontSize:"15px",color:"var(--rd-dark)"}}>
                           {new Date(user.birthdate).toLocaleDateString("ru-RU", {day:"numeric",month:"long",year:"numeric"})}
+                        </div>
+                        <div style={{fontSize:"11px",color:"var(--rd-gray-text)",marginTop:"1px"}}>Изменить может только администратор</div>
+                      </div>
+                    </div>
+                  : <div style={{padding:"10px 14px",background:"var(--rd-gray-bg)",border:"1.5px solid var(--rd-gray-border)",borderRadius:"var(--rd-radius-sm)",fontSize:"13px",color:"var(--rd-gray-text)"}}>
+                      Не указана — обратитесь к администратору
+                    </div>
+                }
+              </div>
+              <div className="form-field">
+                <label className="form-label">Дата трудоустройства</label>
+                {user.employmentDate
+                  ? <div style={{display:"flex",alignItems:"center",gap:"10px",padding:"10px 14px",background:"var(--rd-gray-bg)",border:"1.5px solid var(--rd-gray-border)",borderRadius:"var(--rd-radius-sm)"}}>
+                      <span style={{fontSize:"18px"}}>💼</span>
+                      <div>
+                        <div style={{fontWeight:700,fontSize:"15px",color:"var(--rd-dark)"}}>
+                          {new Date(user.employmentDate).toLocaleDateString("ru-RU",{day:"numeric",month:"long",year:"numeric"})}
                         </div>
                         <div style={{fontSize:"11px",color:"var(--rd-gray-text)",marginTop:"1px"}}>Изменить может только администратор</div>
                       </div>
@@ -4913,6 +5169,10 @@ function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbC
 
           {tab === "currency" && currencySubTab === "currency_bulk" && isAdmin && (
             <BulkAccrualTab users={users} currentUser={currentUser} notify={notify} saveUsers={saveUsers} transfers={transfers} saveTransfers={saveTransfers} />
+          )}
+
+          {tab === "currency" && currencySubTab === "currency_workdays" && isAdmin && (
+            <WorkdaysTab users={users} currentUser={currentUser} notify={notify} saveUsers={saveUsers} transfers={transfers} saveTransfers={saveTransfers} appearance={appearance} saveAppearance={saveAppearance} />
           )}
 
           {tab === "integrations" && isAdmin && (
