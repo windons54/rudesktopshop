@@ -87,8 +87,12 @@ async function _apiCall(action, body = {}) {
 const _cache = {};
 let _cacheReady = false;
 let _readyCallbacks = [];
+let _cacheVersion = 0; // версия данных в кэше — не перезаписываем старыми данными
 
-function _applyData(data) {
+function _applyData(data, version) {
+  // Если версия меньше текущей — данные устарели, не перезаписываем
+  if (version && version < _cacheVersion) return;
+  if (version) _cacheVersion = version;
   Object.keys(data).forEach(k => {
     if (!_pendingWrites.has(k)) _cache[k] = data[k];
   });
@@ -107,7 +111,7 @@ async function initStore() {
     const timeout = new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 8000));
     const r = await Promise.race([_apiCall('getAll'), timeout]);
     if (r.ok && r.data) {
-      _applyData(r.data);
+      _applyData(r.data, r.version || null);
       _initVersion = r.version || null;
     }
   } catch(e) { console.warn('Store init error', e); }
@@ -140,8 +144,18 @@ const storage = {
     _cache[k] = v; // обновляем кэш немедленно
     _pendingWrites.add(k);
     const p = _apiCall('set', { key: k, value: v })
-      .then(() => _pendingWrites.delete(k))
-      .catch(e => { _pendingWrites.delete(k); console.warn('Store set error', k, e); });
+      .then(() => {
+        _pendingWrites.delete(k);
+        // убираем завершённый промис из массива
+        const idx = _writePromises.indexOf(p);
+        if (idx !== -1) _writePromises.splice(idx, 1);
+      })
+      .catch(e => {
+        _pendingWrites.delete(k);
+        const idx = _writePromises.indexOf(p);
+        if (idx !== -1) _writePromises.splice(idx, 1);
+        console.warn('Store set error', k, e);
+      });
     _writePromises.push(p);
     return p;
   },
@@ -156,7 +170,7 @@ const storage = {
   exec: () => [],
   run: () => {},
   isReady: () => _cacheReady,
-  flush: () => Promise.all(_writePromises.splice(0)),
+  flush: () => Promise.all([..._writePromises]),
   // Обновить кэш с сервера (вызывается polling-ом)
   refresh: async () => {
     try {
@@ -501,74 +515,17 @@ function App() {
         setCurrentUser(savedSession.user);
       }
 
-      // Бонус на день рождения
-      const today = new Date();
-      const lastBirthdayGrant = storage.get('cm_birthday_grant') || _lsGet('cm_birthday_grant') || '';
-      const currentYear = today.getFullYear();
-      if (lastBirthdayGrant !== String(currentYear)) {
-        const apLoaded = ap || {};
-        const bonusEnabled = apLoaded.birthdayEnabled !== false;
-        const bonusAmount = parseInt(apLoaded.birthdayBonus || 100);
-        if (bonusEnabled && bonusAmount > 0) {
-          let grantedAny = false;
-          const updatedUsers = { ...base };
-          Object.entries(base).forEach(([uname, ud]) => {
-            if (!ud.birthdate) return;
-            const bd = new Date(ud.birthdate);
-            if (!isNaN(bd) && bd.getDate() === today.getDate() && bd.getMonth() === today.getMonth()) {
-              updatedUsers[uname] = { ...ud, balance: (ud.balance || 0) + bonusAmount };
-              grantedAny = true;
-            }
-          });
-          if (grantedAny) {
-            setUsers(updatedUsers);
-            storage.set('cm_users', updatedUsers);
-            storage.set('cm_birthday_grant', String(currentYear));
-            _lsSet('cm_birthday_grant', String(currentYear));
-          }
+      // Начисления (трудодни + дни рождения) — выполняются на сервере атомарно
+      _apiCall('daily_grants').then(r => {
+        if (r.ok && r.users && (r.grants.workday > 0 || r.grants.birthday > 0)) {
+          // Сервер сделал начисления — обновляем локальный кэш и UI
+          _cache['cm_users'] = r.users;
+          setUsers(r.users);
+          _lsSet('cm_workday_grant', new Date().toISOString().slice(0, 10));
+          _lsSet('cm_birthday_grant', String(new Date().getFullYear()));
         }
-      }
+      }).catch(() => {});
 
-      // Авто-начисление трудодней (1 раз в сутки)
-      // Метка хранится в PG (cm_workday_grant) чтобы не начислять повторно с другого браузера
-      const todayStr = today.toISOString().slice(0, 10);
-      const lastWorkdayGrant = storage.get('cm_workday_grant') || _lsGet('cm_workday_grant') || '';
-      if (lastWorkdayGrant !== todayStr) {
-        const wdCfg = (ap && ap.workdays) || {};
-        const wdCoins = Number(wdCfg.coinsPerDay || 0);
-        if (wdCoins > 0) {
-          const wdOverrides = wdCfg.userOverrides || {};
-          const wdGlobalMode = wdCfg.globalMode || 'employment';
-          const wdGlobalCustomDate = wdCfg.globalCustomDate || '';
-          let wdGranted = false;
-          const wdUsers = { ...base };
-          Object.entries(base).forEach(([uname, ud]) => {
-            if (ud.role === 'admin') return;
-            const override = wdOverrides[uname];
-            const mode = override?.mode || wdGlobalMode;
-            let startStr = null;
-            if (mode === 'employment') startStr = ud.employmentDate || null;
-            else if (mode === 'activation') startStr = ud.activationDate || ud.createdAt || null;
-            else if (mode === 'custom') startStr = override?.customDate || wdGlobalCustomDate || null;
-            if (!startStr) return;
-            const start = new Date(startStr);
-            if (isNaN(start.getTime()) || start > today) return;
-            // Начисляем ТОЛЬКО 1 день (coinsPerDay), а не за все дни с начала работы
-            wdUsers[uname] = { ...ud, balance: (ud.balance || 0) + wdCoins };
-            wdGranted = true;
-          });
-          if (wdGranted) {
-            setUsers(wdUsers);
-            storage.set('cm_users', wdUsers);
-            storage.set('cm_workday_grant', todayStr);
-            _lsSet('cm_workday_grant', todayStr);
-          } else {
-            // Даже если никому не начислили — запоминаем что проверили сегодня
-            storage.set('cm_workday_grant', todayStr);
-            _lsSet('cm_workday_grant', todayStr);
-          }
-        }
-      }
     }).catch(err => {
       console.error('Store init failed', err);
     });
@@ -624,10 +581,13 @@ function App() {
         });
         const r = await res.json();
         if (r.ok && r.data) {
-          _lastKnownVersion = r.version || vData.version;
+          const newVer = r.version || vData.version;
+          _lastKnownVersion = newVer;
           const filtered = {};
+          // _applyData обновит кэш только если версия новее
+          _applyData(r.data, newVer);
           Object.keys(r.data).forEach(k => {
-            if (!_pendingWrites.has(k)) { _cache[k] = r.data[k]; filtered[k] = r.data[k]; }
+            if (!_pendingWrites.has(k)) filtered[k] = r.data[k];
           });
           _applyServerData(filtered);
         }

@@ -268,6 +268,91 @@ export default async function handler(req, res) {
     return res.json({ ok: true, version: g._dataVersion });
   }
 
+  // ── Ежедневные начисления (трудодни + дни рождения) ──
+  // Выполняется на сервере атомарно, чтобы клиент не затирал данные
+  if (action === 'daily_grants') {
+    try {
+      const pool = await getPool();
+      const store = pool ? {
+        get: (k) => pgKv.get(pool, k),
+        set: (k, v) => pgKv.set(pool, k, v),
+      } : {
+        get: (k) => { const s = readJSON(); return Promise.resolve(s[k] ?? null); },
+        set: (k, v) => lock(() => { const s = readJSON(); s[k] = v; writeJSON(s); bumpVersion(); }),
+      };
+
+      const todayDate = new Date();
+      const todayStr = todayDate.toISOString().slice(0, 10);
+      const currentYear = String(todayDate.getFullYear());
+
+      // Читаем актуальные данные с сервера
+      const users     = (await store.get('cm_users'))     || {};
+      const appearance = (await store.get('cm_appearance')) || {};
+      const wdGrant   = (await store.get('cm_workday_grant'))  || '';
+      const bdGrant   = (await store.get('cm_birthday_grant')) || '';
+
+      let updatedUsers = { ...users };
+      const grants = { workday: 0, birthday: 0 };
+
+      // ── Трудодни ──
+      if (wdGrant !== todayStr) {
+        const wdCfg = appearance.workdays || {};
+        const wdCoins = Number(wdCfg.coinsPerDay || 0);
+        if (wdCoins > 0) {
+          const overrides = wdCfg.userOverrides || {};
+          const globalMode = wdCfg.globalMode || 'employment';
+          const globalCustomDate = wdCfg.globalCustomDate || '';
+          Object.entries(users).forEach(([uname, ud]) => {
+            if (!ud || ud.role === 'admin') return;
+            const override = overrides[uname];
+            const mode = override?.mode || globalMode;
+            let startStr = null;
+            if (mode === 'employment') startStr = ud.employmentDate || null;
+            else if (mode === 'activation') startStr = ud.activationDate || ud.createdAt || null;
+            else if (mode === 'custom') startStr = override?.customDate || globalCustomDate || null;
+            if (!startStr) return;
+            const start = new Date(startStr);
+            if (isNaN(start.getTime()) || start > todayDate) return;
+            updatedUsers[uname] = { ...updatedUsers[uname], balance: (updatedUsers[uname].balance || 0) + wdCoins };
+            grants.workday++;
+          });
+          await store.set('cm_workday_grant', todayStr);
+        } else {
+          // coinsPerDay = 0, просто отмечаем что проверили
+          await store.set('cm_workday_grant', todayStr);
+        }
+      }
+
+      // ── Дни рождения ──
+      if (bdGrant !== currentYear) {
+        const bonusEnabled = appearance.birthdayEnabled !== false;
+        const bonusAmount = parseInt(appearance.birthdayBonus || 100);
+        if (bonusEnabled && bonusAmount > 0) {
+          Object.entries(users).forEach(([uname, ud]) => {
+            if (!ud || !ud.birthdate) return;
+            const bd = new Date(ud.birthdate);
+            if (isNaN(bd)) return;
+            if (bd.getDate() === todayDate.getDate() && bd.getMonth() === todayDate.getMonth()) {
+              updatedUsers[uname] = { ...updatedUsers[uname], balance: (updatedUsers[uname].balance || 0) + bonusAmount };
+              grants.birthday++;
+            }
+          });
+          if (grants.birthday > 0) await store.set('cm_birthday_grant', currentYear);
+        }
+      }
+
+      // Сохраняем пользователей только если что-то изменилось
+      if (grants.workday > 0 || grants.birthday > 0) {
+        await store.set('cm_users', updatedUsers);
+      }
+
+      return res.json({ ok: true, grants, users: updatedUsers });
+    } catch (e) {
+      console.error('[daily_grants]', e);
+      return res.json({ ok: false, error: e.message });
+    }
+  }
+
   // ── Основные CRUD ──
   try {
     const pool = await getPool();
