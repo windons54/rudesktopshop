@@ -3147,6 +3147,7 @@ function FaqAdminTab({ faq, saveFaq, notify }) {
 }
 
 function AdminPage({ users, saveUsers, orders, saveOrders, products, saveProducts, categories, saveCategories, notify, setPage, currentUser, transfers, saveTransfers, activeTab, setActiveTab, faq, saveFaq, embedded }) {
+  const isAdmin = currentUser && users[currentUser]?.role === "admin";
   const cName = getCurrName();
   const [internalTab, setInternalTab] = useState("users");
   const tab = activeTab || internalTab;
