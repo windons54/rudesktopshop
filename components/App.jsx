@@ -102,7 +102,9 @@ function _notifyReady() {
 
 async function initStore() {
   try {
-    const r = await _apiCall('getAll');
+    // Таймаут 10 секунд — если PG не отвечает, не зависаем
+    const timeout = new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 10000));
+    const r = await Promise.race([_apiCall('getAll'), timeout]);
     if (r.ok && r.data) _applyData(r.data);
   } catch(e) { console.warn('Store init error', e); }
   _notifyReady();
@@ -114,7 +116,7 @@ function whenStoreReady() {
 }
 
 // Ключи, которые хранятся только локально (личные данные браузера)
-const _LOCAL_KEYS = new Set(['cm_session','cm_seen_orders','cm_notif_history','cm_notif_unread','cm_favorites','cm_birthday_grant','cm_workday_grant']);
+const _LOCAL_KEYS = new Set(['cm_session','cm_seen_orders','cm_notif_history','cm_notif_unread','cm_favorites']);
 
 const _lsGet = (k) => { try { const v = localStorage.getItem('_store_'+k); return v !== null ? JSON.parse(v) : null; } catch { return null; } };
 const _lsSet = (k, v) => { try { localStorage.setItem('_store_'+k, JSON.stringify(v)); } catch {} };
@@ -122,6 +124,7 @@ const _lsDel = (k) => { try { localStorage.removeItem('_store_'+k); } catch {} }
 
 // Ключи которые сейчас записываются на сервер — polling не должен их перетирать
 const _pendingWrites = new Set();
+const _writePromises = [];
 
 const storage = {
   get: (k) => {
@@ -132,9 +135,11 @@ const storage = {
     if (_LOCAL_KEYS.has(k)) { _lsSet(k, v); return; }
     _cache[k] = v; // обновляем кэш немедленно
     _pendingWrites.add(k);
-    _apiCall('set', { key: k, value: v })
+    const p = _apiCall('set', { key: k, value: v })
       .then(() => _pendingWrites.delete(k))
-      .catch(e => { _pendingWrites.delete(k); console.warn('Store set error', e); });
+      .catch(e => { _pendingWrites.delete(k); console.warn('Store set error', k, e); });
+    _writePromises.push(p);
+    return p;
   },
   delete: (k) => {
     if (_LOCAL_KEYS.has(k)) { _lsDel(k); return; }
@@ -147,7 +152,7 @@ const storage = {
   exec: () => [],
   run: () => {},
   isReady: () => _cacheReady,
-  flush: () => Promise.resolve(),
+  flush: () => Promise.all(_writePromises.splice(0)),
   // Обновить кэш с сервера (вызывается polling-ом)
   refresh: async () => {
     try {
@@ -419,6 +424,7 @@ function App() {
   const clearNotifHistory = () => { setNotifHistory([]); storage.set('cm_notif_history', []); setNotifUnread(0); storage.set('cm_notif_unread', '0'); };
   const [toast, setToast] = useState(null);
   const [loaded, setLoaded] = useState(false);
+  const [loadingTooLong, setLoadingTooLong] = useState(false);
   const [sqliteInitError, setSqliteInitError] = useState(null);
 
   useEffect(() => {
@@ -430,7 +436,9 @@ function App() {
       .catch(() => {});
 
     // Загружаем ВСЕ данные с сервера (PostgreSQL или JSON-файл)
-    initStore().then(() => {
+    // Если загрузка занимает > 8 сек — показываем предупреждение
+    const loadingTimer = setTimeout(() => setLoadingTooLong(true), 8000);
+    initStore().then(() => { clearTimeout(loadingTimer); setLoadingTooLong(false);
       const u  = storage.get("cm_users");
       const o  = storage.get("cm_orders");
       const cp = storage.get("cm_products");
@@ -495,7 +503,7 @@ function App() {
 
       // Бонус на день рождения
       const today = new Date();
-      const lastBirthdayGrant = _lsGet('cm_birthday_grant') || '';
+      const lastBirthdayGrant = storage.get('cm_birthday_grant') || _lsGet('cm_birthday_grant') || '';
       const currentYear = today.getFullYear();
       if (lastBirthdayGrant !== String(currentYear)) {
         const apLoaded = ap || {};
@@ -515,14 +523,16 @@ function App() {
           if (grantedAny) {
             setUsers(updatedUsers);
             storage.set('cm_users', updatedUsers);
+            storage.set('cm_birthday_grant', String(currentYear));
             _lsSet('cm_birthday_grant', String(currentYear));
           }
         }
       }
 
-      // Авто-начисление трудодней (1 раз в сутки в 0:00)
+      // Авто-начисление трудодней (1 раз в сутки)
+      // Метка хранится в PG (cm_workday_grant) чтобы не начислять повторно с другого браузера
       const todayStr = today.toISOString().slice(0, 10);
-      const lastWorkdayGrant = _lsGet('cm_workday_grant') || '';
+      const lastWorkdayGrant = storage.get('cm_workday_grant') || _lsGet('cm_workday_grant') || '';
       if (lastWorkdayGrant !== todayStr) {
         const wdCfg = (ap && ap.workdays) || {};
         const wdCoins = Number(wdCfg.coinsPerDay || 0);
@@ -543,20 +553,24 @@ function App() {
             if (!startStr) return;
             const start = new Date(startStr);
             if (isNaN(start.getTime()) || start > today) return;
-            const days = Math.floor((today - start) / (1000 * 60 * 60 * 24));
-            if (days <= 0) return;
-            const amount = wdCoins * days;
-            wdUsers[uname] = { ...ud, balance: (ud.balance || 0) + amount };
+            // Начисляем ТОЛЬКО 1 день (coinsPerDay), а не за все дни с начала работы
+            wdUsers[uname] = { ...ud, balance: (ud.balance || 0) + wdCoins };
             wdGranted = true;
           });
           if (wdGranted) {
             setUsers(wdUsers);
             storage.set('cm_users', wdUsers);
+            storage.set('cm_workday_grant', todayStr);
+            _lsSet('cm_workday_grant', todayStr);
+          } else {
+            // Даже если никому не начислили — запоминаем что проверили сегодня
+            storage.set('cm_workday_grant', todayStr);
             _lsSet('cm_workday_grant', todayStr);
           }
         }
       }
     }).catch(err => {
+      clearTimeout(loadingTimer);
       console.error('Store init failed', err);
       setSqliteInitError(err.message || String(err));
       setLoaded(true);
@@ -749,10 +763,17 @@ function App() {
   const filtered = filterCat === "Все" ? activeProducts : activeProducts.filter(p => p.category === filterCat);
 
   if (!loaded) return (
-    <div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",height:"100vh",gap:"16px",color:"var(--rd-gray-text)"}}>
-      <div style={{fontSize:"32px"}}>🗄️</div>
+    <div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",height:"100vh",gap:"16px",color:"var(--rd-gray-text)",padding:"24px",textAlign:"center"}}>
+      <div style={{fontSize:"32px"}}>{loadingTooLong ? "⚠️" : "🗄️"}</div>
       <div style={{fontWeight:700,fontSize:"16px",color:"var(--rd-dark)"}}>Загрузка данных…</div>
       <div style={{fontSize:"13px"}}>Подключение к базе данных</div>
+      {loadingTooLong && (
+        <div style={{marginTop:"8px",padding:"12px 20px",background:"rgba(234,179,8,0.1)",border:"1px solid rgba(234,179,8,0.3)",borderRadius:"10px",fontSize:"13px",color:"#92400e",maxWidth:"380px"}}>
+          ⏳ Подключение занимает дольше обычного.<br/>
+          Проверьте доступность PostgreSQL или обновите страницу.
+          <br/><button className="btn" style={{marginTop:"10px",background:"#d97706",color:"#fff",border:"none",fontWeight:700}} onClick={() => window.location.reload()}>🔄 Перезагрузить</button>
+        </div>
+      )}
     </div>
   );
   if (sqliteInitError) return (
