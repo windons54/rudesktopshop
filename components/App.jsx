@@ -2646,7 +2646,7 @@ function RegisterPage({ users, saveUsers, setCurrentUser, setPage, notify }) {
 
 // ── USER EDIT FORM ────────────────────────────────────────────────────────
 
-function UserEditForm({ username, user, users, saveUsers, notify, onClose }) {
+function UserEditForm({ username, user, users, saveUsers, notify, onClose, isAdmin }) {
   const [form, setForm] = useState({ email: user.email || "", newPassword: "", confirmPassword: "", birthdate: user.birthdate || "", employmentDate: user.employmentDate || "" });
 
   const save = () => {
@@ -3855,7 +3855,7 @@ function AdminPage({ users, saveUsers, orders, saveOrders, products, saveProduct
           <div className="modal-box" onClick={e => e.stopPropagation()} style={{maxWidth:"440px",padding:"32px 28px"}}>
             <button className="modal-close" onClick={() => setUserEditModal(null)}>✕</button>
             <div style={{fontWeight:800,fontSize:"20px",marginBottom:"20px"}}>Редактировать пользователя</div>
-            <UserEditForm username={userEditModal.username} user={userEditModal.user} users={users} saveUsers={saveUsers} notify={notify} onClose={() => setUserEditModal(null)} />
+            <UserEditForm username={userEditModal.username} user={userEditModal.user} users={users} saveUsers={saveUsers} notify={notify} onClose={() => setUserEditModal(null)} isAdmin={isAdmin} />
           </div>
         </div>
       )}
