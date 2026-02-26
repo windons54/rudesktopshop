@@ -4519,7 +4519,7 @@ function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbC
         body: JSON.stringify({ action: 'pg_diag' }),
       });
       const data = await res.json();
-      if (data.ok) setPgStats({ ok: true, total: data.pgTest?.rows ?? 0, size: '—', rowCounts: { '_total_keys': data.pgTest?.rows ?? 0 } });
+      if (data.ok) setPgStats({ ok: true, total: data.pgTest?.rows ?? 0, size: data.dbSize || '—', rowCounts: data.rowCounts || { '_total_keys': data.pgTest?.rows ?? 0 } });
       else notify("Ошибка загрузки статистики: " + data.error, "err");
     } catch(err) { notify("Ошибка: " + err.message, "err"); }
     setPgStatsLoading(false);
@@ -5566,7 +5566,7 @@ function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbC
                         <div>
                           <div style={{fontSize:"13px",color:"var(--rd-gray-text)",marginBottom:"12px"}}>Размер БД: <strong>{pgStats.size}</strong> · Всего ключей: <strong>{pgStats.total}</strong></div>
                           <div className="db-tables-grid">
-                            {[["cm_users","👥 Пользователи"],["cm_products","🛍️ Товары"],["cm_orders","📦 Заказы"],["cm_transfers","🪙 Переводы"],["cm_categories","🏷️ Категории"],["_total_keys","🔑 Всего ключей"]].map(([k,label]) => (
+                            {[["cm_users","👥 Пользователи"],["cm_products","🛍️ Товары"],["cm_orders","📦 Заказы"],["cm_transfers","🪙 Переводы"],["cm_categories","🏷️ Категории"],["_total_coins","🪙 Всего монет"],["_total_keys","🔑 Всего ключей"]].map(([k,label]) => (
                               <div key={k} className="db-table-card">
                                 <div className="db-table-name">{label}</div>
                                 <div className="db-table-count">{pgStats.rowCounts?.[k] ?? "—"}</div>

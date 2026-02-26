@@ -177,13 +177,37 @@ export default async function handler(req, res) {
   if (action === 'pg_diag') {
     const prisma = await getPrisma();
     const { cfg, source } = await getPgConfigForUI().catch(() => ({ cfg: null, source: 'error' }));
-    let pgTest = null, pgKeys = [];
+    let pgTest = null, pgKeys = [], rowCounts = {}, dbSize = '—';
     if (prisma) {
       try {
         const cnt = await prisma.kv.count();
-        const keys = await prisma.kv.findMany({ select: { key: true }, orderBy: { key: 'asc' } });
+        const rows = await prisma.kv.findMany({ select: { key: true, value: true }, orderBy: { key: 'asc' } });
+        pgKeys = rows.map(r => r.key);
         pgTest = { ok: true, rows: cnt };
-        pgKeys = keys.map(r => r.key);
+        // Считаем количество записей в массивах для каждого ключа
+        for (const row of rows) {
+          try {
+            const parsed = JSON.parse(row.value);
+            if (Array.isArray(parsed)) {
+              rowCounts[row.key] = parsed.length;
+            } else if (parsed && typeof parsed === 'object') {
+              rowCounts[row.key] = Object.keys(parsed).length;
+              // Считаем суммарные монеты пользователей
+              if (row.key === 'cm_users') {
+                const totalCoins = Object.values(parsed).reduce((sum, u) => sum + (u?.balance || 0), 0);
+                rowCounts['_total_coins'] = totalCoins;
+              }
+            } else {
+              rowCounts[row.key] = 1;
+            }
+          } catch { rowCounts[row.key] = 1; }
+        }
+        rowCounts['_total_keys'] = cnt;
+        // Получаем размер БД через raw query
+        try {
+          const sizeRes = await prisma.$queryRaw`SELECT pg_size_pretty(pg_database_size(current_database())) as size`;
+          dbSize = sizeRes[0]?.size || '—';
+        } catch {}
       } catch (e) { pgTest = { ok: false, error: e.message }; }
     }
     const PG_CFG_FILE = path.join(DATA_DIR, 'pg-config.json');
@@ -192,7 +216,7 @@ export default async function handler(req, res) {
       hasPgCfgFile: fs.existsSync(PG_CFG_FILE),
       hasEnvPg: !!process.env.PG_HOST, hasEnvDbUrl: !!process.env.DATABASE_URL,
       cfgHost: cfg?.host || (cfg?.connectionString ? '(connectionString)' : null),
-      pgTest, pgKeys, cwd: process.cwd(),
+      pgTest, pgKeys, rowCounts, dbSize, cwd: process.cwd(),
     });
   }
 
