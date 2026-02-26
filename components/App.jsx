@@ -1996,7 +1996,7 @@ function AuctionPage({ auctions, saveAuctions, currentUser, users, saveUsers, no
   );
 }
 
-function AuctionAdminTab({ auctions, saveAuctions, notify }) {
+function AuctionAdminTab({ auctions, saveAuctions, notify, users }) {
   const list = auctions || [];
   const [form, setForm] = useState({ name: "", image: "", startPrice: "", step: "", endsAt: "" });
   const [imgPreview, setImgPreview] = useState("");
@@ -2146,7 +2146,7 @@ function AuctionAdminTab({ auctions, saveAuctions, notify }) {
                   </div>
                   <div style={{flex:1,minWidth:0}}>
                     <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",gap:"10px"}}>
-                      <div>
+                      <div style={{flex:1,minWidth:0}}>
                         <div style={{fontWeight:700,fontSize:"15px",color:"var(--rd-dark)",marginBottom:"4px"}}>{a.name}</div>
                         <div style={{fontSize:"12px",color:"var(--rd-gray-text)"}}>
                           Старт: {a.startPrice} · Шаг: +{a.step} · Сейчас: <strong style={{color:"var(--rd-red)"}}>{currentPrice}</strong>
@@ -2154,6 +2154,18 @@ function AuctionAdminTab({ auctions, saveAuctions, notify }) {
                         <div style={{fontSize:"12px",color:"var(--rd-gray-text)",marginTop:"2px"}}>
                           {isEnded ? "✅ Завершён" : `⏱ До ${new Date(a.endsAt).toLocaleString("ru-RU")}`} · {a.bids?.length || 0} ставок
                         </div>
+                        {isEnded && lastBid && (() => {
+                          const ud = users && users[lastBid.user];
+                          const fullName = ud ? ((ud.firstName || "") + " " + (ud.lastName || "")).trim() || ud.username || lastBid.user : lastBid.user;
+                          return (
+                            <div style={{marginTop:"8px",display:"inline-flex",alignItems:"center",gap:"6px",background:"#fef9c3",border:"1.5px solid #fde047",borderRadius:"20px",padding:"4px 12px",fontSize:"12px",fontWeight:700,color:"#854d0e"}}>
+                              🏆 Победитель: {fullName} — {lastBid.amount} {getCurrName()}
+                            </div>
+                          );
+                        })()}
+                        {isEnded && !lastBid && (
+                          <div style={{marginTop:"8px",fontSize:"12px",color:"var(--rd-gray-text)",fontStyle:"italic"}}>Ставок не было</div>
+                        )}
                       </div>
                       <div style={{display:"flex",gap:"6px",flexShrink:0}}>
                         <button className="btn btn-ghost btn-sm" onClick={() => startEdit(a)}>✏️</button>
@@ -6004,7 +6016,7 @@ function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbC
               <div style={{fontWeight:700,fontSize:"18px",color:"var(--rd-dark)",marginBottom:"20px",paddingBottom:"14px",borderBottom:"1.5px solid var(--rd-gray-border)"}}>
                 🔨 Управление аукционами
               </div>
-              <AuctionAdminTab auctions={auctions} saveAuctions={saveAuctions} notify={notify} />
+              <AuctionAdminTab auctions={auctions} saveAuctions={saveAuctions} notify={notify} users={users} />
             </div>
           )}
 
