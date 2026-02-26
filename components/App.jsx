@@ -2664,6 +2664,23 @@ function RegisterPage({ users, saveUsers, setCurrentUser, setPage, notify }) {
 
 // ── USER EDIT FORM ────────────────────────────────────────────────────────
 
+class UserEditErrorBoundary extends React.Component {
+  constructor(props) { super(props); this.state = { error: null }; }
+  static getDerivedStateFromError(e) { return { error: e }; }
+  render() {
+    if (this.state.error) {
+      return (
+        <div style={{padding:"20px",background:"#fef2f2",border:"1.5px solid #fca5a5",borderRadius:"10px",color:"#991b1b"}}>
+          <div style={{fontWeight:700,marginBottom:"8px"}}>⚠️ Ошибка при открытии формы</div>
+          <div style={{fontSize:"12px",fontFamily:"monospace",wordBreak:"break-all"}}>{this.state.error.message}</div>
+          <button className="btn btn-ghost btn-sm" style={{marginTop:"12px"}} onClick={()=>this.setState({error:null})}>Попробовать снова</button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 function UserEditForm({ username, user, users, saveUsers, notify, onClose, isAdmin }) {
   const safeUser = user || {};
   const [form, setForm] = useState({ email: safeUser.email || "", newPassword: "", confirmPassword: "", birthdate: safeUser.birthdate || "", employmentDate: safeUser.employmentDate || "", avatar: safeUser.avatar || "" });
@@ -2683,11 +2700,11 @@ function UserEditForm({ username, user, users, saveUsers, notify, onClose, isAdm
     <div>
       <div style={{display:"flex",alignItems:"center",gap:"12px",marginBottom:"20px",padding:"12px 16px",background:"var(--rd-gray-bg)",borderRadius:"var(--rd-radius-sm)",border:"1.5px solid var(--rd-gray-border)"}}>
         <div style={{width:"40px",height:"40px",borderRadius:"50%",background:"var(--rd-red-light)",border:"1.5px solid rgba(199,22,24,0.2)",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:800,fontSize:"16px",color:"var(--rd-red)"}}>
-          {username[0].toUpperCase()}
+          {(username||"?")[0].toUpperCase()}
         </div>
         <div>
           <div style={{fontWeight:700,fontSize:"15px"}}>{username}</div>
-          <div style={{fontSize:"12px",color:"var(--rd-gray-text)"}}>{user.role === "admin" ? "Администратор" : "Пользователь"}</div>
+          <div style={{fontSize:"12px",color:"var(--rd-gray-text)"}}>{safeUser.role === "admin" ? "Администратор" : "Пользователь"}</div>
         </div>
       </div>
       <div className="form-field">
@@ -3874,7 +3891,9 @@ function AdminPage({ users, saveUsers, orders, saveOrders, products, saveProduct
           <div className="modal-box" onClick={e => e.stopPropagation()} style={{maxWidth:"440px",padding:"32px 28px"}}>
             <button className="modal-close" onClick={() => setUserEditModal(null)}>✕</button>
             <div style={{fontWeight:800,fontSize:"20px",marginBottom:"20px"}}>Редактировать пользователя</div>
-            <UserEditForm username={userEditModal.username} user={users[userEditModal.username] || userEditModal.user} users={users} saveUsers={saveUsers} notify={notify} onClose={() => setUserEditModal(null)} isAdmin={isAdmin} />
+            <UserEditErrorBoundary>
+              <UserEditForm username={userEditModal.username} user={users[userEditModal.username] || userEditModal.user} users={users} saveUsers={saveUsers} notify={notify} onClose={() => setUserEditModal(null)} isAdmin={isAdmin} />
+            </UserEditErrorBoundary>
           </div>
         </div>
       )}
@@ -5103,20 +5122,20 @@ function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbC
               const amount = parseInt(bdBonus);
               if (!bdEnabled) { notify("Автоначисление отключено", "err"); return; }
               if (isNaN(amount) || amount <= 0) { notify("Укажите корректную сумму", "err"); return; }
-              const today = new Date();
+              const nowBd = new Date();
               let count = 0;
               const updated = {...users};
               Object.entries(users).forEach(([uname, ud]) => {
                 if (!ud.birthdate) return;
                 const bd = new Date(ud.birthdate);
-                if (bd.getDate() === today.getDate() && bd.getMonth() === today.getMonth()) {
+                if (!isNaN(bd) && bd.getDate() === nowBd.getDate() && bd.getMonth() === nowBd.getMonth()) {
                   updated[uname] = { ...ud, balance: (ud.balance || 0) + amount };
                   count++;
                 }
               });
               if (count > 0) {
                 saveUsers(updated);
-                try { storage.set('cm_birthday_grant', String(today.getFullYear())); } catch(e) {}
+                try { storage.set('cm_birthday_grant', String(nowBd.getFullYear())); } catch(e) {}
                 notify(`🎂 Начислено ${amount} ${getCurrName(appearance.currency)} для ${count} ${count === 1 ? "именинника" : count < 5 ? "именинников" : "именинников"}!`);
               } else {
                 notify("Сегодня именинников нет 🎂");
