@@ -27,6 +27,4 @@ EXPOSE 3000
 ENV PORT=3000
 ENV HOSTNAME="0.0.0.0"
 
-COPY start.sh .
-RUN chmod +x start.sh
-CMD ["sh", "start.sh"]
+CMD ["npm", "start"]
