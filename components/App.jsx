@@ -433,6 +433,7 @@ function App() {
   const [appearance, setAppearance] = useState({ logo: null, theme: "default", headerBg: "", footerBg: "", pageBg: "", accentColor: "", socials: { telegram: "", max: "", vk: "", rutube: "", vkvideo: "" }, birthdayBonus: 100, birthdayEnabled: true, integrations: { tgEnabled: false, tgBotToken: "", tgChatId: "" }, currency: { name: "RuDeCoin", icon: "🪙", logo: "" }, seo: { title: "", description: "", favicon: "" } });
   const [currentUser, setCurrentUser] = useState(null);
   const [cart, setCart] = useState([]);
+  const [orderSuccess, setOrderSuccess] = useState(false);
   const [page, setPage] = useState("shop");
   const [filterCat, setFilterCat] = useState("Все");
   const [orders, setOrders] = useState([]);
@@ -806,7 +807,7 @@ function App() {
     saveUsers(newUsers);
     saveOrders([order, ...orders]);
     setCart([]);
-    notify(`Заказ оформлен! Списано ${cartTotal} ${currName()}.`);
+    setOrderSuccess(true);
     sendTelegramNotify(order);
   };
 
@@ -831,6 +832,20 @@ function App() {
   return (
     <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", background: appearance.pageBg || undefined }}>
       {toast && <div className={`toast toast-${toast.type}`}>{toast.msg}</div>}
+
+      {orderSuccess && (
+        <div className="modal-overlay" style={{zIndex:9999}} onClick={() => { setOrderSuccess(false); setPage("shop"); }}>
+          <div className="modal-box" style={{maxWidth:"420px",padding:"48px 36px",textAlign:"center"}} onClick={e => e.stopPropagation()}>
+            <div style={{fontSize:"64px",marginBottom:"16px",lineHeight:1}}>✅</div>
+            <div style={{fontWeight:800,fontSize:"24px",color:"var(--rd-dark)",marginBottom:"10px"}}>Заказ успешно оформлен!</div>
+            <div style={{fontSize:"15px",color:"var(--rd-gray-text)",marginBottom:"32px"}}>Ваш заказ принят в обработку. Вы можете отследить его статус в разделе «История заказов».</div>
+            <div style={{display:"flex",flexDirection:"column",gap:"10px"}}>
+              <button className="btn btn-primary btn-lg" onClick={() => { setOrderSuccess(false); setPage("history"); }}>Мои заказы</button>
+              <button className="btn btn-secondary" onClick={() => { setOrderSuccess(false); setPage("shop"); }}>Вернуться в магазин</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* HEADER */}
       <header className="rd-header" style={appearance.headerBg ? {background: appearance.headerBg, borderBottomColor: appearance.headerBg} : {}}>
@@ -2640,10 +2655,6 @@ function LoginPage({ users, setCurrentUser, setPage, notify }) {
         <button className="btn btn-primary btn-block" style={{marginTop:"8px"}} onClick={submit}>Войти</button>
         <div className="auth-link">
           Нет аккаунта? <a onClick={() => setPage("register")}>Зарегистрироваться</a>
-        </div>
-        <div className="auth-demo-hint">
-          <div className="adh-label">Демо администратора</div>
-          <div className="adh-value">Логин: <strong>admin</strong> / Пароль: <strong>admin123</strong></div>
         </div>
       </div>
     </div>
@@ -4801,6 +4812,7 @@ function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbC
     { id: "profile",    icon: "👤", label: "Профиль" },
     { id: "appearance", icon: "🎨", label: "Внешний вид" },
     { id: "banner",     icon: "🖼️", label: "Баннер" },
+    { id: "users",      icon: "👥", label: "Пользователи" },
     { id: "currency",   icon: "🪙", label: "Валюта" },
     { id: "seo",        icon: "🔍", label: "SEO" },
     { id: "database",   icon: "🗄️", label: "База данных" },
@@ -4826,7 +4838,6 @@ function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbC
     { id: "products",   icon: "🛍️", label: "Товары" },
     { id: "categories", icon: "🏷️", label: "Категории" },
     { id: "orders",     icon: "📦", label: "Заказы" },
-    { id: "faq",        icon: "❓", label: "Вопрос-ответ" },
     { id: "import",     icon: "⬆️", label: "Импорт" },
     { id: "export",     icon: "⬇️", label: "Экспорт" },
   ];
@@ -5801,6 +5812,21 @@ function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbC
                 </div>
               )}
 
+            </div>
+          )}
+
+          {tab === "users" && isAdmin && (
+            <div style={{marginTop:"-12px"}}>
+              <AdminPage
+                users={users} saveUsers={saveUsers}
+                orders={orders} saveOrders={saveOrders}
+                products={products} saveProducts={saveProducts}
+                categories={categories} saveCategories={saveCategories}
+                notify={notify} setPage={() => {}} currentUser={currentUser}
+                transfers={transfers} saveTransfers={saveTransfers}
+                embedded={true} activeTab="users" setActiveTab={() => {}}
+                faq={faq} saveFaq={saveFaq}
+              />
             </div>
           )}
 
