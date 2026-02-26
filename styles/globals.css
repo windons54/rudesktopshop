@@ -131,7 +131,7 @@ body {
   background: var(--rd-green-light);
   border: 1px solid rgba(5,150,105,0.2);
   padding: 6px 14px;
-  border-radius: 20px;
+  border-radius: var(--rd-radius-sm);
   font-size: 13px;
   font-weight: 700;
   color: var(--rd-green);
@@ -252,6 +252,31 @@ body {
   0% { transform: scale(0); }
   70% { transform: scale(1.2); }
   100% { transform: scale(1); }
+}
+@keyframes cartBounce {
+  0% { transform: scale(1); }
+  15% { transform: scale(1.25) rotate(-8deg); }
+  30% { transform: scale(0.9) rotate(4deg); }
+  45% { transform: scale(1.15) rotate(-3deg); }
+  60% { transform: scale(0.95); }
+  75% { transform: scale(1.05); }
+  100% { transform: scale(1); }
+}
+.cart-bounce {
+  animation: cartBounce 0.6s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.cart-bounce .cart-icon {
+  animation: cartBounce 0.6s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+/* Product card action buttons — equal size */
+.pc-action-btn {
+  flex: 1 1 0;
+  min-width: 0;
+  text-align: center;
+  justify-content: center;
+  padding: 9px 12px !important;
+  font-size: 13px;
 }
 
 /* ======= BUTTONS ======= */

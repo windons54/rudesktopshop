@@ -770,6 +770,7 @@ function App() {
   const savePolls = (pl) => { const data = pl || []; setPolls(data); storage.set("cm_polls", data); };
   const saveTaskSubmissions = (ts) => { setTaskSubmissions(ts); storage.set("cm_task_submissions", ts); };
 
+  const [cartAnimating, setCartAnimating] = useState(false);
   const addToCart = (product) => {
     if (product.size && product.sizeStock && product.sizeStock[product.size] === 0) {
       notify("Нет в наличии: " + product.name + " (" + product.size + ")", "err");
@@ -784,6 +785,8 @@ function App() {
     });
     const sizeStr = product.size ? " (" + product.size + ")" : "";
     notify("\u00ab" + product.name + "\u00bb" + sizeStr + " \u0434\u043e\u0431\u0430\u0432\u043b\u0435\u043d \u0432 \u043a\u043e\u0440\u0437\u0438\u043d\u0443");
+    setCartAnimating(true);
+    setTimeout(() => setCartAnimating(false), 600);
   };
   const removeFromCart = (cartKey) => setCart(prev => prev.filter(i => (i.cartKey || ("" + i.id)) !== cartKey));
   const cartTotal = cart.reduce((s, i) => s + i.price * i.qty, 0);
@@ -1011,7 +1014,7 @@ function App() {
                   <button className="btn btn-primary btn-sm" onClick={() => setPage("register")}>Регистрация</button>
                 )}
               </>}
-              <div className="cart-wrap" onClick={() => setPage("cart")}>
+              <div className={"cart-wrap" + (cartAnimating ? " cart-bounce" : "")} onClick={() => setPage("cart")}>
                 <div className="cart-icon">🛒</div>
                 {cartCount > 0 && <span className="cart-badge">{cartCount}</span>}
               </div>
@@ -2452,21 +2455,21 @@ function ShopPage({ products, allProducts, categories, filterCat, setFilterCat, 
                     <div style={{fontSize:"14px",color:"rgba(255,255,255,0.55)"}}>Шаг ставки: <span style={{color:"rgba(255,255,255,0.85)",fontWeight:700}}>+{a.step} {cName}</span> · {a.bids?.length || 0} ставок</div>
                   </div>
 
-                  <div style={{display:"flex",gap:"12px",flexWrap:"wrap",alignItems:"center"}}>
-                    <div style={{background:"rgba(255,255,255,0.06)",border:"1.5px solid rgba(255,255,255,0.12)",borderRadius:"14px",padding:"14px 22px"}}>
+                  <div style={{display:"flex",gap:"12px",flexWrap:"wrap",alignItems:"stretch"}}>
+                    <div style={{background:"rgba(255,255,255,0.06)",border:"1.5px solid rgba(255,255,255,0.12)",borderRadius:"14px",padding:"14px 22px",flex:"1 1 180px",minWidth:"180px"}}>
                       <div style={{fontSize:"11px",color:"rgba(255,255,255,0.5)",textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:"4px"}}>Текущая цена</div>
                       <div style={{fontSize:"32px",fontWeight:900,color:"var(--rd-red)",lineHeight:1}}>{currentPrice} <span style={{fontSize:"16px",fontWeight:700}}>{cName}</span></div>
                       <div style={{fontSize:"12px",color:"rgba(255,255,255,0.4)",marginTop:"2px"}}>Старт: {a.startPrice} {cName}</div>
                     </div>
                     {lastBid && (() => {
                       return (
-                        <div style={{background:"rgba(255,255,255,0.06)",border:"1.5px solid rgba(255,255,255,0.12)",borderRadius:"14px",padding:"14px 22px"}}>
-                          <div style={{fontSize:"11px",color:"rgba(255,255,255,0.5)",textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:"6px"}}>Лидер</div>
+                        <div style={{background:"rgba(255,255,255,0.06)",border:"1.5px solid rgba(255,255,255,0.12)",borderRadius:"14px",padding:"14px 22px",flex:"1 1 180px",minWidth:"180px"}}>
+                          <div style={{fontSize:"11px",color:"rgba(255,255,255,0.5)",textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:"6px"}}>Лидер аукциона</div>
                           <div style={{display:"flex",alignItems:"center",gap:"10px"}}>
                             <div style={{width:"36px",height:"36px",borderRadius:"50%",background:"linear-gradient(135deg,var(--rd-red),#ff6b6b)",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:800,color:"#fff",fontSize:"14px",flexShrink:0}}>
                               {lastBid.user[0]?.toUpperCase()}
                             </div>
-                            <div style={{fontSize:"14px",fontWeight:700,color:"#fff"}}>{lastBid.user}</div>
+                            <div style={{fontSize:"14px",fontWeight:700,color:"#fff",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",minWidth:0}}>{lastBid.user}</div>
                           </div>
                         </div>
                       );
@@ -2709,11 +2712,11 @@ function ProductCard({ product, addToCart, onOpen, favorites, toggleFavorite }) 
               {favorites && favorites.includes(product.id) ? "❤️" : "🤍"}
             </button>
           )}
-          <button className="btn btn-primary btn-sm" style={{flex:1}} onClick={(e) => { e.stopPropagation(); onOpen(product); }}>
+          <button className="btn btn-primary btn-sm pc-action-btn" onClick={(e) => { e.stopPropagation(); onOpen(product); }}>
             Подробнее
           </button>
           {addToCart && (
-            <button className="btn btn-primary btn-sm" style={{background:"var(--rd-red)",border:"none",color:"#fff",flexShrink:0,padding:"6px 12px"}} onClick={(e) => { e.stopPropagation(); addToCart(product); }}>
+            <button className="btn btn-primary btn-sm pc-action-btn" style={{background:"var(--rd-red)",border:"none",color:"#fff"}} onClick={(e) => { e.stopPropagation(); addToCart(product); }}>
               🛒 Купить
             </button>
           )}
@@ -6572,9 +6575,31 @@ function LotteryPage({ lotteries, currentUser, currency }) {
   const ended = list.filter(l => l.status === "ended").sort((a, b) => b.endsAt - a.endsAt);
 
   return (
-    <div className="page-fade" style={{ maxWidth: "900px", margin: "0 auto", padding: "40px 24px 64px" }}>
-      <div className="page-eyebrow">Розыгрыши</div>
-      <h2 className="page-title" style={{ fontSize: "32px", marginBottom: "28px" }}>Лотерея</h2>
+    <div className="page-fade" style={{ minHeight: "60vh" }}>
+      <div style={{background:"#fff",borderBottom:"1.5px solid var(--rd-gray-border)",padding:"40px 0 32px"}}>
+        <div className="container">
+          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:"12px"}}>
+            <div>
+              <h1 style={{fontSize:"clamp(26px,5vw,40px)",fontWeight:900,color:"var(--rd-dark)",letterSpacing:"-0.02em"}}>Лотерея</h1>
+              <p style={{fontSize:"15px",color:"var(--rd-gray-text)",marginTop:"6px"}}>Участвуйте в розыгрышах и выигрывайте призы</p>
+            </div>
+            {list.length > 0 && (
+              <div style={{display:"flex",gap:"16px",flexWrap:"wrap"}}>
+                <div style={{textAlign:"center",background:"var(--rd-gray-bg)",borderRadius:"12px",padding:"12px 20px"}}>
+                  <div style={{fontSize:"22px",fontWeight:900,color:"var(--rd-red)"}}>{active.length}</div>
+                  <div style={{fontSize:"11px",color:"var(--rd-gray-text)",textTransform:"uppercase",letterSpacing:"0.08em"}}>Активных</div>
+                </div>
+                <div style={{textAlign:"center",background:"var(--rd-gray-bg)",borderRadius:"12px",padding:"12px 20px"}}>
+                  <div style={{fontSize:"22px",fontWeight:900,color:"var(--rd-dark)"}}>{ended.length}</div>
+                  <div style={{fontSize:"11px",color:"var(--rd-gray-text)",textTransform:"uppercase",letterSpacing:"0.08em"}}>Завершённых</div>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      <div style={{ maxWidth: "900px", margin: "0 auto", padding: "40px 24px 64px" }}>
 
       {active.length > 0 && (
         <>
@@ -6642,6 +6667,7 @@ function LotteryPage({ lotteries, currentUser, currency }) {
           <div style={{ fontSize: "13px", marginTop: "6px" }}>Следите за обновлениями!</div>
         </div>
       )}
+      </div>
     </div>
   );
 }
@@ -6891,9 +6917,31 @@ function VotingPage({ polls, savePolls, currentUser, users, saveUsers, notify, c
   };
 
   return (
-    <div className="page-fade" style={{ maxWidth: "900px", margin: "0 auto", padding: "40px 24px 64px" }}>
-      <div className="page-eyebrow">Сообщество</div>
-      <h2 className="page-title" style={{ fontSize: "32px", marginBottom: "28px" }}>Голосование</h2>
+    <div className="page-fade" style={{ minHeight: "60vh" }}>
+      <div style={{background:"#fff",borderBottom:"1.5px solid var(--rd-gray-border)",padding:"40px 0 32px"}}>
+        <div className="container">
+          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:"12px"}}>
+            <div>
+              <h1 style={{fontSize:"clamp(26px,5vw,40px)",fontWeight:900,color:"var(--rd-dark)",letterSpacing:"-0.02em"}}>Голосование</h1>
+              <p style={{fontSize:"15px",color:"var(--rd-gray-text)",marginTop:"6px"}}>Голосуйте и влияйте на решения сообщества</p>
+            </div>
+            {list.length > 0 && (
+              <div style={{display:"flex",gap:"16px",flexWrap:"wrap"}}>
+                <div style={{textAlign:"center",background:"var(--rd-gray-bg)",borderRadius:"12px",padding:"12px 20px"}}>
+                  <div style={{fontSize:"22px",fontWeight:900,color:"var(--rd-red)"}}>{active.length}</div>
+                  <div style={{fontSize:"11px",color:"var(--rd-gray-text)",textTransform:"uppercase",letterSpacing:"0.08em"}}>Активных</div>
+                </div>
+                <div style={{textAlign:"center",background:"var(--rd-gray-bg)",borderRadius:"12px",padding:"12px 20px"}}>
+                  <div style={{fontSize:"22px",fontWeight:900,color:"var(--rd-dark)"}}>{ended.length}</div>
+                  <div style={{fontSize:"11px",color:"var(--rd-gray-text)",textTransform:"uppercase",letterSpacing:"0.08em"}}>Завершённых</div>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      <div style={{ maxWidth: "900px", margin: "0 auto", padding: "40px 24px 64px" }}>
 
       {active.length > 0 && (
         <>
@@ -7024,6 +7072,7 @@ function VotingPage({ polls, savePolls, currentUser, users, saveUsers, notify, c
           <div style={{ fontSize: "13px", marginTop: "6px" }}>Следите за обновлениями!</div>
         </div>
       )}
+      </div>
     </div>
   );
 }
