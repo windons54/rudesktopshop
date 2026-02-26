@@ -442,7 +442,7 @@ function App() {
     if (appearance.currency && appearance.currency.logo) return <img src={appearance.currency.logo} alt="" style={{width:"16px",height:"16px",objectFit:"contain",verticalAlign:"middle"}} />;
     return <span>{(appearance.currency && appearance.currency.icon) ? appearance.currency.icon : "🪙"}</span>;
   };
-  const [appearance, setAppearance] = useState({ logo: null, theme: "default", headerBg: "", footerBg: "", pageBg: "", accentColor: "", socials: { telegram: "", max: "", vk: "", rutube: "", vkvideo: "" }, birthdayBonus: 100, birthdayEnabled: true, integrations: { tgEnabled: false, tgBotToken: "", tgChatId: "" }, currency: { name: "RuDeCoin", icon: "🪙", logo: "" }, seo: { title: "", description: "", favicon: "" } });
+  const [appearance, setAppearance] = useState({ logo: null, theme: "default", headerBg: "", footerBg: "", pageBg: "", accentColor: "", socials: { telegram: "", max: "", vk: "", rutube: "", vkvideo: "" }, birthdayBonus: 100, birthdayEnabled: true, integrations: { tgEnabled: false, tgBotToken: "", tgChatId: "" }, currency: { name: "RuDeCoin", icon: "🪙", logo: "" }, seo: { title: "", description: "", favicon: "" }, registrationEnabled: true, bitrix24: { enabled: false, clientId: "", clientSecret: "", portalUrl: "" } });
   const [currentUser, setCurrentUser] = useState(null);
   const [cart, setCart] = useState([]);
   const [orderSuccess, setOrderSuccess] = useState(false);
@@ -987,7 +987,9 @@ function App() {
                 })()}
               </> : <>
                 <button className="btn btn-ghost btn-sm" onClick={() => setPage("login")}>Войти</button>
-                <button className="btn btn-primary btn-sm" onClick={() => setPage("register")}>Регистрация</button>
+                {appearance.registrationEnabled !== false && (
+                  <button className="btn btn-primary btn-sm" onClick={() => setPage("register")}>Регистрация</button>
+                )}
               </>}
               <div className="cart-wrap" onClick={() => setPage("cart")}>
                 <div className="cart-icon">🛒</div>
@@ -1045,8 +1047,8 @@ function App() {
         {page === "favorites" && currentUser && <FavoritesPage products={activeProducts.filter(p => favorites.includes(p.id))} favorites={favorites} toggleFavorite={toggleFavorite} addToCart={addToCart} setPage={setPage} />}
         {page === "history" && currentUser && <HistoryPage currentUser={currentUser} transfers={transfers} orders={orders} taskSubmissions={taskSubmissions} />}
         {page === "cart" && <CartPage cart={cart} removeFromCart={removeFromCart} cartTotal={cartTotal} checkout={checkout} currentUser={currentUser} setPage={setPage} users={users} currency={appearance.currency} />}
-        {page === "login" && <LoginPage users={users} setCurrentUser={setCurrentUser} setPage={setPage} notify={notify} />}
-        {page === "register" && <RegisterPage users={users} saveUsers={saveUsers} setCurrentUser={setCurrentUser} setPage={setPage} notify={notify} />}
+        {page === "login" && <LoginPage users={users} setCurrentUser={setCurrentUser} setPage={setPage} notify={notify} appearance={appearance} saveUsers={saveUsers} />}
+        {page === "register" && <RegisterPage users={users} saveUsers={saveUsers} setCurrentUser={setCurrentUser} setPage={setPage} notify={notify} appearance={appearance} />}
         
         {page === "orders" && currentUser && <OrdersPage orders={orders.filter(o => o.user === currentUser)} currency={appearance.currency} />}
         {page === "transfer" && currentUser && <TransferPage currentUser={currentUser} users={users} saveUsers={saveUsers} transfers={transfers} saveTransfers={saveTransfers} notify={notify} setPage={setPage} currency={appearance.currency} />}
@@ -2754,7 +2756,7 @@ function CartPage({ cart, removeFromCart, cartTotal, checkout, currentUser, setP
 
 // ── LOGIN ─────────────────────────────────────────────────────────────────
 
-function LoginPage({ users, setCurrentUser, setPage, notify }) {
+function LoginPage({ users, setCurrentUser, setPage, notify, appearance, saveUsers }) {
   const [form, setForm] = useState({ username: "", password: "", remember: true });
   const submit = () => {
     const u = users[form.username];
@@ -2766,11 +2768,80 @@ function LoginPage({ users, setCurrentUser, setPage, notify }) {
     notify(`Добро пожаловать, ${form.username}!`);
     setPage("shop");
   };
+
+  const bx24 = appearance?.bitrix24 || {};
+  const handleBitrix24 = () => {
+    if (!bx24.portalUrl || !bx24.clientId) {
+      notify("Битрикс24 не настроен администратором", "err");
+      return;
+    }
+    const redirectUri = encodeURIComponent(window.location.origin + "/oauth/bitrix24");
+    const state = btoa(JSON.stringify({ ts: Date.now() }));
+    const authUrl = `${bx24.portalUrl}/oauth/authorize/?client_id=${bx24.clientId}&response_type=code&redirect_uri=${redirectUri}&state=${state}`;
+    // Store state for verification
+    _lsSet("bx24_oauth_state", state);
+    window.location.href = authUrl;
+  };
+
+  // Check for OAuth callback params (code in URL)
+  React.useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const code = params.get("bx24_code");
+    const bxUser = params.get("bx24_user");
+    const bxEmail = params.get("bx24_email");
+    const bxFirst = params.get("bx24_first");
+    const bxLast = params.get("bx24_last");
+    if (code === "ok" && bxUser) {
+      // User authenticated via Bitrix24
+      const existing = users[bxUser];
+      if (!existing) {
+        // Auto-create account
+        const newUser = {
+          username: bxUser,
+          firstName: bxFirst || bxUser,
+          lastName: bxLast || "",
+          email: bxEmail || "",
+          password: "",
+          role: "user",
+          balance: 0,
+          createdAt: Date.now(),
+          bitrix24: true,
+        };
+        if (saveUsers) saveUsers({ ...users, [bxUser]: newUser });
+      }
+      setCurrentUser(bxUser);
+      _lsSet("cm_session", { user: bxUser, ts: Date.now() });
+      notify(`Добро пожаловать, ${bxFirst || bxUser}!`);
+      // Clear URL params
+      window.history.replaceState({}, "", window.location.pathname);
+      setPage("shop");
+    }
+  }, []);
+
+  const registrationEnabled = appearance?.registrationEnabled !== false;
+
   return (
     <div className="auth-wrap">
       <div className="page-eyebrow">Вход</div>
       <h2 className="page-title" style={{fontSize:"32px"}}>Войдите в аккаунт</h2>
       <div className="auth-card">
+        {bx24.enabled && (
+          <>
+            <button
+              onClick={handleBitrix24}
+              style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"center",gap:"10px",padding:"12px 20px",borderRadius:"var(--rd-radius-sm)",border:"1.5px solid rgba(255,87,34,0.35)",background:"#fff",cursor:"pointer",fontWeight:700,fontSize:"15px",color:"#FF5722",transition:"all 0.2s",marginBottom:"8px"}}
+              onMouseEnter={e=>{e.currentTarget.style.background="rgba(255,87,34,0.06)";e.currentTarget.style.borderColor="rgba(255,87,34,0.6)"}}
+              onMouseLeave={e=>{e.currentTarget.style.background="#fff";e.currentTarget.style.borderColor="rgba(255,87,34,0.35)"}}>
+              <span style={{width:"24px",height:"24px",borderRadius:"6px",background:"#FF5722",display:"inline-flex",alignItems:"center",justifyContent:"center",color:"#fff",fontWeight:900,fontSize:"14px",flexShrink:0}}>B</span>
+              Войти через Битрикс24
+            </button>
+            <div style={{display:"flex",alignItems:"center",gap:"10px",margin:"16px 0"}}>
+              <div style={{flex:1,height:"1px",background:"var(--rd-gray-border)"}}></div>
+              <span style={{fontSize:"12px",color:"var(--rd-gray-text)",fontWeight:600,whiteSpace:"nowrap"}}>или войдите с паролем</span>
+              <div style={{flex:1,height:"1px",background:"var(--rd-gray-border)"}}></div>
+            </div>
+          </>
+        )}
         <div className="form-field">
           <label className="form-label">Логин</label>
           <input className="form-input" placeholder="Введите логин" value={form.username} onChange={e => setForm({...form, username: e.target.value})} />
@@ -2784,9 +2855,11 @@ function LoginPage({ users, setCurrentUser, setPage, notify }) {
           Запомнить меня
         </label>
         <button className="btn btn-primary btn-block" style={{marginTop:"8px"}} onClick={submit}>Войти</button>
-        <div className="auth-link">
-          Нет аккаунта? <a onClick={() => setPage("register")}>Зарегистрироваться</a>
-        </div>
+        {registrationEnabled && (
+          <div className="auth-link">
+            Нет аккаунта? <a onClick={() => setPage("register")}>Зарегистрироваться</a>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -2794,8 +2867,22 @@ function LoginPage({ users, setCurrentUser, setPage, notify }) {
 
 // ── REGISTER ──────────────────────────────────────────────────────────────
 
-function RegisterPage({ users, saveUsers, setCurrentUser, setPage, notify }) {
+function RegisterPage({ users, saveUsers, setCurrentUser, setPage, notify, appearance }) {
   const [form, setForm] = useState({ username: "", firstName: "", lastName: "", email: "", password: "", confirm: "" });
+
+  if (appearance?.registrationEnabled === false) {
+    return (
+      <div className="auth-wrap">
+        <div className="auth-card" style={{textAlign:"center",padding:"48px 36px"}}>
+          <div style={{fontSize:"48px",marginBottom:"16px"}}>🔒</div>
+          <div style={{fontWeight:800,fontSize:"20px",color:"var(--rd-dark)",marginBottom:"10px"}}>Регистрация закрыта</div>
+          <div style={{fontSize:"14px",color:"var(--rd-gray-text)",marginBottom:"24px"}}>Самостоятельная регистрация отключена администратором. Обратитесь к администратору для создания аккаунта.</div>
+          <button className="btn btn-primary" onClick={() => setPage("login")}>Войти</button>
+        </div>
+      </div>
+    );
+  }
+
   const submit = () => {
     if (!form.username || !form.firstName || !form.lastName || !form.email || !form.password) { notify("Заполните все обязательные поля", "err"); return; }
     if (form.password !== form.confirm) { notify("Пароли не совпадают", "err"); return; }
@@ -3412,6 +3499,29 @@ function AdminPage({ users, saveUsers, orders, saveOrders, products, saveProduct
   const [imgPreviews, setImgPreviews] = useState([]);
 
   const [userEditModal, setUserEditModal] = useState(null);
+  const [showCreateUser, setShowCreateUser] = useState(false);
+  const [createUserForm, setCreateUserForm] = useState({ username: "", firstName: "", lastName: "", email: "", password: "", role: "user", balance: "0" });
+  const createUserSubmit = () => {
+    const f = createUserForm;
+    if (!f.username.trim()) { notify("Введите логин", "err"); return; }
+    if (users[f.username.trim()]) { notify("Логин уже занят", "err"); return; }
+    if (!f.firstName.trim()) { notify("Введите имя", "err"); return; }
+    if (!f.password || f.password.length < 6) { notify("Пароль минимум 6 символов", "err"); return; }
+    const newUser = {
+      username: f.username.trim(),
+      firstName: f.firstName.trim(),
+      lastName: f.lastName.trim(),
+      email: f.email.trim(),
+      password: f.password,
+      role: f.role,
+      balance: parseInt(f.balance) || 0,
+      createdAt: Date.now(),
+    };
+    saveUsers({ ...users, [newUser.username]: newUser });
+    setCreateUserForm({ username: "", firstName: "", lastName: "", email: "", password: "", role: "user", balance: "0" });
+    setShowCreateUser(false);
+    notify(`Пользователь «${newUser.username}» создан ✓`);
+  };
   const [catInput, setCatInput] = useState("");
   const [editCatIdx, setEditCatIdx] = useState(null);
   const [editCatVal, setEditCatVal] = useState("");
@@ -4012,14 +4122,67 @@ function AdminPage({ users, saveUsers, orders, saveOrders, products, saveProduct
               ))}
             </div>
             <div style={{marginLeft:"auto",display:"flex",gap:"8px",flexWrap:"wrap"}}>
+              <button className="btn btn-primary btn-sm" onClick={() => setShowCreateUser(true)}>➕ Создать пользователя</button>
               <button className="btn btn-secondary btn-sm" onClick={exportUsersCSV}>⬇ CSV</button>
               <button className="btn btn-secondary btn-sm" onClick={exportUsersXLSX}>⬇ XLSX</button>
-              <label className="btn btn-primary btn-sm" style={{cursor:"pointer",position:"relative"}}>
+              <label className="btn btn-secondary btn-sm" style={{cursor:"pointer",position:"relative"}}>
                 ⬆ Импорт
                 <input type="file" accept=".csv,.xlsx,.xls" style={{position:"absolute",inset:0,opacity:0,cursor:"pointer",width:"100%",height:"100%"}} onChange={handleUsersImport} />
               </label>
             </div>
           </div>
+
+          {/* Create user inline form */}
+          {showCreateUser && (
+            <div style={{background:"#fff",border:"2px solid var(--rd-red)",borderRadius:"14px",padding:"24px",marginBottom:"20px",boxShadow:"0 4px 24px rgba(199,22,24,0.1)"}}>
+              <div style={{fontWeight:800,fontSize:"16px",color:"var(--rd-dark)",marginBottom:"18px",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+                <span>➕ Создать пользователя</span>
+                <button onClick={() => setShowCreateUser(false)} style={{background:"none",border:"none",cursor:"pointer",fontSize:"18px",color:"var(--rd-gray-text)"}}>✕</button>
+              </div>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"12px",marginBottom:"12px"}}>
+                <div className="form-field">
+                  <label className="form-label">Имя <span style={{color:"var(--rd-red)"}}>*</span></label>
+                  <input className="form-input" placeholder="Иван" value={createUserForm.firstName} onChange={e => setCreateUserForm(f=>({...f,firstName:e.target.value}))} />
+                </div>
+                <div className="form-field">
+                  <label className="form-label">Фамилия</label>
+                  <input className="form-input" placeholder="Петров" value={createUserForm.lastName} onChange={e => setCreateUserForm(f=>({...f,lastName:e.target.value}))} />
+                </div>
+              </div>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"12px",marginBottom:"12px"}}>
+                <div className="form-field">
+                  <label className="form-label">Логин <span style={{color:"var(--rd-red)"}}>*</span></label>
+                  <input className="form-input" placeholder="ivanpetrov" value={createUserForm.username} onChange={e => setCreateUserForm(f=>({...f,username:e.target.value.replace(/\s/g,"")}))} />
+                </div>
+                <div className="form-field">
+                  <label className="form-label">Email</label>
+                  <input className="form-input" type="email" placeholder="ivan@corp.ru" value={createUserForm.email} onChange={e => setCreateUserForm(f=>({...f,email:e.target.value}))} />
+                </div>
+              </div>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:"12px",marginBottom:"16px"}}>
+                <div className="form-field">
+                  <label className="form-label">Пароль <span style={{color:"var(--rd-red)"}}>*</span></label>
+                  <input className="form-input" type="password" placeholder="Мин. 6 символов" value={createUserForm.password} onChange={e => setCreateUserForm(f=>({...f,password:e.target.value}))} />
+                </div>
+                <div className="form-field">
+                  <label className="form-label">Роль</label>
+                  <select className="form-select" value={createUserForm.role} onChange={e => setCreateUserForm(f=>({...f,role:e.target.value}))}>
+                    <option value="user">Пользователь</option>
+                    <option value="admin">Администратор</option>
+                  </select>
+                </div>
+                <div className="form-field">
+                  <label className="form-label">Начальный баланс</label>
+                  <input className="form-input" type="number" min="0" placeholder="0" value={createUserForm.balance} onChange={e => setCreateUserForm(f=>({...f,balance:e.target.value}))} />
+                </div>
+              </div>
+              <div style={{display:"flex",gap:"10px"}}>
+                <button className="btn btn-primary" onClick={createUserSubmit}>✓ Создать</button>
+                <button className="btn btn-secondary" onClick={() => setShowCreateUser(false)}>Отмена</button>
+              </div>
+            </div>
+          )}
+
           <div style={{fontSize:"13px",color:"var(--rd-gray-text)",marginBottom:"12px"}}>
             Показано: {userList.length} {userRoleFilter === "admin" ? "администраторов" : userRoleFilter === "user" ? "пользователей" : "пользователей"}
           </div>
@@ -4631,6 +4794,16 @@ function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbC
       setInteg(prev => ({ ...prev, ...appearance.integrations }));
     }
   }, [JSON.stringify(appearance.integrations)]);
+
+  const [bitrix24, setBitrix24] = useState(() => ({
+    enabled: false, clientId: "", clientSecret: "", portalUrl: "",
+    ...(appearance.bitrix24 || {})
+  }));
+  useEffect(() => {
+    if (appearance.bitrix24) setBitrix24(prev => ({ ...prev, ...appearance.bitrix24 }));
+  }, [JSON.stringify(appearance.bitrix24)]);
+
+  const [registrationEnabled, setRegistrationEnabled] = useState(appearance.registrationEnabled !== false);
   const user = users[currentUser] || {};
   const [form, setForm] = useState({ email: user.email || "", firstName: user.firstName || "", lastName: user.lastName || "", currentPassword: "", newPassword: "", confirmPassword: "", avatar: user.avatar || "" });
   const [ap, setAp] = useState({ ...appearance });
@@ -4959,6 +5132,7 @@ function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbC
 
   const SIDEBAR_TABS = isAdmin ? [
     { id: "profile",    icon: "👤", label: "Профиль" },
+    { id: "general",    icon: "⚙️", label: "Общее" },
     { id: "appearance", icon: "🎨", label: "Внешний вид" },
     { id: "banner",     icon: "🖼️", label: "Баннер" },
     { id: "users",      icon: "👥", label: "Пользователи" },
@@ -5035,6 +5209,38 @@ function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbC
         </div>
 
         <div className="settings-content">
+
+          {tab === "general" && isAdmin && (
+            <div style={{maxWidth:"560px"}}>
+              <div className="settings-card" style={{marginBottom:"16px"}}>
+                <div className="settings-section-title">🌐 Регистрация пользователей</div>
+                <p style={{fontSize:"13px",color:"var(--rd-gray-text)",marginBottom:"20px",lineHeight:1.6}}>
+                  Управляйте возможностью самостоятельной регистрации. При отключении кнопка «Регистрация» скрывается — добавлять пользователей сможет только администратор.
+                </p>
+                <div style={{display:"flex",alignItems:"center",gap:"14px",padding:"14px 16px",background:registrationEnabled?"rgba(34,197,94,0.06)":"var(--rd-gray-bg)",borderRadius:"var(--rd-radius-sm)",border:"1.5px solid",borderColor:registrationEnabled?"rgba(34,197,94,0.25)":"var(--rd-gray-border)",transition:"all 0.2s",marginBottom:"20px"}}>
+                  <div style={{position:"relative",width:"44px",height:"24px",flexShrink:0}}>
+                    <input type="checkbox" checked={registrationEnabled} onChange={e => setRegistrationEnabled(e.target.checked)}
+                      style={{position:"absolute",inset:0,opacity:0,cursor:"pointer",zIndex:1,width:"100%",height:"100%"}} />
+                    <div style={{width:"44px",height:"24px",borderRadius:"12px",background:registrationEnabled?"#22c55e":"#d1d5db",transition:"background 0.2s",display:"flex",alignItems:"center",padding:"2px"}}>
+                      <div style={{width:"20px",height:"20px",borderRadius:"50%",background:"#fff",transition:"transform 0.2s",transform:registrationEnabled?"translateX(20px)":"translateX(0)",boxShadow:"0 1px 3px rgba(0,0,0,0.2)"}}></div>
+                    </div>
+                  </div>
+                  <div>
+                    <div style={{fontWeight:700,fontSize:"14px",color:"var(--rd-dark)"}}>
+                      {registrationEnabled ? "Регистрация открыта" : "Регистрация закрыта"}
+                    </div>
+                    <div style={{fontSize:"12px",color:"var(--rd-gray-text)",marginTop:"2px"}}>
+                      {registrationEnabled ? "Любой посетитель может создать аккаунт" : "Новых пользователей добавляет только администратор"}
+                    </div>
+                  </div>
+                </div>
+                <button className="btn btn-primary" onClick={() => {
+                  saveAppearance({ ...appearance, registrationEnabled });
+                  notify("Настройки сохранены ✓");
+                }}>Сохранить</button>
+              </div>
+            </div>
+          )}
 
           {tab === "profile" && (
             <div className="settings-card">
@@ -5605,6 +5811,72 @@ function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbC
                   <li>Вставьте токен и Chat ID, нажмите «Отправить тест»</li>
                   <li>Включите уведомления и сохраните</li>
                 </ol>
+              </div>
+
+              {/* Bitrix24 */}
+              <div className="settings-card" style={{marginTop:"16px"}}>
+                <div className="settings-section-title" style={{display:"flex",alignItems:"center",gap:"10px"}}>
+                  <span style={{width:"32px",height:"32px",borderRadius:"8px",background:"#FF5722",display:"inline-flex",alignItems:"center",justifyContent:"center",fontSize:"16px",color:"#fff",fontWeight:900}}>B</span>
+                  Авторизация через Битрикс24
+                </div>
+                <p style={{fontSize:"13px",color:"var(--rd-gray-text)",marginBottom:"20px",lineHeight:1.6}}>
+                  Позволяет пользователям входить через корпоративный портал Битрикс24 с помощью OAuth 2.0.
+                </p>
+
+                <div style={{display:"flex",alignItems:"center",gap:"14px",padding:"14px 16px",background:bitrix24.enabled?"rgba(255,87,34,0.06)":"var(--rd-gray-bg)",borderRadius:"var(--rd-radius-sm)",border:"1.5px solid",borderColor:bitrix24.enabled?"rgba(255,87,34,0.3)":"var(--rd-gray-border)",transition:"all 0.2s",marginBottom:"20px"}}>
+                  <div style={{position:"relative",width:"44px",height:"24px",flexShrink:0}}>
+                    <input type="checkbox" checked={!!bitrix24.enabled} onChange={e => setBitrix24(prev => ({...prev, enabled: e.target.checked}))}
+                      style={{position:"absolute",inset:0,opacity:0,cursor:"pointer",zIndex:1,width:"100%",height:"100%"}} />
+                    <div style={{width:"44px",height:"24px",borderRadius:"12px",background:bitrix24.enabled?"#FF5722":"#d1d5db",transition:"background 0.2s",display:"flex",alignItems:"center",padding:"2px"}}>
+                      <div style={{width:"20px",height:"20px",borderRadius:"50%",background:"#fff",transition:"transform 0.2s",transform:bitrix24.enabled?"translateX(20px)":"translateX(0)",boxShadow:"0 1px 3px rgba(0,0,0,0.2)"}}></div>
+                    </div>
+                  </div>
+                  <div>
+                    <div style={{fontWeight:700,fontSize:"14px",color:"var(--rd-dark)"}}>
+                      {bitrix24.enabled ? "Вход через Битрикс24 включён" : "Вход через Битрикс24 отключён"}
+                    </div>
+                    <div style={{fontSize:"12px",color:"var(--rd-gray-text)",marginTop:"2px"}}>
+                      Кнопка входа появится на странице авторизации
+                    </div>
+                  </div>
+                </div>
+
+                <div className="form-field">
+                  <label className="form-label">URL портала Битрикс24</label>
+                  <input className="form-input" placeholder="https://company.bitrix24.ru"
+                    value={bitrix24.portalUrl || ""}
+                    onChange={e => setBitrix24(prev => ({...prev, portalUrl: e.target.value.replace(/\/$/, "")}))} />
+                  <div style={{fontSize:"11px",color:"var(--rd-gray-text)",marginTop:"4px"}}>Например: https://mycompany.bitrix24.ru</div>
+                </div>
+
+                <div className="form-field">
+                  <label className="form-label">Client ID приложения</label>
+                  <input className="form-input" placeholder="local.xxxxxxxxxxxxxxxxxx"
+                    value={bitrix24.clientId || ""}
+                    onChange={e => setBitrix24(prev => ({...prev, clientId: e.target.value}))} />
+                </div>
+
+                <div className="form-field">
+                  <label className="form-label">Client Secret</label>
+                  <input className="form-input" type="password" placeholder="••••••••••••••••••••"
+                    value={bitrix24.clientSecret || ""}
+                    onChange={e => setBitrix24(prev => ({...prev, clientSecret: e.target.value}))} />
+                </div>
+
+                <div style={{padding:"12px 14px",background:"rgba(255,87,34,0.06)",borderRadius:"8px",border:"1.5px solid rgba(255,87,34,0.2)",marginBottom:"16px",fontSize:"12px",color:"var(--rd-gray-text)",lineHeight:1.7}}>
+                  <div style={{fontWeight:700,color:"#FF5722",marginBottom:"6px"}}>📋 Как подключить</div>
+                  <ol style={{paddingLeft:"16px",margin:0}}>
+                    <li>В Битрикс24 перейдите в Приложения → Разработчикам → Добавить приложение</li>
+                    <li>Укажите Redirect URI: <code style={{background:"rgba(0,0,0,0.06)",padding:"1px 5px",borderRadius:"4px"}}>{typeof window !== "undefined" ? window.location.origin : "https://your-site.com"}/oauth/bitrix24</code></li>
+                    <li>Скопируйте Client ID и Client Secret в поля выше</li>
+                    <li>При входе пользователь будет перенаправлен на портал для авторизации</li>
+                  </ol>
+                </div>
+
+                <button className="btn btn-primary" onClick={() => {
+                  saveAppearance({ ...appearance, bitrix24, integrations: integ });
+                  notify("Настройки Битрикс24 сохранены ✓");
+                }}>Сохранить</button>
               </div>
             </div>
           )}
