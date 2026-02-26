@@ -87,8 +87,12 @@ async function _apiCall(action, body = {}) {
 const _cache = {};
 let _cacheReady = false;
 let _readyCallbacks = [];
+let _cacheVersion = 0; // версия данных в кэше — не перезаписываем старыми данными
 
-function _applyData(data) {
+function _applyData(data, version) {
+  // Если версия меньше текущей — данные устарели, не перезаписываем
+  if (version && version < _cacheVersion) return;
+  if (version) _cacheVersion = version;
   Object.keys(data).forEach(k => {
     if (!_pendingWrites.has(k)) _cache[k] = data[k];
   });
@@ -100,10 +104,16 @@ function _notifyReady() {
   _readyCallbacks = [];
 }
 
+let _initVersion = null;
+
 async function initStore() {
   try {
-    const r = await _apiCall('getAll');
-    if (r.ok && r.data) _applyData(r.data);
+    const timeout = new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 8000));
+    const r = await Promise.race([_apiCall('getAll'), timeout]);
+    if (r.ok && r.data) {
+      _applyData(r.data, r.version || null);
+      _initVersion = r.version || null;
+    }
   } catch(e) { console.warn('Store init error', e); }
   _notifyReady();
 }
@@ -114,7 +124,7 @@ function whenStoreReady() {
 }
 
 // Ключи, которые хранятся только локально (личные данные браузера)
-const _LOCAL_KEYS = new Set(['cm_session','cm_seen_orders','cm_notif_history','cm_notif_unread','cm_favorites','cm_birthday_grant']);
+const _LOCAL_KEYS = new Set(['cm_session','cm_seen_orders','cm_notif_history','cm_notif_unread','cm_favorites']);
 
 const _lsGet = (k) => { try { const v = localStorage.getItem('_store_'+k); return v !== null ? JSON.parse(v) : null; } catch { return null; } };
 const _lsSet = (k, v) => { try { localStorage.setItem('_store_'+k, JSON.stringify(v)); } catch {} };
@@ -122,6 +132,7 @@ const _lsDel = (k) => { try { localStorage.removeItem('_store_'+k); } catch {} }
 
 // Ключи которые сейчас записываются на сервер — polling не должен их перетирать
 const _pendingWrites = new Set();
+const _writePromises = [];
 
 const storage = {
   get: (k) => {
@@ -132,9 +143,34 @@ const storage = {
     if (_LOCAL_KEYS.has(k)) { _lsSet(k, v); return; }
     _cache[k] = v; // обновляем кэш немедленно
     _pendingWrites.add(k);
-    _apiCall('set', { key: k, value: v })
-      .then(() => _pendingWrites.delete(k))
-      .catch(e => { _pendingWrites.delete(k); console.warn('Store set error', e); });
+    const doWrite = (attempt) => {
+      return _apiCall('set', { key: k, value: v })
+        .then((r) => {
+          _pendingWrites.delete(k);
+          const idx = _writePromises.indexOf(p);
+          if (idx !== -1) _writePromises.splice(idx, 1);
+          if (r && !r.ok && attempt < 3) {
+            console.warn('[Storage] set failed, retrying', k, r.error, 'attempt', attempt+1);
+            return new Promise(res => setTimeout(res, 500 * (attempt + 1))).then(() => doWrite(attempt + 1));
+          }
+          if (r && !r.ok) {
+            console.error('[Storage] set failed permanently', k, r.error);
+          }
+        })
+        .catch(e => {
+          if (attempt < 3) {
+            console.warn('[Storage] set error, retrying', k, e.message, 'attempt', attempt+1);
+            return new Promise(res => setTimeout(res, 1000 * (attempt + 1))).then(() => doWrite(attempt + 1));
+          }
+          _pendingWrites.delete(k);
+          const idx = _writePromises.indexOf(p);
+          if (idx !== -1) _writePromises.splice(idx, 1);
+          console.error('[Storage] set error (final)', k, e.message);
+        });
+    };
+    const p = doWrite(0);
+    _writePromises.push(p);
+    return p;
   },
   delete: (k) => {
     if (_LOCAL_KEYS.has(k)) { _lsDel(k); return; }
@@ -147,7 +183,7 @@ const storage = {
   exec: () => [],
   run: () => {},
   isReady: () => _cacheReady,
-  flush: () => Promise.resolve(),
+  flush: () => Promise.all([..._writePromises]),
   // Обновить кэш с сервера (вызывается polling-ом)
   refresh: async () => {
     try {
@@ -418,7 +454,7 @@ function App() {
   const markNotifRead = () => { setNotifUnread(0); storage.set('cm_notif_unread', '0'); };
   const clearNotifHistory = () => { setNotifHistory([]); storage.set('cm_notif_history', []); setNotifUnread(0); storage.set('cm_notif_unread', '0'); };
   const [toast, setToast] = useState(null);
-  const [loaded, setLoaded] = useState(false);
+
   const [sqliteInitError, setSqliteInitError] = useState(null);
 
   useEffect(() => {
@@ -429,7 +465,7 @@ function App() {
       .then(r => { if (r.ok && r.config) savePgConfigState(r.config); })
       .catch(() => {});
 
-    // Загружаем ВСЕ данные с сервера (PostgreSQL или JSON-файл)
+    // Загружаем данные с сервера в фоне — страница рендерится сразу
     initStore().then(() => {
       const u  = storage.get("cm_users");
       const o  = storage.get("cm_orders");
@@ -485,44 +521,48 @@ function App() {
       // НЕ вызываем storage.set("cm_users") здесь — не затираем данные других браузеров!
 
       setDbConfig({ connected: true, dbSize: Object.keys(storage.all()).length, rowCounts: getSQLiteStats() });
-      setLoaded(true);
 
       // Восстанавливаем сессию из localStorage
       const savedSession = _lsGet("cm_session");
-      if (savedSession && savedSession.user && base[savedSession.user]) {
-        setCurrentUser(savedSession.user);
-      }
-
-      // Бонус на день рождения
-      const today = new Date();
-      const lastBirthdayGrant = _lsGet('cm_birthday_grant') || '';
-      const currentYear = today.getFullYear();
-      if (lastBirthdayGrant !== String(currentYear)) {
-        const apLoaded = ap || {};
-        const bonusEnabled = apLoaded.birthdayEnabled !== false;
-        const bonusAmount = parseInt(apLoaded.birthdayBonus || 100);
-        if (bonusEnabled && bonusAmount > 0) {
-          let grantedAny = false;
-          const updatedUsers = { ...base };
-          Object.entries(base).forEach(([uname, ud]) => {
-            if (!ud.birthdate) return;
-            const bd = new Date(ud.birthdate);
-            if (bd.getDate() === today.getDate() && bd.getMonth() === today.getMonth()) {
-              updatedUsers[uname] = { ...ud, balance: (ud.balance || 0) + bonusAmount };
-              grantedAny = true;
+      if (savedSession && savedSession.user) {
+        // Восстанавливаем сессию если пользователь найден в базе
+        if (base[savedSession.user]) {
+          setCurrentUser(savedSession.user);
+        } else {
+          // Пользователь не найден — возможно данные ещё загружаются
+          // Устанавливаем таймер для повторной проверки
+          console.warn('[Session] Пользователь', savedSession.user, 'не найден в базе, попробуем позже');
+          setTimeout(() => {
+            const retryUsers = storage.get("cm_users");
+            if (retryUsers && retryUsers[savedSession.user]) {
+              setCurrentUser(savedSession.user);
             }
-          });
-          if (grantedAny) {
-            setUsers(updatedUsers);
-            storage.set('cm_users', updatedUsers);
-            _lsSet('cm_birthday_grant', String(currentYear));
-          }
+          }, 2000);
         }
       }
+
+      // Начисления (трудодни + дни рождения) — выполняются на сервере атомарно
+      _apiCall('daily_grants').then(r => {
+        if (r.ok && r.users && (r.grants.workday > 0 || r.grants.birthday > 0)) {
+          // Сервер сделал начисления — обновляем локальный кэш и UI
+          // Мержим а не заменяем, чтобы не потерять данные
+          _cache['cm_users'] = r.users;
+          setUsers(prev => {
+            const merged = { ...prev };
+            Object.keys(r.users).forEach(k => {
+              merged[k] = { ...(merged[k] || {}), ...r.users[k] };
+              // Гарантируем что пароль не теряется
+              if (!merged[k].password && prev[k]?.password) merged[k].password = prev[k].password;
+            });
+            return merged;
+          });
+          _lsSet('cm_workday_grant', new Date().toISOString().slice(0, 10));
+          _lsSet('cm_birthday_grant', String(new Date().getFullYear()));
+        }
+      }).catch(() => {});
+
     }).catch(err => {
       console.error('Store init failed', err);
-      setSqliteInitError(err.message || String(err));
-      setLoaded(true);
     });
 
     const handleUnload = () => storage.flush();
@@ -531,8 +571,37 @@ function App() {
     // ── Polling: обновляем данные с сервера каждые 4 секунды ──
     const _applyServerData = (data) => {
       if (!data) return;
-      // Всегда обновляем — не проверяем truthy, чтобы не пропустить пустые массивы/объекты
-      if ('cm_users'            in data) setUsers(data.cm_users);
+      // Защита: НЕ перезаписываем users пустым объектом если были данные
+      if ('cm_users' in data) {
+        const newUsers = data.cm_users;
+        if (newUsers && typeof newUsers === 'object' && Object.keys(newUsers).length > 0) {
+          // Мержим с текущим состоянием: не теряем пользователей которые уже есть в state
+          setUsers(prev => {
+            const merged = { ...prev };
+            Object.keys(newUsers).forEach(k => {
+              if (newUsers[k] && typeof newUsers[k] === 'object') {
+                // Для каждого пользователя: мержим поля, не теряем password/role/balance
+                merged[k] = {
+                  ...(merged[k] || {}),
+                  ...newUsers[k],
+                };
+                // Гарантируем обязательные поля
+                if (!merged[k].password && prev[k]?.password) merged[k].password = prev[k].password;
+                if (!merged[k].role) merged[k].role = prev[k]?.role || (k === 'admin' ? 'admin' : 'user');
+                if (merged[k].balance === undefined || merged[k].balance === null) {
+                  merged[k].balance = prev[k]?.balance || 0;
+                }
+              }
+            });
+            return merged;
+          });
+          // Восстановление сессии: если currentUser не установлен, но сессия есть в localStorage
+          const savedSession = _lsGet("cm_session");
+          if (savedSession && savedSession.user && newUsers[savedSession.user]) {
+            setCurrentUser(prev => prev || savedSession.user);
+          }
+        }
+      }
       if ('cm_orders'           in data) setOrders(data.cm_orders);
       if ('cm_products'         in data) setCustomProducts(data.cm_products);
       if ('cm_transfers'        in data) setTransfers(data.cm_transfers);
@@ -555,8 +624,20 @@ function App() {
       }
     };
 
+    // Polling с проверкой версии — не тянем данные если ничего не изменилось
+    let _lastKnownVersion = _initVersion;
     const pollInterval = setInterval(async () => {
       try {
+        // Сначала проверяем версию (лёгкий запрос)
+        const vRes = await fetch('/api/store', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'version' }),
+        });
+        const vData = await vRes.json();
+        if (!vData.ok || vData.version === _lastKnownVersion) return; // данные не изменились
+
+        // Версия изменилась — тянем полные данные
         const res = await fetch('/api/store', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -564,14 +645,18 @@ function App() {
         });
         const r = await res.json();
         if (r.ok && r.data) {
+          const newVer = r.version || vData.version;
+          _lastKnownVersion = newVer;
           const filtered = {};
+          // _applyData обновит кэш только если версия новее
+          _applyData(r.data, newVer);
           Object.keys(r.data).forEach(k => {
-            if (!_pendingWrites.has(k)) { _cache[k] = r.data[k]; filtered[k] = r.data[k]; }
+            if (!_pendingWrites.has(k)) filtered[k] = r.data[k];
           });
           _applyServerData(filtered);
         }
       } catch(e) { /* ignore */ }
-    }, 5000);
+    }, 10000);
 
     return () => {
       clearInterval(pollInterval);
@@ -604,7 +689,28 @@ function App() {
 
   const notify = (msg, type = "ok") => { setToast({ msg, type }); setTimeout(() => setToast(null), 3200); pushNotif(msg, type); };
 
-  const saveUsers = (u) => { setUsers(u); storage.set("cm_users", u); };
+  const saveUsers = (u) => {
+    // Гарантируем что пользовательские данные не потеряются
+    if (!u || typeof u !== 'object') return;
+    
+    // Защита: никогда не сохранять пустой объект если уже есть пользователи
+    if (Object.keys(u).length === 0) {
+      console.warn('[saveUsers] Попытка сохранить пустой объект users — отклонено');
+      return;
+    }
+    
+    // Гарантируем что у каждого пользователя есть обязательные поля
+    const safe = { ...u };
+    Object.keys(safe).forEach(k => {
+      if (safe[k] && typeof safe[k] === 'object') {
+        if (!safe[k].role) safe[k].role = (k === 'admin') ? 'admin' : 'user';
+        if (safe[k].balance === undefined || safe[k].balance === null) safe[k].balance = 0;
+      }
+    });
+    
+    setUsers(safe);
+    storage.set("cm_users", safe);
+  };
   const saveOrders = (o) => { setOrders(o); storage.set("cm_orders", o); };
   const saveProducts = (p) => { setCustomProducts(p); storage.set("cm_products", p); };
   const saveTransfers = (t) => { setTransfers(t); storage.set("cm_transfers", t); };
@@ -658,15 +764,8 @@ function App() {
   const cartCount = cart.reduce((s, i) => s + i.qty, 0);
 
   const sendTelegramNotify = (order) => {
-    // Read from storage first, fallback to hardcoded values
-    const ap = storage.get("cm_appearance") || {};
-    const saved = ap.integrations || {};
-    const integ = {
-      tgEnabled: false,
-      tgBotToken: "",
-      tgChatId: "",
-      ...saved
-    };
+    // Use React state (appearance) — it's always up-to-date after save
+    const integ = appearance.integrations || {};
     if (!integ.tgEnabled || !integ.tgBotToken || !integ.tgChatId) return;
     const token = integ.tgBotToken.trim();
     const chatId = integ.tgChatId.trim();
@@ -718,13 +817,7 @@ function App() {
   const shopCategories = ["Все", ...allCategories];
   const filtered = filterCat === "Все" ? activeProducts : activeProducts.filter(p => p.category === filterCat);
 
-  if (!loaded) return (
-    <div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",height:"100vh",gap:"16px",color:"var(--rd-gray-text)"}}>
-      <div style={{fontSize:"32px"}}>🗄️</div>
-      <div style={{fontWeight:700,fontSize:"16px",color:"var(--rd-dark)"}}>Загрузка данных…</div>
-      <div style={{fontSize:"13px"}}>Подключение к базе данных</div>
-    </div>
-  );
+
   if (sqliteInitError) return (
     <div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",height:"100vh",gap:"12px",padding:"24px",textAlign:"center"}}>
       <div style={{fontSize:"32px"}}>⚠️</div>
@@ -856,7 +949,7 @@ function App() {
                             </button>
                           ))}
                           <div className="user-dropdown-divider"></div>
-                          <button className="user-dropdown-item danger" onClick={() => { setCurrentUser(null); storage.set("cm_session", null); setPage("shop"); setMenuOpen(false); }}>
+                          <button className="user-dropdown-item danger" onClick={() => { setCurrentUser(null); _lsSet("cm_session", null); setPage("shop"); setMenuOpen(false); }}>
                             <span className="udi-icon">🚪</span>
                             Выйти
                           </button>
@@ -1304,6 +1397,7 @@ function TasksPage({ tasks, currentUser, taskSubmissions, saveTaskSubmissions, n
                         <span style={{flexShrink:0,width:"26px",height:"26px",borderRadius:"50%",background:"var(--rd-red)",color:"#fff",display:"flex",alignItems:"center",justifyContent:"center",fontSize:"12px",fontWeight:800}}>{qi+1}</span>
                         {q.question}
                       </div>
+                      {q.image && <div style={{paddingLeft:"36px",marginBottom:"10px"}}><img src={q.image} alt="" style={{maxHeight:"200px",maxWidth:"100%",borderRadius:"10px",border:"1.5px solid var(--rd-gray-border)"}} /></div>}
                       <div style={{display:"flex",flexDirection:"column",gap:"8px",paddingLeft:"36px"}}>
                         {(q.options||[]).map((opt, oi) => {
                           const selected = quizState.answers[qi] === oi;
@@ -1527,6 +1621,7 @@ function TasksAdminTab({ tasks, saveTasks, taskSubmissions, saveTaskSubmissions,
                         value={q.question} onChange={e=>{const qs=[...(form.quizQuestions||[])];qs[qi]={...qs[qi],question:e.target.value};setForm(f=>({...f,quizQuestions:qs}));}} />
                       <button onClick={()=>{const qs=(form.quizQuestions||[]).filter((_,i)=>i!==qi);setForm(f=>({...f,quizQuestions:qs}));}} style={{background:"none",border:"none",cursor:"pointer",color:"var(--rd-red)",fontSize:"18px",flexShrink:0,marginTop:"6px"}}>✕</button>
                     </div>
+                    <div style={{paddingLeft:"34px",marginBottom:"10px"}}>{q.image?(<div style={{position:"relative",display:"inline-block"}}><img src={q.image} alt="" style={{maxHeight:"140px",maxWidth:"100%",borderRadius:"8px",border:"1.5px solid var(--rd-gray-border)",display:"block"}} /><button onClick={()=>{const qs=[...(form.quizQuestions||[])];qs[qi]={...qs[qi],image:""};setForm(f=>({...f,quizQuestions:qs}));}} style={{position:"absolute",top:"4px",right:"4px",background:"rgba(0,0,0,0.6)",border:"none",borderRadius:"50%",width:"22px",height:"22px",color:"#fff",cursor:"pointer",fontSize:"13px",display:"flex",alignItems:"center",justifyContent:"center"}}>✕</button></div>):(<label style={{display:"inline-flex",alignItems:"center",gap:"6px",padding:"6px 14px",border:"1.5px dashed var(--rd-gray-border)",borderRadius:"8px",cursor:"pointer",fontSize:"12px",fontWeight:600,color:"var(--rd-gray-text)",background:"#fff"}}>🖼️ Добавить фото<input type="file" accept="image/*" style={{display:"none"}} onChange={async e=>{const file=e.target.files[0];if(!file)return;const r=new FileReader();r.onload=async ev=>{const c=await compressImage(ev.target.result,800,600,0.82);const qs=[...(form.quizQuestions||[])];qs[qi]={...qs[qi],image:c};setForm(f=>({...f,quizQuestions:qs}));};r.readAsDataURL(file);e.target.value="";}} /></label>)}</div>
                     <div style={{paddingLeft:"34px",display:"flex",flexDirection:"column",gap:"8px"}}>
                       {(q.options||[]).map((opt, oi) => (
                         <div key={oi} style={{display:"flex",alignItems:"center",gap:"8px"}}>
@@ -1574,7 +1669,7 @@ function TasksAdminTab({ tasks, saveTasks, taskSubmissions, saveTaskSubmissions,
                 {task.title}
                 {task.taskType === "quiz" && <span style={{fontSize:"11px",background:"var(--rd-blue-light)",color:"var(--rd-blue)",border:"1px solid rgba(37,99,235,0.2)",borderRadius:"6px",padding:"2px 7px",fontWeight:700}}>📝 Квиз · {(task.quizQuestions||[]).length} вопр. · {task.quizPassPct||80}% · попыток: {task.quizMaxFailedAttempts > 0 ? task.quizMaxFailedAttempts : "∞"}</span>}
               </div>
-              <div style={{fontSize:"12px",color:"var(--rd-gray-text)"}}>Награда: <b>{task.reward}</b> монет · {task.active!==false ? <span style={{color:"var(--rd-green)",fontWeight:700}}>Активно</span> : <span style={{color:"var(--rd-gray-text)"}}>Скрыто</span>}{task.deadline && <span> · ⏰ до {new Date(task.deadline).toLocaleString("ru-RU",{day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"})}</span>}</div>
+              <div style={{fontSize:"12px",color:"var(--rd-gray-text)"}}>Награда: <b>{task.reward}</b> монет · {task.active!==false ? <span style={{color:"var(--rd-green)",fontWeight:700}}>Активно</span> : <span style={{color:"var(--rd-gray-text)"}}>Скрыто</span>}{task.deadline && <span> · ⏰ до {(d=>isNaN(d)?"—":d.toLocaleString("ru-RU",{day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"}))(new Date(task.deadline))}</span>}</div>
             </div>
             <div style={{display:"flex",gap:"8px",flexShrink:0}}>
               <button className="btn btn-ghost btn-sm" onClick={() => startEdit(task)}>✏️</button>
@@ -2520,9 +2615,8 @@ function LoginPage({ users, setCurrentUser, setPage, notify }) {
     if (!u) { notify("Пользователь не найден", "err"); return; }
     if (u.password !== form.password) { notify("Неверный пароль", "err"); return; }
     setCurrentUser(form.username);
-    if (form.remember) {
-      storage.set("cm_session", { user: form.username, ts: Date.now() });
-    }
+    // Всегда сохраняем сессию в localStorage (не зависит от «Запомнить меня»)
+    _lsSet("cm_session", { user: form.username, ts: Date.now() });
     notify(`Добро пожаловать, ${form.username}!`);
     setPage("shop");
   };
@@ -2565,10 +2659,12 @@ function RegisterPage({ users, saveUsers, setCurrentUser, setPage, notify }) {
     if (form.password !== form.confirm) { notify("Пароли не совпадают", "err"); return; }
     if (users[form.username]) { notify("Логин уже занят", "err"); return; }
     if (form.password.length < 6) { notify("Пароль минимум 6 символов", "err"); return; }
-    const newUsers = { ...users, [form.username]: { username: form.username, firstName: form.firstName, lastName: form.lastName, email: form.email, password: form.password, role: "user", balance: 0, createdAt: Date.now() } };
+    // Берём текущее состояние users и добавляем нового — не теряем существующих
+    const newUser = { username: form.username, firstName: form.firstName, lastName: form.lastName, email: form.email, password: form.password, role: "user", balance: 0, createdAt: Date.now() };
+    const newUsers = { ...users, [form.username]: newUser };
     saveUsers(newUsers);
     setCurrentUser(form.username);
-    storage.set("cm_session", { user: form.username, ts: Date.now() });
+    _lsSet("cm_session", { user: form.username, ts: Date.now() });
     notify("Регистрация прошла успешно!");
     setPage("shop");
   };
@@ -2614,16 +2710,57 @@ function RegisterPage({ users, saveUsers, setCurrentUser, setPage, notify }) {
 
 // ── USER EDIT FORM ────────────────────────────────────────────────────────
 
-function UserEditForm({ username, user, users, saveUsers, notify, onClose }) {
-  const [form, setForm] = useState({ email: user.email || "", newPassword: "", confirmPassword: "", birthdate: user.birthdate || "" });
+class UserEditErrorBoundary extends React.Component {
+  constructor(props) { super(props); this.state = { error: null }; }
+  static getDerivedStateFromError(e) { return { error: e }; }
+  render() {
+    if (this.state.error) {
+      return (
+        <div style={{padding:"20px",background:"#fef2f2",border:"1.5px solid #fca5a5",borderRadius:"10px",color:"#991b1b"}}>
+          <div style={{fontWeight:700,marginBottom:"8px"}}>⚠️ Ошибка при открытии формы</div>
+          <div style={{fontSize:"12px",fontFamily:"monospace",wordBreak:"break-all"}}>{this.state.error.message}</div>
+          <button className="btn btn-ghost btn-sm" style={{marginTop:"12px"}} onClick={()=>this.setState({error:null})}>Попробовать снова</button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+function UserEditForm({ username, user, users, saveUsers, notify, onClose, isAdmin }) {
+  const safeUser = user || {};
+  const [form, setForm] = useState({ email: safeUser.email || "", newPassword: "", confirmPassword: "", birthdate: safeUser.birthdate || "", employmentDate: safeUser.employmentDate || "", avatar: safeUser.avatar || "" });
 
   const save = () => {
     if (!form.email.trim()) { notify("Email не может быть пустым", "err"); return; }
     if (form.newPassword && form.newPassword.length < 6) { notify("Пароль минимум 6 символов", "err"); return; }
     if (form.newPassword && form.newPassword !== form.confirmPassword) { notify("Пароли не совпадают", "err"); return; }
-    const updated = { ...user, email: form.email.trim(), avatar: form.avatar || "", birthdate: form.birthdate || "" };
-    if (form.newPassword) updated.password = form.newPassword;
-    saveUsers({ ...users, [username]: updated });
+    // ВАЖНО: берём АКТУАЛЬНЫЕ данные пользователя из users (не из замыкания safeUser)
+    // чтобы не затереть баланс/роль/пароль и другие поля обновлённые polling-ом
+    const currentUserData = users[username] || safeUser;
+    const updated = {
+      ...currentUserData,
+      email: form.email.trim(),
+      avatar: form.avatar || currentUserData.avatar || "",
+      birthdate: form.birthdate || currentUserData.birthdate || "",
+      employmentDate: form.employmentDate || currentUserData.employmentDate || "",
+    };
+    // Меняем пароль ТОЛЬКО если админ явно ввёл новый пароль
+    if (form.newPassword) {
+      updated.password = form.newPassword;
+    }
+    // Гарантируем что пароль, роль и баланс НИКОГДА не потеряются
+    if (!updated.password) updated.password = currentUserData.password;
+    if (!updated.role) updated.role = currentUserData.role || "user";
+    if (updated.balance === undefined || updated.balance === null) updated.balance = currentUserData.balance || 0;
+    // Сохраняем — берём АКТУАЛЬНЫЙ объект users (не stale) и обновляем ТОЛЬКО этого пользователя
+    const freshUsers = { ...users };
+    // Гарантируем что другие пользователи не потеряются
+    Object.keys(freshUsers).forEach(u => {
+      if (!freshUsers[u]) freshUsers[u] = users[u];
+    });
+    freshUsers[username] = updated;
+    saveUsers(freshUsers);
     notify("Профиль пользователя обновлён ✓");
     onClose();
   };
@@ -2632,11 +2769,11 @@ function UserEditForm({ username, user, users, saveUsers, notify, onClose }) {
     <div>
       <div style={{display:"flex",alignItems:"center",gap:"12px",marginBottom:"20px",padding:"12px 16px",background:"var(--rd-gray-bg)",borderRadius:"var(--rd-radius-sm)",border:"1.5px solid var(--rd-gray-border)"}}>
         <div style={{width:"40px",height:"40px",borderRadius:"50%",background:"var(--rd-red-light)",border:"1.5px solid rgba(199,22,24,0.2)",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:800,fontSize:"16px",color:"var(--rd-red)"}}>
-          {username[0].toUpperCase()}
+          {(username||"?")[0].toUpperCase()}
         </div>
         <div>
           <div style={{fontWeight:700,fontSize:"15px"}}>{username}</div>
-          <div style={{fontSize:"12px",color:"var(--rd-gray-text)"}}>{user.role === "admin" ? "Администратор" : "Пользователь"}</div>
+          <div style={{fontSize:"12px",color:"var(--rd-gray-text)"}}>{safeUser.role === "admin" ? "Администратор" : "Пользователь"}</div>
         </div>
       </div>
       <div className="form-field">
@@ -2647,6 +2784,11 @@ function UserEditForm({ username, user, users, saveUsers, notify, onClose }) {
         <label className="form-label">Дата рождения</label>
         <input className="form-input" type="date" value={form.birthdate} onChange={e => { if (isAdmin) setForm(f => ({...f, birthdate: e.target.value})); }} disabled={!isAdmin} style={!isAdmin ? {opacity:0.6,cursor:"not-allowed"} : {}} />
         {!isAdmin && <div style={{fontSize:"11px",color:"var(--rd-gray-text)",marginTop:"4px"}}>Редактировать может только администратор</div>}
+      </div>
+      <div className="form-field">
+        <label className="form-label">Дата трудоустройства <span style={{fontSize:"11px",color:"var(--rd-red)",fontWeight:600}}>(только для администратора)</span></label>
+        <input className="form-input" type="date" value={form.employmentDate} onChange={e => setForm(f => ({...f, employmentDate: e.target.value}))} />
+        {form.employmentDate && !isNaN(new Date(form.employmentDate)) && <div style={{fontSize:"11px",color:"var(--rd-gray-text)",marginTop:"4px"}}>📅 {new Date(form.employmentDate).toLocaleDateString("ru-RU",{day:"numeric",month:"long",year:"numeric"})}</div>}
       </div>
       <div style={{height:"1px",background:"var(--rd-gray-border)",margin:"16px 0"}}></div>
       <div style={{fontSize:"12px",fontWeight:700,textTransform:"uppercase",letterSpacing:"0.05em",color:"var(--rd-gray-text)",marginBottom:"12px"}}>Сменить пароль</div>
@@ -2668,6 +2810,214 @@ function UserEditForm({ username, user, users, saveUsers, notify, onClose }) {
 const BLANK_PRODUCT = { name: "", price: "", category: "Одежда", emoji: "🛍️", desc: "", images: [], sizes: ["S","M","L","XL","XXL"], sku: "", badge: "", discount: 0, inactive: false, stock: "", sizeStock: {} };
 const ALL_CATEGORIES = ["Одежда", "Аксессуары", "Посуда", "Канцелярия"];
 const EMOJIS = ["🛍️","👕","🧥","🧢","👟","🎒","☕","🍵","📓","✏️","📌","🎨","☂️","🧦","🏅","💼","🕶️","🧤","🧣","⌚"];
+
+
+// ── WORKDAYS TAB ─────────────────────────────────────────────────────────────
+function WorkdaysTab({ users, currentUser, notify, saveUsers, transfers, saveTransfers, appearance, saveAppearance }) {
+  const workdaysCfg = (appearance.workdays) || {};
+  const [coinsPerDay, setCoinsPerDay] = useState(String(workdaysCfg.coinsPerDay || 10));
+  const [globalMode, setGlobalMode] = useState(workdaysCfg.globalMode || "employment");
+  const [globalCustomDate, setGlobalCustomDate] = useState(workdaysCfg.globalCustomDate || "");
+  const [userOverrides, setUserOverrides] = useState(workdaysCfg.userOverrides || {});
+  const [filterStr, setFilterStr] = useState("");
+  const [openUsers, setOpenUsers] = useState({});
+
+  const allUsers = Object.entries(users).filter(([u]) => u !== "admin" && u !== currentUser);
+  const filtered = allUsers.filter(([u]) => u.toLowerCase().includes(filterStr.toLowerCase()));
+
+  const saveSettings = () => {
+    const coins = Number(coinsPerDay);
+    if (isNaN(coins) || coins < 0) { notify("Некорректное количество монет", "err"); return; }
+    const cfg = { coinsPerDay: coins, globalMode, globalCustomDate, userOverrides };
+    saveAppearance({ ...appearance, workdays: cfg });
+    notify("Настройки трудодней сохранены ✓");
+  };
+
+  const getUserMode = (u) => userOverrides[u]?.mode || null;
+  const getEffectiveMode = (u) => userOverrides[u]?.mode || globalMode;
+  const getUserCustomDate = (u) => userOverrides[u]?.customDate || "";
+  const setUserMode = (u, mode) => setUserOverrides(prev => ({ ...prev, [u]: { ...(prev[u]||{}), mode } }));
+  const setUserCustomDate = (u, d) => setUserOverrides(prev => ({ ...prev, [u]: { ...(prev[u]||{}), customDate: d } }));
+  const clearUserOverride = (u) => setUserOverrides(prev => { const n={...prev}; delete n[u]; return n; });
+  const toggleUserOpen = (u) => setOpenUsers(prev => ({ ...prev, [u]: !prev[u] }));
+
+  const getStartDate = (u, ud) => {
+    const override = userOverrides[u];
+    const mode = override?.mode || globalMode;
+    if (mode === "employment") return ud.employmentDate || null;
+    if (mode === "activation") return ud.activationDate || ud.createdAt || null;
+    if (mode === "custom") {
+      const d = override?.customDate || globalCustomDate;
+      return d || null;
+    }
+    return null;
+  };
+
+  const calcDays = (u, ud) => {
+    const startStr = getStartDate(u, ud);
+    if (!startStr) return null;
+    const start = new Date(startStr);
+    const now = new Date();
+    if (isNaN(start.getTime()) || start > now) return 0;
+    return Math.floor((now - start) / (1000 * 60 * 60 * 24));
+  };
+
+  const runAccrual = () => {
+    const coins = Number(coinsPerDay);
+    if (isNaN(coins) || coins <= 0) { notify("Укажите количество монет за день", "err"); return; }
+    const updated = { ...users };
+    const now = new Date().toLocaleString("ru-RU");
+    const newTransfers = [...(transfers || [])];
+    let count = 0;
+    allUsers.forEach(([u, ud]) => {
+      const days = calcDays(u, ud);
+      if (days === null || days <= 0) return;
+      const amount = coins * days;
+      updated[u] = { ...updated[u], balance: (updated[u].balance || 0) + amount };
+      newTransfers.push({ id: Date.now() + Math.random(), from: currentUser, to: u, amount, comment: "Трудодни: " + days + " дн. × " + coins + " монет", date: now });
+      count++;
+    });
+    if (count === 0) { notify("Нет пользователей для начисления (не указаны даты)", "err"); return; }
+    saveUsers(updated);
+    if (saveTransfers) saveTransfers(newTransfers);
+    notify("Трудодни начислены " + count + " пользователям ✓");
+  };
+
+  const modeLabel = { employment: "от даты трудоустройства", activation: "от даты активации", custom: "от указанной даты" };
+
+  return (
+    <div style={{maxWidth:"800px"}}>
+      <div style={{background:"#fff",border:"1.5px solid var(--rd-gray-border)",borderRadius:"var(--rd-radius)",padding:"28px",boxShadow:"var(--rd-shadow-md)",marginBottom:"20px"}}>
+        <div style={{fontSize:"11px",fontWeight:700,textTransform:"uppercase",letterSpacing:"0.07em",color:"var(--rd-gray-text)",marginBottom:"20px",paddingBottom:"10px",borderBottom:"1px solid var(--rd-gray-border)"}}>⚙️ Параметры начисления</div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"20px",marginBottom:"20px"}}>
+          <div>
+            <div style={{fontSize:"12px",fontWeight:700,textTransform:"uppercase",letterSpacing:"0.05em",color:"var(--rd-gray-text)",marginBottom:"6px"}}>Монет за 1 день работы</div>
+            <div style={{position:"relative"}}>
+              <input className="form-input" type="number" min="0" step="0.5" placeholder="10" value={coinsPerDay}
+                onChange={e => setCoinsPerDay(e.target.value)}
+                style={{paddingRight:"96px",fontSize:"20px",fontWeight:700}} />
+              <span style={{position:"absolute",right:"14px",top:"50%",transform:"translateY(-50%)",fontSize:"12px",fontWeight:700,color:"var(--rd-gray-text)"}}>мон./день</span>
+            </div>
+            <div style={{display:"flex",gap:"6px",marginTop:"8px",flexWrap:"wrap"}}>
+              {[1,5,10,25,50].map(v => (
+                <button key={v} onClick={() => setCoinsPerDay(String(v))}
+                  style={{padding:"4px 10px",borderRadius:"20px",border:"1.5px solid var(--rd-gray-border)",background:String(coinsPerDay)===String(v)?"var(--rd-red)":"#fff",color:String(coinsPerDay)===String(v)?"#fff":"var(--rd-gray-text)",fontSize:"12px",fontWeight:700,cursor:"pointer"}}>
+                  {v}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div>
+            <div style={{fontSize:"12px",fontWeight:700,textTransform:"uppercase",letterSpacing:"0.05em",color:"var(--rd-gray-text)",marginBottom:"6px"}}>Способ начисления (по умолчанию)</div>
+            <div style={{display:"flex",flexDirection:"column",gap:"8px"}}>
+              {[["employment","💼 От даты трудоустройства"],["activation","✅ От даты активации"],["custom","📅 От указанной даты"]].map(([v,l]) => (
+                <label key={v} style={{display:"flex",alignItems:"center",gap:"10px",padding:"10px 14px",border:"1.5px solid " + (globalMode===v?"var(--rd-red)":"var(--rd-gray-border)"),borderRadius:"10px",background:globalMode===v?"var(--rd-red-light)":"#fff",cursor:"pointer",transition:"all 0.12s"}}>
+                  <input type="radio" checked={globalMode===v} onChange={()=>setGlobalMode(v)} style={{accentColor:"var(--rd-red)"}} />
+                  <span style={{fontSize:"13px",fontWeight:globalMode===v?700:400,color:globalMode===v?"var(--rd-red)":"var(--rd-dark)"}}>{l}</span>
+                </label>
+              ))}
+            </div>
+            {globalMode === "custom" && (
+              <div style={{marginTop:"10px"}}>
+                <div style={{fontSize:"12px",fontWeight:600,color:"var(--rd-gray-text)",marginBottom:"4px"}}>Дата начала начисления</div>
+                <input className="form-input" type="date" value={globalCustomDate} onChange={e=>setGlobalCustomDate(e.target.value)} />
+              </div>
+            )}
+          </div>
+        </div>
+        <div style={{display:"flex",gap:"12px"}}>
+          <button className="btn btn-primary" onClick={saveSettings}>💾 Сохранить настройки</button>
+        </div>
+      </div>
+
+      <div style={{background:"#fff",border:"1.5px solid var(--rd-gray-border)",borderRadius:"var(--rd-radius)",padding:"28px",boxShadow:"var(--rd-shadow-md)",marginBottom:"20px"}}>
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:"16px",paddingBottom:"10px",borderBottom:"1px solid var(--rd-gray-border)"}}>
+          <div style={{fontSize:"11px",fontWeight:700,textTransform:"uppercase",letterSpacing:"0.07em",color:"var(--rd-gray-text)"}}>
+            👥 Индивидуальные настройки ({allUsers.length} польз.)
+          </div>
+          <input className="form-input" placeholder="Поиск..." value={filterStr} onChange={e=>setFilterStr(e.target.value)}
+            style={{padding:"6px 12px",fontSize:"13px",width:"160px"}} />
+        </div>
+        <div style={{display:"flex",flexDirection:"column",gap:"10px",maxHeight:"440px",overflowY:"auto"}}>
+          {filtered.length === 0
+            ? <div style={{padding:"24px",textAlign:"center",color:"var(--rd-gray-text)"}}>Пользователи не найдены</div>
+            : filtered.map(([u, ud]) => {
+                const override = userOverrides[u];
+                const isOpen = !!openUsers[u];
+                const days = calcDays(u, ud);
+                const effectiveMode = getEffectiveMode(u);
+                const coins = Number(coinsPerDay) || 0;
+                return (
+                  <div key={u} style={{border:"1.5px solid " + (override?"rgba(199,22,24,0.3)":"var(--rd-gray-border)"),borderRadius:"12px",padding:"14px 16px",background:override?"rgba(199,22,24,0.03)":"#fff"}}>
+                    <div style={{display:"flex",alignItems:"center",gap:"12px"}}>
+                      {ud.avatar
+                        ? <img src={ud.avatar} style={{width:"36px",height:"36px",borderRadius:"50%",objectFit:"cover",flexShrink:0}} alt="" />
+                        : <div style={{width:"36px",height:"36px",borderRadius:"50%",background:"var(--rd-red-light)",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:800,fontSize:"14px",color:"var(--rd-red)",flexShrink:0}}>{u[0].toUpperCase()}</div>
+                      }
+                      <div style={{flex:1,minWidth:0}}>
+                        <div style={{fontWeight:700,fontSize:"14px",color:"var(--rd-dark)"}}>{u}</div>
+                        <div style={{fontSize:"12px",color:"var(--rd-gray-text)"}}>
+                          {override
+                            ? <span style={{color:"var(--rd-red)",fontWeight:600}}>⚡ Индивид.: {modeLabel[effectiveMode]}</span>
+                            : <span>По умолчанию: {modeLabel[effectiveMode]}</span>
+                          }
+                          {days !== null && <span style={{marginLeft:"8px",fontWeight:700,color:"var(--rd-green)"}}>· {days} дн. · +{(days*(Number(coinsPerDay)||0)).toFixed(0)} мон.</span>}
+                          {days === null && <span style={{marginLeft:"8px",color:"#f59e0b",fontWeight:600}}>· дата не задана</span>}
+                        </div>
+                      </div>
+                      <div style={{display:"flex",gap:"6px",flexShrink:0}}>
+                        {override && (
+                          <button onClick={()=>clearUserOverride(u)} className="btn btn-ghost btn-sm" style={{fontSize:"11px",color:"var(--rd-red)"}}>✕ Сбросить</button>
+                        )}
+                        <button onClick={()=>toggleUserOpen(u)} className="btn btn-ghost btn-sm" style={{fontSize:"11px"}}>
+                          {isOpen ? "Скрыть" : "⚙️ Настроить"}
+                        </button>
+                      </div>
+                    </div>
+                    {isOpen && (
+                      <div style={{paddingTop:"10px",borderTop:"1px solid var(--rd-gray-border)",marginTop:"10px",display:"flex",flexDirection:"column",gap:"8px"}}>
+                        <div style={{fontSize:"12px",fontWeight:700,color:"var(--rd-gray-text)",textTransform:"uppercase",letterSpacing:"0.05em"}}>Способ начисления для {u}</div>
+                        <div style={{display:"flex",gap:"8px",flexWrap:"wrap"}}>
+                          {[["employment","💼 Трудоустройство"],["activation","✅ Активация"],["custom","📅 Своя дата"]].map(([v,l]) => (
+                            <label key={v} style={{display:"inline-flex",alignItems:"center",gap:"6px",padding:"6px 12px",border:"1.5px solid " + (effectiveMode===v?"var(--rd-red)":"var(--rd-gray-border)"),borderRadius:"8px",background:effectiveMode===v?"var(--rd-red-light)":"#fff",cursor:"pointer",fontSize:"12px",fontWeight:effectiveMode===v?700:400}}>
+                              <input type="radio" checked={effectiveMode===v} onChange={()=>setUserMode(u,v)} style={{accentColor:"var(--rd-red)"}} />
+                              {l}
+                            </label>
+                          ))}
+                        </div>
+                        {effectiveMode==="custom" && (
+                          <div>
+                            <div style={{fontSize:"12px",fontWeight:600,marginBottom:"4px",color:"var(--rd-gray-text)"}}>Дата начала</div>
+                            <input className="form-input" type="date" value={getUserCustomDate(u)} onChange={e=>setUserCustomDate(u,e.target.value)} style={{maxWidth:"200px"}} />
+                          </div>
+                        )}
+                        {effectiveMode==="employment" && !ud.employmentDate && (
+                          <div style={{fontSize:"12px",color:"#f59e0b",fontWeight:600}}>⚠️ Дата трудоустройства не задана в профиле пользователя</div>
+                        )}
+                        {effectiveMode==="activation" && !ud.activationDate && !ud.createdAt && (
+                          <div style={{fontSize:"12px",color:"#f59e0b",fontWeight:600}}>⚠️ Дата активации не задана</div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })
+          }
+        </div>
+      </div>
+
+      <div style={{background:"#fff",border:"1.5px solid var(--rd-gray-border)",borderRadius:"var(--rd-radius)",padding:"20px 28px",boxShadow:"var(--rd-shadow-md)",display:"flex",alignItems:"center",justifyContent:"space-between",gap:"16px"}}>
+        <div>
+          <div style={{fontWeight:700,fontSize:"15px",color:"var(--rd-dark)",marginBottom:"2px"}}>Начислить трудодни вручную</div>
+          <div style={{fontSize:"12px",color:"var(--rd-gray-text)"}}>Начисляется {coinsPerDay} мон. × количество дней для каждого пользователя. Автоматически — в 0:00.</div>
+        </div>
+        <button className="btn btn-primary" style={{minWidth:"180px",fontSize:"14px",flexShrink:0}} onClick={runAccrual}>
+          💼 Начислить трудодни
+        </button>
+      </div>
+    </div>
+  );
+}
 
 function BulkAccrualTab({ users, currentUser, notify, saveUsers, transfers, saveTransfers }) {
   
@@ -2906,6 +3256,7 @@ function FaqAdminTab({ faq, saveFaq, notify }) {
 }
 
 function AdminPage({ users, saveUsers, orders, saveOrders, products, saveProducts, categories, saveCategories, notify, setPage, currentUser, transfers, saveTransfers, activeTab, setActiveTab, faq, saveFaq, embedded }) {
+  const isAdmin = currentUser && users[currentUser]?.role === "admin";
   const cName = getCurrName();
   const [internalTab, setInternalTab] = useState("users");
   const tab = activeTab || internalTab;
@@ -3138,9 +3489,15 @@ function AdminPage({ users, saveUsers, orders, saveOrders, products, saveProduct
 
   const deleteUser = (username) => {
     if (!confirm("Удалить пользователя " + username + "? Это действие необратимо.")) return;
+    if (username === "admin") { notify("Нельзя удалить администратора", "err"); return; }
     const nu = {...users};
     delete nu[username];
-    saveUsers(nu);
+    // Напрямую обновляем state и пишем на сервер с флагом intentional_delete
+    setUsers(nu);
+    _pendingWrites.add('cm_users');
+    _apiCall('set', { key: 'cm_users', value: nu, intentional_delete: username }).then(() => {
+      _pendingWrites.delete('cm_users');
+    }).catch(() => { _pendingWrites.delete('cm_users'); });
     notify("Пользователь " + username + " удалён");
   };
 
@@ -3516,8 +3873,8 @@ function AdminPage({ users, saveUsers, orders, saveOrders, products, saveProduct
                     {user.role === "admin" && <span style={{marginLeft:"8px",fontSize:"11px",fontWeight:700,background:"var(--rd-red-light)",color:"var(--rd-red)",border:"1.5px solid rgba(199,22,24,0.2)",borderRadius:"20px",padding:"1px 8px"}}>Админ</span>}
                   </div>
                   <div className="user-card-email">{user.email}</div>
-                  <div className="user-card-date">С {new Date(user.createdAt).toLocaleDateString("ru-RU")}</div>
-                  {user.birthdate && <div className="user-card-date" style={{color:"var(--rd-red)"}}>🎂 {new Date(user.birthdate).toLocaleDateString("ru-RU", {day:"numeric",month:"long"})}</div>}
+                  <div className="user-card-date">С {user.createdAt ? new Date(user.createdAt).toLocaleDateString("ru-RU") : "—"}</div>
+                  {user.birthdate && !isNaN(new Date(user.birthdate)) && <div className="user-card-date" style={{color:"var(--rd-red)"}}>🎂 {new Date(user.birthdate).toLocaleDateString("ru-RU", {day:"numeric",month:"long"})}</div>}
                 </div>
                 <div className="user-card-balance">
                   <div className="ucb-label">Баланс</div>
@@ -3544,7 +3901,7 @@ function AdminPage({ users, saveUsers, orders, saveOrders, products, saveProduct
 
       {tab === "categories" && (
         <div style={{maxWidth:"560px"}}>
-          <div className="product-form-card" style={{marginBottom:"20px", position:"static"}}>
+          <div className="product-form-card" style={{marginBottom:"20px",position:"relative",top:"auto"}}>
             <div className="product-form-title">🏷️ Добавить категорию</div>
             <div style={{display:"flex",gap:"10px"}}>
               <input className="form-input" placeholder="Название категории" value={catInput} onChange={e => setCatInput(e.target.value)}
@@ -3605,12 +3962,14 @@ function AdminPage({ users, saveUsers, orders, saveOrders, products, saveProduct
         </div>
       )}
 
-      {userEditModal && (
+      {userEditModal && users[userEditModal.username] && (
         <div className="modal-overlay" onClick={() => setUserEditModal(null)}>
           <div className="modal-box" onClick={e => e.stopPropagation()} style={{maxWidth:"440px",padding:"32px 28px"}}>
             <button className="modal-close" onClick={() => setUserEditModal(null)}>✕</button>
             <div style={{fontWeight:800,fontSize:"20px",marginBottom:"20px"}}>Редактировать пользователя</div>
-            <UserEditForm username={userEditModal.username} user={userEditModal.user} users={users} saveUsers={saveUsers} notify={notify} onClose={() => setUserEditModal(null)} />
+            <UserEditErrorBoundary>
+              <UserEditForm username={userEditModal.username} user={users[userEditModal.username] || userEditModal.user} users={users} saveUsers={saveUsers} notify={notify} onClose={() => setUserEditModal(null)} isAdmin={isAdmin} />
+            </UserEditErrorBoundary>
           </div>
         </div>
       )}
@@ -4145,7 +4504,7 @@ function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbC
   }, [pgConfig]);
   const [pgTesting, setPgTesting] = useState(false);
   const [pgTestResult, setPgTestResult] = useState(null);
-  const [pgMigrating, setPgMigrating] = useState(false);
+  const [pgActivationMode, setPgActivationMode] = useState('existing'); // 'existing' or 'new'
   const [pgSqlConsole, setPgSqlConsole] = useState("");
   const [pgSqlResult, setPgSqlResult] = useState(null);
   const [pgSqlError, setPgSqlError] = useState("");
@@ -4190,23 +4549,70 @@ function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbC
     if (!pgForm.host || !pgForm.database || !pgForm.user) {
       notify("Сначала заполните настройки", "err"); return;
     }
+    
+    // Подтверждение в зависимости от режима
+    if (pgActivationMode === 'new') {
+      if (!confirm("⚠️ ВНИМАНИЕ!\n\nВы выбрали режим 'Создать новую БД'.\n\nВсе текущие данные в PostgreSQL будут ПЕРЕЗАПИСАНЫ данными из SQLite!\n\nПродолжить?")) {
+        return;
+      }
+    }
+    
     setPgTesting(true);
     const { _passwordSaved, ...pgFormClean } = pgForm;
     const cfg = { ...pgFormClean, enabled: true };
+    
     try {
+      // 1. Проверяем подключение
       const r = await fetch('/api/store', { method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'pg_test', config: cfg }) });
       const testRes = await r.json();
-      if (!testRes.ok) { notify("Не удалось подключиться: " + testRes.error, "err"); setPgTesting(false); return; }
+      if (!testRes.ok) { 
+        notify("Не удалось подключиться: " + testRes.error, "err"); 
+        setPgTesting(false); 
+        return; 
+      }
+      
+      // 2. Если режим 'new' - мигрируем данные
+      if (pgActivationMode === 'new') {
+        notify("Миграция данных из SQLite в PostgreSQL...", "ok");
+        const all = storage.all();
+        const migrateRes = await fetch('/api/store', { 
+          method: 'POST', 
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'setMany', data: all }) 
+        });
+        const migrateData = await migrateRes.json();
+        if (!migrateData.ok) { 
+          notify("Ошибка миграции: " + migrateData.error, "err"); 
+          setPgTesting(false); 
+          return; 
+        }
+        notify("✓ Мигрировано " + Object.keys(all).length + " ключей", "ok");
+      }
+      
+      // 3. Сохраняем конфиг и активируем PostgreSQL
       const r2 = await fetch('/api/store', { method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'pg_save', config: cfg }) });
       const saved = await r2.json();
-      if (!saved.ok) { notify("Ошибка сохранения конфига: " + (saved.error||''), "err"); setPgTesting(false); return; }
+      if (!saved.ok) { 
+        notify("Ошибка сохранения конфига: " + (saved.error||''), "err"); 
+        setPgTesting(false); 
+        return; 
+      }
+      
       savePgConfig(cfg);
       setPgForm(cfg);
-      notify("PostgreSQL активирована! Перезагрузите страницу.", "ok");
+      
+      if (pgActivationMode === 'existing') {
+        notify("PostgreSQL активирована! Подключено к существующей БД. Перезагрузка...", "ok");
+      } else {
+        notify("PostgreSQL активирована! Данные мигрированы. Перезагрузка...", "ok");
+      }
+      
       setTimeout(() => window.location.reload(), 1500);
-    } catch(e) { notify("Ошибка: " + e.message, "err"); }
+    } catch(e) { 
+      notify("Ошибка: " + e.message, "err"); 
+    }
     setPgTesting(false);
   };
 
@@ -4219,32 +4625,45 @@ function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbC
     setTimeout(() => window.location.reload(), 1200);
   };
 
-  const migrateToPg = async () => {
-    if (!confirm("Мигрировать все данные в PostgreSQL? Данные в PG будут перезаписаны.")) return;
-    setPgMigrating(true);
-    try {
-      const all = storage.all();
-      const res = await fetch('/api/store', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'setMany', data: all }) });
-      const data = await res.json();
-      if (data.ok) { notify("Мигрировано " + Object.keys(all).length + " ключей ✓"); }
-      else { notify("Ошибка миграции: " + data.error, "err"); }
-    } catch(err) { notify("Ошибка: " + err.message, "err"); }
-    setPgMigrating(false);
-  };
-
   const loadPgStats = async () => {
     setPgStatsLoading(true);
     try {
       const res = await fetch('/api/store', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'pg_stats' }),
+        body: JSON.stringify({ action: 'getAll' }),
       });
       const data = await res.json();
-      if (data.ok) {
-        setPgStats({ ok: true, total: data.total ?? 0, size: data.size || '—', rowCounts: data.rowCounts || {} });
+      if (data.ok && data.data) {
+        const d = data.data;
+        const countOf = (v) => {
+          if (!v) return 0;
+          if (Array.isArray(v)) return v.length;
+          if (typeof v === 'object') return Object.keys(v).length;
+          return 1;
+        };
+        const rowCounts = {
+          cm_users:      countOf(d.cm_users),
+          cm_products:   countOf(d.cm_products),
+          cm_orders:     countOf(d.cm_orders),
+          cm_transfers:  countOf(d.cm_transfers),
+          cm_categories: countOf(d.cm_categories),
+          _total_keys:   Object.keys(d).length,
+          _total_coins:  d.cm_users
+            ? Object.values(d.cm_users).reduce((s, u) => s + (u?.balance || 0), 0)
+            : 0,
+        };
+        let dbSize = '—';
+        try {
+          const dr = await fetch('/api/store', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'pg_diag' }),
+          });
+          const dd = await dr.json();
+          if (dd.ok && dd.dbSize) dbSize = dd.dbSize;
+        } catch {}
+        setPgStats({ ok: true, total: rowCounts._total_keys, size: dbSize, rowCounts });
       } else {
-        notify("Ошибка загрузки статистики: " + data.error, "err");
+        notify("Ошибка загрузки статистики: " + (data.error || 'нет данных'), "err");
       }
     } catch(err) { notify("Ошибка: " + err.message, "err"); }
     setPgStatsLoading(false);
@@ -4398,6 +4817,7 @@ function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbC
     { id: "currency_settings", icon: "✏️", label: "Настройки" },
     { id: "currency_birthday", icon: "🎂", label: "День рождения" },
     { id: "currency_bulk", icon: "💸", label: "Начисление" },
+    { id: "currency_workdays", icon: "💼", label: "Трудодни" },
   ] : [
     { id: "currency_settings", icon: "✏️", label: "Настройки" },
   ];
@@ -4511,7 +4931,24 @@ function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbC
                       <span style={{fontSize:"18px"}}>🎂</span>
                       <div>
                         <div style={{fontWeight:700,fontSize:"15px",color:"var(--rd-dark)"}}>
-                          {new Date(user.birthdate).toLocaleDateString("ru-RU", {day:"numeric",month:"long",year:"numeric"})}
+                          {!isNaN(new Date(user.birthdate)) ? new Date(user.birthdate).toLocaleDateString("ru-RU", {day:"numeric",month:"long",year:"numeric"}) : "—"}
+                        </div>
+                        <div style={{fontSize:"11px",color:"var(--rd-gray-text)",marginTop:"1px"}}>Изменить может только администратор</div>
+                      </div>
+                    </div>
+                  : <div style={{padding:"10px 14px",background:"var(--rd-gray-bg)",border:"1.5px solid var(--rd-gray-border)",borderRadius:"var(--rd-radius-sm)",fontSize:"13px",color:"var(--rd-gray-text)"}}>
+                      Не указана — обратитесь к администратору
+                    </div>
+                }
+              </div>
+              <div className="form-field">
+                <label className="form-label">Дата трудоустройства</label>
+                {user.employmentDate
+                  ? <div style={{display:"flex",alignItems:"center",gap:"10px",padding:"10px 14px",background:"var(--rd-gray-bg)",border:"1.5px solid var(--rd-gray-border)",borderRadius:"var(--rd-radius-sm)"}}>
+                      <span style={{fontSize:"18px"}}>💼</span>
+                      <div>
+                        <div style={{fontWeight:700,fontSize:"15px",color:"var(--rd-dark)"}}>
+                          {!isNaN(new Date(user.employmentDate)) ? new Date(user.employmentDate).toLocaleDateString("ru-RU",{day:"numeric",month:"long",year:"numeric"}) : "—"}
                         </div>
                         <div style={{fontSize:"11px",color:"var(--rd-gray-text)",marginTop:"1px"}}>Изменить может только администратор</div>
                       </div>
@@ -4761,20 +5198,20 @@ function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbC
               const amount = parseInt(bdBonus);
               if (!bdEnabled) { notify("Автоначисление отключено", "err"); return; }
               if (isNaN(amount) || amount <= 0) { notify("Укажите корректную сумму", "err"); return; }
-              const today = new Date();
+              const nowBd = new Date();
               let count = 0;
               const updated = {...users};
               Object.entries(users).forEach(([uname, ud]) => {
                 if (!ud.birthdate) return;
                 const bd = new Date(ud.birthdate);
-                if (bd.getDate() === today.getDate() && bd.getMonth() === today.getMonth()) {
+                if (!isNaN(bd) && bd.getDate() === nowBd.getDate() && bd.getMonth() === nowBd.getMonth()) {
                   updated[uname] = { ...ud, balance: (ud.balance || 0) + amount };
                   count++;
                 }
               });
               if (count > 0) {
                 saveUsers(updated);
-                try { storage.set('cm_birthday_grant', String(today.getFullYear())); } catch(e) {}
+                try { storage.set('cm_birthday_grant', String(nowBd.getFullYear())); } catch(e) {}
                 notify(`🎂 Начислено ${amount} ${getCurrName(appearance.currency)} для ${count} ${count === 1 ? "именинника" : count < 5 ? "именинников" : "именинников"}!`);
               } else {
                 notify("Сегодня именинников нет 🎂");
@@ -4786,12 +5223,12 @@ function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbC
             const todayBirthdays = Object.entries(users).filter(([u, ud]) => {
               if (!ud.birthdate) return false;
               const bd = new Date(ud.birthdate);
-              return bd.getDate() === today.getDate() && bd.getMonth() === today.getMonth();
+              return !isNaN(bd) && bd.getDate() === today.getDate() && bd.getMonth() === today.getMonth();
             });
 
             // Upcoming birthdays (next 30 days)
             const upcoming = Object.entries(users)
-              .filter(([u, ud]) => ud.birthdate)
+              .filter(([u, ud]) => ud.birthdate && !isNaN(new Date(ud.birthdate)))
               .map(([uname, ud]) => {
                 const bd = new Date(ud.birthdate);
                 const thisYear = new Date(today.getFullYear(), bd.getMonth(), bd.getDate());
@@ -4870,7 +5307,7 @@ function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbC
                           <div style={{fontWeight:700,fontSize:"14px",color:"var(--rd-dark)"}}>
                             {ud.firstName ? ud.firstName + " " + (ud.lastName || "") : uname}
                           </div>
-                          <div style={{fontSize:"12px",color:"var(--rd-gray-text)"}}>@{uname} · {new Date(ud.birthdate).toLocaleDateString("ru-RU",{day:"numeric",month:"long"})}</div>
+                          <div style={{fontSize:"12px",color:"var(--rd-gray-text)"}}>@{uname} · {!isNaN(new Date(ud.birthdate)) ? new Date(ud.birthdate).toLocaleDateString("ru-RU",{day:"numeric",month:"long"}) : "—"}</div>
                         </div>
                         <div style={{fontSize:"13px",fontWeight:700,color:"var(--rd-green)"}}>
                           🪙 {ud.balance || 0}
@@ -4916,6 +5353,10 @@ function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbC
 
           {tab === "currency" && currencySubTab === "currency_bulk" && isAdmin && (
             <BulkAccrualTab users={users} currentUser={currentUser} notify={notify} saveUsers={saveUsers} transfers={transfers} saveTransfers={saveTransfers} />
+          )}
+
+          {tab === "currency" && currencySubTab === "currency_workdays" && isAdmin && (
+            <WorkdaysTab users={users} currentUser={currentUser} notify={notify} saveUsers={saveUsers} transfers={transfers} saveTransfers={saveTransfers} appearance={appearance} saveAppearance={saveAppearance} />
           )}
 
           {tab === "integrations" && isAdmin && (
@@ -5206,26 +5647,59 @@ function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbC
                   {/* Enable / Disable */}
                   <div className="settings-card">
                     <div className="settings-section-title">⚡ Активация</div>
-                    <div style={{fontSize:"13px",color:"var(--rd-gray-text)",marginBottom:"14px",lineHeight:"1.6"}}>
+                    <div style={{fontSize:"13px",color:"var(--rd-gray-text)",marginBottom:"16px",lineHeight:"1.6"}}>
                       После активации приложение будет хранить и читать все данные из PostgreSQL. SQLite останется как резервная копия до следующей загрузки страницы.
                     </div>
+                    
+                    {!isPgActive && (
+                      <div style={{marginBottom:"20px"}}>
+                        <div style={{fontSize:"12px",fontWeight:700,textTransform:"uppercase",letterSpacing:"0.05em",color:"var(--rd-gray-text)",marginBottom:"12px"}}>Выберите режим активации</div>
+                        
+                        <div style={{display:"flex",flexDirection:"column",gap:"12px"}}>
+                          {/* Режим: Существующая БД */}
+                          <label style={{display:"flex",alignItems:"flex-start",gap:"12px",padding:"14px",border:"2px solid " + (pgActivationMode === 'existing' ? "var(--rd-red)" : "var(--rd-gray-border)"),borderRadius:"var(--rd-radius-sm)",cursor:"pointer",background:pgActivationMode === 'existing' ? "rgba(199,22,24,0.04)" : "#fff",transition:"all 0.2s"}}>
+                            <input type="radio" name="pgActivationMode" value="existing" checked={pgActivationMode === 'existing'} onChange={e => setPgActivationMode(e.target.value)} style={{marginTop:"2px",cursor:"pointer"}} />
+                            <div style={{flex:1}}>
+                              <div style={{fontWeight:700,fontSize:"14px",marginBottom:"4px",color:pgActivationMode === 'existing' ? "var(--rd-red)" : "var(--rd-dark)"}}>
+                                ✅ Подключиться к существующей БД
+                              </div>
+                              <div style={{fontSize:"12px",color:"var(--rd-gray-text)",lineHeight:"1.5"}}>
+                                Сохранить все данные в PostgreSQL. Безопасно для обновлений приложения. <strong style={{color:"#16a34a"}}>Рекомендуется!</strong>
+                              </div>
+                            </div>
+                          </label>
+                          
+                          {/* Режим: Новая БД */}
+                          <label style={{display:"flex",alignItems:"flex-start",gap:"12px",padding:"14px",border:"2px solid " + (pgActivationMode === 'new' ? "var(--rd-red)" : "var(--rd-gray-border)"),borderRadius:"var(--rd-radius-sm)",cursor:"pointer",background:pgActivationMode === 'new' ? "rgba(199,22,24,0.04)" : "#fff",transition:"all 0.2s"}}>
+                            <input type="radio" name="pgActivationMode" value="new" checked={pgActivationMode === 'new'} onChange={e => setPgActivationMode(e.target.value)} style={{marginTop:"2px",cursor:"pointer"}} />
+                            <div style={{flex:1}}>
+                              <div style={{fontWeight:700,fontSize:"14px",marginBottom:"4px",color:pgActivationMode === 'new' ? "var(--rd-red)" : "var(--rd-dark)"}}>
+                                🔄 Создать новую БД (мигрировать из SQLite)
+                              </div>
+                              <div style={{fontSize:"12px",color:"var(--rd-gray-text)",lineHeight:"1.5",marginBottom:"6px"}}>
+                                Перенести данные из SQLite в PostgreSQL. Текущие данные в PostgreSQL будут перезаписаны.
+                              </div>
+                              {pgActivationMode === 'new' && (
+                                <div style={{fontSize:"11px",background:"rgba(239,68,68,0.1)",color:"#dc2626",padding:"8px 10px",borderRadius:"6px",fontWeight:600,display:"flex",alignItems:"center",gap:"6px"}}>
+                                  <span>⚠️</span>
+                                  <span>ВНИМАНИЕ! Все данные в PostgreSQL будут перезаписаны!</span>
+                                </div>
+                              )}
+                            </div>
+                          </label>
+                        </div>
+                      </div>
+                    )}
+                    
                     <div style={{display:"flex",gap:"10px",flexWrap:"wrap",alignItems:"center"}}>
                       {!isPgActive ? (
-                        <button className="btn btn-primary" style={{background:"#16a34a",border:"none"}} onClick={enablePg} disabled={pgTesting}>{pgTesting ? "⏳ Проверка…" : "🟢 Активировать PostgreSQL"}</button>
+                        <button className="btn btn-primary" style={{background:"#16a34a",border:"none"}} onClick={enablePg} disabled={pgTesting}>
+                          {pgTesting ? "⏳ Подключение…" : "🟢 Активировать PostgreSQL"}
+                        </button>
                       ) : (
                         <button className="btn" style={{background:"var(--rd-red)",color:"#fff",fontWeight:700}} onClick={disablePg}>🔴 Отключить PostgreSQL</button>
                       )}
                     </div>
-                  </div>
-
-                  {/* Migration */}
-                  <div className="settings-card">
-                    <div className="settings-section-title">🔄 Миграция данных</div>
-                    <div style={{fontSize:"13px",color:"var(--rd-gray-text)",marginBottom:"14px",lineHeight:"1.6"}}>
-                      Скопировать все текущие данные из SQLite (браузер) в PostgreSQL. Используйте это при первом переходе на PG чтобы не потерять существующие данные.
-                    </div>
-                    <button className="btn btn-secondary" onClick={migrateToPg} disabled={pgMigrating || !pgConfig?.host}>{pgMigrating ? "⏳ Миграция…" : "📤 Мигрировать SQLite → PostgreSQL"}</button>
-                    {!pgConfig?.host && <div style={{fontSize:"12px",color:"var(--rd-gray-text)",marginTop:"6px"}}>Сначала сохраните настройки подключения.</div>}
                   </div>
 
                   {/* Stats */}
@@ -5236,7 +5710,7 @@ function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbC
                         <div>
                           <div style={{fontSize:"13px",color:"var(--rd-gray-text)",marginBottom:"12px"}}>Размер БД: <strong>{pgStats.size}</strong> · Всего ключей: <strong>{pgStats.total}</strong></div>
                           <div className="db-tables-grid">
-                            {[["cm_users","👥 Пользователи"],["cm_products","🛍️ Товары"],["cm_orders","📦 Заказы"],["cm_transfers","🪙 Переводы"],["cm_categories","🏷️ Категории"],["_total_keys","🔑 Всего ключей"]].map(([k,label]) => (
+                            {[["cm_users","👥 Пользователи"],["cm_products","🛍️ Товары"],["cm_orders","📦 Заказы"],["cm_transfers","🪙 Переводы"],["cm_categories","🏷️ Категории"],["_total_coins","🪙 Всего монет"],["_total_keys","🔑 Всего ключей"]].map(([k,label]) => (
                               <div key={k} className="db-table-card">
                                 <div className="db-table-name">{label}</div>
                                 <div className="db-table-count">{pgStats.rowCounts?.[k] ?? "—"}</div>
@@ -5280,9 +5754,22 @@ function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbC
                   <div className="settings-card">
                     <div className="settings-section-title">🔍 Диагностика соединения</div>
                     <div style={{fontSize:"13px",color:"var(--rd-gray-text)",marginBottom:"10px"}}>Проверяет что сервер реально использует PostgreSQL — видит ли он конфиг, подключается ли к БД.</div>
+                    <div style={{display:"flex",gap:"10px",flexWrap:"wrap"}}>
                     <button className="btn" onClick={runDiag} disabled={debugLoading} style={{background:"#7c3aed",color:"#fff",fontWeight:700,border:"none"}}>
                       {debugLoading ? "⏳ Диагностика…" : "🔍 Запустить диагностику"}
                     </button>
+                    <button className="btn" onClick={async () => {
+                      if (!confirm("Перенести данные из store.json в PostgreSQL?\n\nЭто перезапишет данные в PG текущими данными из JSON-файла.")) return;
+                      try {
+                        const r = await fetch('/api/store', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ action:'migrate' }) });
+                        const d = await r.json();
+                        if (d.ok) { notify("✅ Мигрировано " + d.migrated + " ключей в PostgreSQL", "ok"); runDiag(); }
+                        else notify("Ошибка миграции: " + d.error, "err");
+                      } catch(e) { notify("Ошибка: " + e.message, "err"); }
+                    }} style={{background:"#0369a1",color:"#fff",fontWeight:700,border:"none"}}>
+                      📤 Перенести JSON → PG
+                    </button>
+                    </div>
                     {debugInfo && (
                       <div style={{marginTop:"12px",background:"#0f172a",color:"#e2e8f0",borderRadius:"10px",padding:"14px 16px",fontSize:"12px",fontFamily:"monospace",lineHeight:1.8,overflowX:"auto"}}>
                         <div style={{color:"#94a3b8",marginBottom:"8px",fontWeight:700}}>── РЕЗУЛЬТАТ ──</div>
