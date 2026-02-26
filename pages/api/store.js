@@ -207,10 +207,6 @@ export default async function handler(req, res) {
       if (action === 'getAll') return res.json({ ok: true, data: await prismaKv.getAll(prisma) });
       if (action === 'setMany') { await prismaKv.setMany(prisma, data); return res.json({ ok: true }); }
     } else {
-      // ⚠️ Fallback: JSON-файл. В Docker-контейнере данные не сохранятся при рестарте!
-      if (process.env.NODE_ENV === 'production') {
-        console.warn('[Store] ⚠️ DATABASE_URL не задан — используется JSON-файл. Данные не переживут рестарт контейнера!');
-      }
       if (action === 'get') { const s = readJSON(); return res.json({ ok: true, value: s[key] !== undefined ? s[key] : null }); }
       if (action === 'getAll') return res.json({ ok: true, data: readJSON() });
       if (action === 'set') { await lock(() => { const s = readJSON(); s[key] = value; writeJSON(s); }); return res.json({ ok: true }); }

@@ -1,92 +1,136 @@
-# Corp Merch Store — Деплой на Timeweb.cloud
+# Corp Merch Store — Next.js
 
-## Стек
-- **Next.js 14** (стандартный режим, без standalone)
-- **SQLite / sql.js** — хранение данных в браузере (IndexedDB)
-- **JSON-файл** — серверное хранилище настроек (`data/store.json`)
-- **Нет PostgreSQL / Prisma** — БД не требуется
+Корпоративный магазин мерча, конвертированный из HTML в Next.js.
 
----
+## Технологии
+- **Next.js 14** (Pages Router)
+- **React 18**
+- **sql.js** — SQLite в браузере (хранение данных в IndexedDB)
+- **xlsx** — экспорт/импорт данных
 
-## Деплой на Timeweb.cloud (Node.js приложение)
-
-### Настройки в панели Timeweb
-
-| Параметр | Значение |
-|---|---|
-| Команда установки | `npm install` |
-| Команда сборки | `npm run build` |
-| Команда запуска | `npm start` |
-| Версия Node.js | 18+ |
-| Корневая папка | `/` (корень репозитория) |
-
-### Переменные окружения
-Добавьте в панели Timeweb (раздел «Переменные окружения»):
-- `NODE_ENV=production` (обычно устанавливается автоматически)
-- `PORT` — Timeweb подставляет автоматически
-
----
-
-## Локальная разработка
+## Локальный запуск
 
 ```bash
+# 1. Установить зависимости (скопирует sql-wasm.wasm автоматически)
 npm install
-npm run dev       # http://localhost:3000
+
+# 2. Запустить dev-сервер
+npm run dev
+
+# 3. Открыть http://localhost:3000
 ```
 
-## Сборка и запуск локально
+## Деплой на Vercel
+
+### Способ 1 — через GitHub (рекомендуется)
+
+1. Создайте репозиторий на GitHub и загрузите проект:
+   ```bash
+   git init
+   git add .
+   git commit -m "Initial commit"
+   git remote add origin https://github.com/YOUR_USER/YOUR_REPO.git
+   git push -u origin main
+   ```
+
+2. Зайдите на [vercel.com](https://vercel.com) → **New Project**
+
+3. Выберите ваш GitHub репозиторий
+
+4. Настройки оставьте по умолчанию (Vercel автоматически определит Next.js):
+   - **Framework Preset**: Next.js
+   - **Build Command**: `npm run build`
+   - **Install Command**: `npm install`
+
+5. Нажмите **Deploy** — через ~1 минуту сайт будет доступен
+
+### Способ 2 — Vercel CLI
 
 ```bash
-npm run build     # сборка + копирование sql-wasm.wasm в public/
-npm start         # запуск на PORT=3000
+npm i -g vercel
+vercel login
+vercel --prod
 ```
-
----
 
 ## Структура проекта
 
 ```
 ├── pages/
-│   ├── index.js          # Главная страница (SPA через dynamic import)
-│   ├── _app.js
-│   ├── _document.js
-│   └── api/
-│       ├── health.js     # GET /api/health — healthcheck для хостинга
-│       ├── store.js      # POST /api/store — JSON-хранилище (настройки)
-│       └── telegram.js   # POST /api/telegram — прокси Telegram Bot API
+│   ├── _app.js          # Глобальные стили
+│   ├── _document.js     # HTML шаблон
+│   └── index.js         # Главная страница
 ├── components/
-│   └── App.jsx           # Основное SPA-приложение
+│   └── App.jsx          # Вся логика приложения (SPA)
 ├── lib/
-│   ├── storage.js        # SQLite (браузер) через sql.js + IndexedDB
-│   └── utils.js          # Утилиты, темы, сжатие изображений
-├── scripts/
-│   └── copy-wasm.js      # Копирует sql-wasm.wasm → public/ после сборки
+│   ├── storage.js       # SQLite/IndexedDB слой
+│   └── utils.js         # Утилиты
 ├── styles/
-│   └── globals.css
+│   └── globals.css      # Все стили
 ├── public/
-│   └── sql-wasm.wasm     # Генерируется автоматически при npm run build
-├── data/                 # Создаётся автоматически при первом запуске
-│   └── store.json        # Серверное хранилище настроек
-├── next.config.js
-└── package.json
+│   └── sql-wasm.wasm    # WebAssembly для SQLite (копируется при npm install)
+├── scripts/
+│   └── copy-wasm.js     # Postinstall скрипт
+└── next.config.js
 ```
+
+## Важно
+
+- Все данные хранятся **в браузере пользователя** (IndexedDB + SQLite in-memory)
+- При очистке кэша браузера данные удаляются — используйте экспорт БД в настройках
+- Это **клиентское SPA**, серверные компоненты не используются
+
+## Логин администратора
+
+- **Логин**: `admin`
+- **Пароль**: `admin123`
 
 ---
 
-## Важные замечания
+## Prisma (ORM)
 
-### Почему нет `output: 'standalone'`
-Режим `standalone` генерирует минимальный сервер (`node server.js`) без `node_modules`.
-Timeweb.cloud запускает приложение через `npm start` → `next start`, что несовместимо со standalone.
-Поэтому используется **стандартный режим Next.js**.
+Проект использует **Prisma ORM** для работы с PostgreSQL вместо сырых SQL-запросов.
 
-### Файл `public/sql-wasm.wasm`
-Копируется автоматически из `node_modules/sql.js/dist/` при:
-- `npm run build`
-- `npm install` (через `postinstall`)
+### Быстрый старт
 
-Если файл не появился — запустите вручную: `node scripts/copy-wasm.js`
+1. **Скопируй `.env.example` в `.env`** и заполни `DATABASE_URL`:
+   ```
+   cp .env.example .env
+   ```
 
-### Данные `data/store.json`
-Папка `data/` создаётся автоматически. Файл содержит серверные настройки магазина.
-Основные данные (товары, заказы) хранятся в **IndexedDB браузера** через sql.js.
+2. **Установи зависимости** (Prisma Client генерируется автоматически через `postinstall`):
+   ```bash
+   npm install
+   ```
+
+3. **Применить миграции** (создаст таблицу `kv` в БД):
+   ```bash
+   npm run prisma:migrate
+   ```
+
+4. **Запустить проект:**
+   ```bash
+   npm run dev
+   ```
+
+### Команды Prisma
+
+| Команда | Описание |
+|---|---|
+| `npm run prisma:generate` | Сгенерировать Prisma Client |
+| `npm run prisma:migrate` | Применить миграции (prod) |
+| `npm run prisma:migrate:dev` | Создать и применить миграцию (dev) |
+| `npm run prisma:studio` | Открыть Prisma Studio (GUI для БД) |
+
+### Схема базы данных
+
+```prisma
+model Kv {
+  key        String   @id
+  value      String
+  updated_at DateTime @default(now()) @updatedAt
+
+  @@map("kv")
+}
+```
+
+Таблица `kv` используется как универсальное хранилище ключ-значение для настроек и данных магазина. Если `DATABASE_URL` не задан — данные сохраняются в `data/store.json` (режим локальной разработки).
