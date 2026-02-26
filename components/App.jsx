@@ -6311,7 +6311,7 @@ function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbC
               <div style={{fontWeight:700,fontSize:"18px",color:"var(--rd-dark)",marginBottom:"20px",paddingBottom:"14px",borderBottom:"1.5px solid var(--rd-gray-border)"}}>
                 🎰 Управление лотереями
               </div>
-              <LotteryAdminTab lotteries={lotteries} saveLotteries={saveLotteries} notify={notify} users={users} saveUsers={saveUsers} />
+              <LotteryAdminTab lotteries={lotteries} saveLotteries={saveLotteries} notify={notify} users={users} saveUsers={saveUsers} appearance={appearance} />
             </div>
           )}
 
@@ -6333,20 +6333,73 @@ function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbC
 
 // ── LOTTERY ──────────────────────────────────────────────────────────────
 
-function LotteryAdminTab({ lotteries, saveLotteries, notify, users, saveUsers }) {
+// Shared countdown component
+function LotteryCountdown({ endsAt, large }) {
+  const [diff, setDiff] = useState(endsAt - Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setDiff(endsAt - Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [endsAt]);
+  if (diff <= 0) return <span style={{ color: "var(--rd-red)", fontWeight: 700 }}>Завершается...</span>;
+  const d = Math.floor(diff / 86400000), h = Math.floor((diff % 86400000) / 3600000), m = Math.floor((diff % 3600000) / 60000), s = Math.floor((diff % 60000) / 1000);
+  const fs = large ? "22px" : "15px";
+  return (
+    <span style={{ fontWeight: 800, fontSize: fs, color: "var(--rd-red)", fontVariantNumeric: "tabular-nums" }}>
+      {d > 0 ? `${d}д ` : ""}{String(h).padStart(2,"0")}:{String(m).padStart(2,"0")}:{String(s).padStart(2,"0")}
+    </span>
+  );
+}
+
+function LotteryAdminTab({ lotteries, saveLotteries, notify, users, saveUsers, appearance }) {
   const list = lotteries || [];
   const emptyForm = { name: "", image: "", coins: "", participants: "", endsAt: "" };
   const [form, setForm] = useState(emptyForm);
   const [imgPreview, setImgPreview] = useState("");
   const [editingId, setEditingId] = useState(null);
   const [editForm, setEditForm] = useState(null);
-  const [editImgPreview, setEditImgPreview] = useState("");
   const [historyView, setHistoryView] = useState(false);
+  const drawnRef = React.useRef(new Set());
+
+  const sendTg = (text) => {
+    const integ = appearance?.integrations || {};
+    if (!integ.tgEnabled || !integ.tgBotToken || !integ.tgChatId) return;
+    fetch('/api/telegram', { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ token: integ.tgBotToken.trim(), chat_id: integ.tgChatId.trim(), text, parse_mode: "HTML" }) }).catch(() => {});
+  };
+
+  const doDrawWinners = (lottery, currentList) => {
+    const allUserKeys = Object.keys(users).filter(u => u !== "admin");
+    if (allUserKeys.length === 0) return null;
+    const count = Math.min(lottery.participants, allUserKeys.length);
+    const shuffled = [...allUserKeys].sort(() => Math.random() - 0.5);
+    const winners = shuffled.slice(0, count);
+    const prizePerWinner = Math.floor(lottery.coins / count);
+    const newUsers = { ...users };
+    winners.forEach(w => { newUsers[w] = { ...newUsers[w], balance: (newUsers[w].balance || 0) + prizePerWinner }; });
+    saveUsers(newUsers);
+    const winnerList = winners.map(w => ({ user: w, prize: prizePerWinner }));
+    const updated = (currentList || list).map(l => l.id === lottery.id ? { ...l, status: "ended", winners: winnerList } : l);
+    saveLotteries(updated);
+    const tgText = `🎰 <b>Лотерея завершена: «${lottery.name}»</b>\n\n🏆 Победители:\n` + winnerList.map((w, i) => `${i+1}. <b>${w.user}</b> — +${w.prize} 🪙`).join("\n") + `\n\n💰 Всего разыграно: ${lottery.coins} монет`;
+    sendTg(tgText);
+    notify(`🎰 Лотерея «${lottery.name}» завершена! Победители: ${winners.join(", ")} (+${prizePerWinner} 🪙)`);
+    return winnerList;
+  };
+
+  // Auto-draw on timer expiry
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const now = Date.now();
+      const currentList = storage.get("cm_lotteries") || list;
+      const toFinish = currentList.filter(l => l.status === "active" && l.endsAt <= now && !drawnRef.current.has(l.id));
+      toFinish.forEach(l => { drawnRef.current.add(l.id); doDrawWinners(l, currentList); });
+    }, 5000);
+    return () => clearInterval(interval);
+  }, [users, list]);
 
   const handleImage = (e, setter, setSrc) => {
     const file = e.target.files[0]; if (!file) return;
     const reader = new FileReader();
-    reader.onload = async (ev) => { const c = await compressImage(ev.target.result, 1200, 1200, 0.85, 300); setter(f => ({ ...f, image: c })); setSrc(c); };
+    reader.onload = async (ev) => { const c = await compressImage(ev.target.result, 1200, 1200, 0.85, 300); setter(f => ({ ...f, image: c })); if (setSrc) setSrc(c); };
     reader.readAsDataURL(file); e.target.value = "";
   };
 
@@ -6365,9 +6418,8 @@ function LotteryAdminTab({ lotteries, saveLotteries, notify, users, saveUsers })
     const endsAtLocal = new Date(l.endsAt - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16);
     setEditingId(l.id);
     setEditForm({ name: l.name, image: l.image || "", coins: String(l.coins), participants: String(l.participants), endsAt: endsAtLocal });
-    setEditImgPreview(l.image || "");
   };
-  const cancelEdit = () => { setEditingId(null); setEditForm(null); setEditImgPreview(""); };
+  const cancelEdit = () => { setEditingId(null); setEditForm(null); };
   const saveEdit = () => {
     if (!editForm.name.trim()) { notify("Введите название", "err"); return; }
     const updated = list.map(l => l.id === editingId ? { ...l, name: editForm.name.trim(), image: editForm.image, coins: parseInt(editForm.coins), participants: parseInt(editForm.participants), endsAt: new Date(editForm.endsAt).getTime() } : l);
@@ -6375,25 +6427,9 @@ function LotteryAdminTab({ lotteries, saveLotteries, notify, users, saveUsers })
   };
   const deleteLottery = (id) => { saveLotteries(list.filter(l => l.id !== id)); notify("Лотерея удалена"); };
 
-  const drawWinners = (lottery) => {
-    const allUserKeys = Object.keys(users).filter(u => u !== "admin");
-    if (allUserKeys.length === 0) { notify("Нет пользователей для розыгрыша", "err"); return; }
-    const count = Math.min(lottery.participants, allUserKeys.length);
-    const shuffled = [...allUserKeys].sort(() => Math.random() - 0.5);
-    const winners = shuffled.slice(0, count);
-    const prizePerWinner = Math.floor(lottery.coins / count);
-    const newUsers = { ...users };
-    winners.forEach(w => { newUsers[w] = { ...newUsers[w], balance: (newUsers[w].balance || 0) + prizePerWinner }; });
-    saveUsers(newUsers);
-    const updated = list.map(l => l.id === lottery.id ? { ...l, status: "ended", winners: winners.map(w => ({ user: w, prize: prizePerWinner })) } : l);
-    saveLotteries(updated);
-    notify(`Розыгрыш завершён! Победители: ${winners.join(", ")} (+${prizePerWinner} монет каждому)`);
-  };
-
   const now = Date.now();
   const active = list.filter(l => l.status === "active");
   const ended = list.filter(l => l.status === "ended");
-
   const inputStyle = { width: "100%", padding: "10px 14px", border: "1.5px solid var(--rd-gray-border)", borderRadius: "10px", fontSize: "14px", boxSizing: "border-box", background: "#fff" };
   const labelStyle = { fontSize: "12px", fontWeight: 700, color: "var(--rd-gray-text)", marginBottom: "6px", display: "block" };
 
@@ -6407,7 +6443,7 @@ function LotteryAdminTab({ lotteries, saveLotteries, notify, users, saveUsers })
       {!historyView && (
         <>
           <div style={{ background: "var(--rd-gray-bg)", borderRadius: "var(--rd-radius-sm)", padding: "20px", marginBottom: "24px", border: "1.5px solid var(--rd-gray-border)" }}>
-            <div style={{ fontWeight: 700, fontSize: "15px", marginBottom: "16px" }}>Создать лотерею</div>
+            <div style={{ fontWeight: 700, fontSize: "15px", marginBottom: "16px" }}>➕ Создать лотерею</div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
               <div style={{ gridColumn: "1/-1" }}><label style={labelStyle}>Название</label><input style={inputStyle} value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="Новогодний розыгрыш" /></div>
               <div><label style={labelStyle}>Монет для розыгрыша</label><input type="number" style={inputStyle} value={form.coins} onChange={e => setForm(f => ({ ...f, coins: e.target.value }))} placeholder="1000" /></div>
@@ -6451,10 +6487,15 @@ function LotteryAdminTab({ lotteries, saveLotteries, notify, users, saveUsers })
                     <div style={{ fontWeight: 700, fontSize: "15px" }}>{l.name}</div>
                     <div style={{ fontSize: "13px", color: "var(--rd-gray-text)", marginTop: "4px" }}>💰 {l.coins} монет · 👥 {l.participants} победителей</div>
                     <div style={{ fontSize: "12px", color: "var(--rd-gray-text)", marginTop: "2px" }}>📅 {new Date(l.endsAt).toLocaleString("ru-RU")}</div>
-                    {now > l.endsAt && <div style={{ fontSize: "12px", color: "var(--rd-red)", fontWeight: 700, marginTop: "4px" }}>⏰ Время вышло — завершите розыгрыш</div>}
+                    {now <= l.endsAt && (
+                      <div style={{ marginTop: "8px", display: "inline-flex", alignItems: "center", gap: "6px", background: "var(--rd-red-light)", padding: "4px 10px", borderRadius: "8px" }}>
+                        <span style={{ fontSize: "11px", color: "var(--rd-red)", fontWeight: 600 }}>⏱ До розыгрыша:</span>
+                        <LotteryCountdown endsAt={l.endsAt} />
+                      </div>
+                    )}
+                    {now > l.endsAt && <div style={{ fontSize: "12px", color: "var(--rd-red)", fontWeight: 700, marginTop: "4px" }}>⏰ Завершается автоматически...</div>}
                   </div>
                   <div style={{ display: "flex", gap: "6px", flexShrink: 0 }}>
-                    {now > l.endsAt && <button onClick={() => drawWinners(l)} style={{ background: "var(--rd-red)", color: "#fff", border: "none", borderRadius: "8px", padding: "8px 14px", fontWeight: 700, cursor: "pointer", fontSize: "13px" }}>🎲 Провести</button>}
                     <button onClick={() => startEdit(l)} style={{ background: "var(--rd-gray-bg)", border: "1.5px solid var(--rd-gray-border)", borderRadius: "8px", padding: "8px 12px", cursor: "pointer", fontSize: "13px", fontWeight: 700 }}>✏️</button>
                     <button onClick={() => deleteLottery(l.id)} style={{ background: "#fff0f0", border: "1.5px solid #fecaca", borderRadius: "8px", padding: "8px 12px", cursor: "pointer", fontSize: "13px", color: "var(--rd-red)", fontWeight: 700 }}>🗑️</button>
                   </div>
@@ -6497,20 +6538,8 @@ function LotteryAdminTab({ lotteries, saveLotteries, notify, users, saveUsers })
 
 function LotteryPage({ lotteries, currentUser, currency }) {
   const list = lotteries || [];
-  const now = Date.now();
   const active = list.filter(l => l.status === "active").sort((a, b) => a.endsAt - b.endsAt);
   const ended = list.filter(l => l.status === "ended").sort((a, b) => b.endsAt - a.endsAt);
-
-  function Countdown({ endsAt }) {
-    const [diff, setDiff] = useState(endsAt - Date.now());
-    useEffect(() => {
-      const t = setInterval(() => setDiff(endsAt - Date.now()), 1000);
-      return () => clearInterval(t);
-    }, [endsAt]);
-    if (diff <= 0) return <span style={{ color: "var(--rd-red)", fontWeight: 700 }}>Завершается...</span>;
-    const d = Math.floor(diff / 86400000), h = Math.floor((diff % 86400000) / 3600000), m = Math.floor((diff % 3600000) / 60000), s = Math.floor((diff % 60000) / 1000);
-    return <span style={{ fontWeight: 800, fontSize: "18px", color: "var(--rd-red)" }}>{d > 0 ? `${d}д ` : ""}{String(h).padStart(2,"0")}:{String(m).padStart(2,"0")}:{String(s).padStart(2,"0")}</span>;
-  }
 
   return (
     <div className="page-fade" style={{ maxWidth: "900px", margin: "0 auto", padding: "40px 24px 64px" }}>
@@ -6522,24 +6551,27 @@ function LotteryPage({ lotteries, currentUser, currency }) {
           <div style={{ fontWeight: 700, fontSize: "16px", marginBottom: "14px" }}>🎰 Активные розыгрыши</div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: "16px", marginBottom: "32px" }}>
             {active.map(l => (
-              <div key={l.id} style={{ background: "#fff", border: "1.5px solid var(--rd-gray-border)", borderRadius: "var(--rd-radius)", overflow: "hidden", boxShadow: "var(--rd-shadow)", transition: "transform 0.2s", cursor: "default" }}>
+              <div key={l.id} style={{ background: "#fff", border: "1.5px solid var(--rd-gray-border)", borderRadius: "var(--rd-radius)", overflow: "hidden", boxShadow: "var(--rd-shadow)" }}>
                 {l.image && <img src={l.image} alt="" style={{ width: "100%", height: "160px", objectFit: "cover", display: "block" }} />}
-                <div style={{ padding: "16px" }}>
-                  <div style={{ fontWeight: 800, fontSize: "16px", marginBottom: "8px" }}>{l.name}</div>
-                  <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "10px" }}>
-                    <span style={{ fontSize: "24px" }}>🪙</span>
+                <div style={{ padding: "18px" }}>
+                  <div style={{ fontWeight: 800, fontSize: "17px", marginBottom: "12px" }}>{l.name}</div>
+                  {/* Prize block */}
+                  <div style={{ background: "linear-gradient(135deg, var(--rd-red-light), rgba(199,22,24,0.04))", border: "1.5px solid rgba(199,22,24,0.2)", borderRadius: "12px", padding: "12px 16px", marginBottom: "12px", display: "flex", alignItems: "center", gap: "12px" }}>
+                    <span style={{ fontSize: "28px" }}>🪙</span>
                     <div>
-                      <div style={{ fontWeight: 800, fontSize: "20px", color: "var(--rd-red)" }}>{l.coins}</div>
-                      <div style={{ fontSize: "11px", color: "var(--rd-gray-text)" }}>монет разыгрывается</div>
+                      <div style={{ fontWeight: 900, fontSize: "26px", color: "var(--rd-red)", lineHeight: 1 }}>{l.coins}</div>
+                      <div style={{ fontSize: "12px", color: "var(--rd-gray-text)", fontWeight: 600 }}>монет разыгрывается</div>
                     </div>
-                    <div style={{ marginLeft: "auto", textAlign: "right" }}>
-                      <div style={{ fontWeight: 700, fontSize: "13px", color: "var(--rd-gray-text)" }}>победителей</div>
-                      <div style={{ fontWeight: 800, fontSize: "20px" }}>{l.participants}</div>
+                    <div style={{ marginLeft: "auto", textAlign: "center", background: "#fff", borderRadius: "10px", padding: "8px 14px", border: "1px solid var(--rd-gray-border)" }}>
+                      <div style={{ fontWeight: 900, fontSize: "22px", color: "var(--rd-dark)" }}>{l.participants}</div>
+                      <div style={{ fontSize: "11px", color: "var(--rd-gray-text)", fontWeight: 600 }}>победителей</div>
                     </div>
                   </div>
-                  <div style={{ background: "var(--rd-gray-bg)", borderRadius: "10px", padding: "10px 14px", textAlign: "center" }}>
-                    <div style={{ fontSize: "11px", color: "var(--rd-gray-text)", fontWeight: 600, marginBottom: "4px" }}>До розыгрыша</div>
-                    <Countdown endsAt={l.endsAt} />
+                  {/* Countdown */}
+                  <div style={{ background: "var(--rd-gray-bg)", borderRadius: "10px", padding: "12px 14px", textAlign: "center", border: "1px solid var(--rd-gray-border)" }}>
+                    <div style={{ fontSize: "11px", color: "var(--rd-gray-text)", fontWeight: 600, marginBottom: "4px", textTransform: "uppercase", letterSpacing: "0.05em" }}>⏱ До розыгрыша</div>
+                    <LotteryCountdown endsAt={l.endsAt} large />
+                    <div style={{ fontSize: "11px", color: "var(--rd-gray-text)", marginTop: "4px" }}>{new Date(l.endsAt).toLocaleString("ru-RU")}</div>
                   </div>
                 </div>
               </div>
@@ -6740,6 +6772,7 @@ function VotingPage({ polls, savePolls, currentUser, users, saveUsers, notify, c
 
   const vote = (poll, optionId) => {
     if (!currentUser) { notify("Войдите, чтобы голосовать", "err"); return; }
+    if (now > poll.endsAt) { notify("Голосование завершено", "err"); return; }
     const myVotes = getUserVotes(poll);
     const isVoted = myVotes.includes(optionId);
     if (!isVoted && myVotes.length >= poll.maxVotes) { notify(`У вас только ${poll.maxVotes} голос(а)`, "err"); return; }
@@ -6753,6 +6786,7 @@ function VotingPage({ polls, savePolls, currentUser, users, saveUsers, notify, c
       return { ...p, options: newOptions };
     });
     savePolls(updated);
+    if (!isVoted) notify("Голос принят ✓");
   };
 
   return (
@@ -6766,23 +6800,63 @@ function VotingPage({ polls, savePolls, currentUser, users, saveUsers, notify, c
           {active.map(poll => {
             const myVotes = getUserVotes(poll);
             const total = poll.options.reduce((s, o) => s + (o.votes || []).length, 0);
+            const votesLeft = poll.maxVotes - myVotes.length;
             return (
-              <div key={poll.id} style={{ background: "#fff", border: "1.5px solid var(--rd-gray-border)", borderRadius: "var(--rd-radius)", padding: "24px", marginBottom: "16px", boxShadow: "var(--rd-shadow)" }}>
-                <div style={{ fontWeight: 800, fontSize: "18px", marginBottom: "6px" }}>{poll.title}</div>
-                <div style={{ fontSize: "12px", color: "var(--rd-gray-text)", marginBottom: "4px" }}>📅 До {new Date(poll.endsAt).toLocaleString("ru-RU")}</div>
-                <div style={{ fontSize: "12px", color: "var(--rd-gray-text)", marginBottom: "16px" }}>Голосов: {myVotes.length}/{poll.maxVotes} · 💰 Приз: {poll.prize} 🪙 за победившие варианты</div>
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: "12px" }}>
+              <div key={poll.id} style={{ background: "#fff", border: "1.5px solid var(--rd-gray-border)", borderRadius: "var(--rd-radius)", padding: "24px", marginBottom: "20px", boxShadow: "var(--rd-shadow)" }}>
+                {/* Header */}
+                <div style={{ marginBottom: "16px" }}>
+                  <div style={{ fontWeight: 800, fontSize: "20px", marginBottom: "8px" }}>{poll.title}</div>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", alignItems: "center" }}>
+                    {/* Prize badge */}
+                    <div style={{ display: "inline-flex", alignItems: "center", gap: "6px", background: "linear-gradient(135deg, var(--rd-red-light), rgba(199,22,24,0.04))", border: "1.5px solid rgba(199,22,24,0.25)", borderRadius: "20px", padding: "6px 14px" }}>
+                      <span style={{ fontSize: "16px" }}>🪙</span>
+                      <span style={{ fontWeight: 900, fontSize: "18px", color: "var(--rd-red)" }}>{poll.prize}</span>
+                      <span style={{ fontSize: "12px", color: "var(--rd-red)", fontWeight: 600 }}>монет победителям</span>
+                    </div>
+                    {/* Votes badge */}
+                    <div style={{ display: "inline-flex", alignItems: "center", gap: "6px", background: votesLeft > 0 ? "rgba(34,197,94,0.08)" : "var(--rd-gray-bg)", border: `1.5px solid ${votesLeft > 0 ? "rgba(34,197,94,0.3)" : "var(--rd-gray-border)"}`, borderRadius: "20px", padding: "6px 14px" }}>
+                      <span style={{ fontSize: "16px" }}>🗳️</span>
+                      <span style={{ fontWeight: 800, fontSize: "16px", color: votesLeft > 0 ? "#16a34a" : "var(--rd-gray-text)" }}>{votesLeft}</span>
+                      <span style={{ fontSize: "12px", color: "var(--rd-gray-text)", fontWeight: 600 }}>из {poll.maxVotes} голосов доступно</span>
+                    </div>
+                    <div style={{ fontSize: "12px", color: "var(--rd-gray-text)", marginLeft: "auto" }}>📅 До {new Date(poll.endsAt).toLocaleString("ru-RU")}</div>
+                  </div>
+                </div>
+
+                {/* Options grid */}
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: "12px" }}>
                   {poll.options.map(opt => {
                     const isVoted = myVotes.includes(opt.id);
                     const voteCnt = (opt.votes || []).length;
                     const pct = total > 0 ? Math.round((voteCnt / total) * 100) : 0;
+                    const canVote = !isVoted && votesLeft > 0;
                     return (
-                      <div key={opt.id} onClick={() => vote(poll, opt.id)} style={{ border: `2px solid ${isVoted ? "var(--rd-red)" : "var(--rd-gray-border)"}`, borderRadius: "12px", padding: "14px", cursor: currentUser ? "pointer" : "default", background: isVoted ? "var(--rd-red-light)" : "#fff", transition: "all 0.2s" }}>
-                        {opt.image && <img src={opt.image} alt="" style={{ width: "100%", height: "100px", objectFit: "cover", borderRadius: "8px", marginBottom: "8px", display: "block" }} />}
-                        <div style={{ fontWeight: 700, fontSize: "14px", marginBottom: "6px" }}>{opt.text}</div>
-                        <div style={{ fontSize: "12px", color: "var(--rd-gray-text)" }}>{voteCnt} голосов</div>
-                        <div style={{ height: "4px", background: "#e5e7eb", borderRadius: "2px", marginTop: "6px" }}><div style={{ height: "100%", width: `${pct}%`, background: isVoted ? "var(--rd-red)" : "#94a3b8", borderRadius: "2px", transition: "width 0.4s" }} /></div>
-                        {isVoted && <div style={{ marginTop: "6px", fontSize: "11px", color: "var(--rd-red)", fontWeight: 700 }}>✓ Ваш голос</div>}
+                      <div key={opt.id} style={{ border: `2px solid ${isVoted ? "var(--rd-red)" : "var(--rd-gray-border)"}`, borderRadius: "14px", overflow: "hidden", background: isVoted ? "var(--rd-red-light)" : "#fff", transition: "all 0.2s", boxShadow: isVoted ? "0 0 0 3px rgba(199,22,24,0.1)" : "none" }}>
+                        {opt.image && <img src={opt.image} alt="" style={{ width: "100%", height: "110px", objectFit: "cover", display: "block" }} />}
+                        <div style={{ padding: "12px" }}>
+                          <div style={{ fontWeight: 700, fontSize: "14px", marginBottom: "8px" }}>{opt.text}</div>
+                          {/* Progress bar */}
+                          <div style={{ marginBottom: "10px" }}>
+                            <div style={{ display: "flex", justifyContent: "space-between", fontSize: "12px", color: "var(--rd-gray-text)", marginBottom: "4px" }}>
+                              <span>{voteCnt} голосов</span><span>{pct}%</span>
+                            </div>
+                            <div style={{ height: "6px", background: "#e5e7eb", borderRadius: "3px" }}>
+                              <div style={{ height: "100%", width: `${pct}%`, background: isVoted ? "var(--rd-red)" : "#94a3b8", borderRadius: "3px", transition: "width 0.4s" }} />
+                            </div>
+                          </div>
+                          {/* Vote button */}
+                          {isVoted ? (
+                            <button onClick={() => vote(poll, opt.id)} style={{ width: "100%", padding: "8px", background: "var(--rd-red)", color: "#fff", border: "none", borderRadius: "8px", fontWeight: 700, fontSize: "13px", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: "6px" }}>
+                              ✓ Отменить голос
+                            </button>
+                          ) : (
+                            <button onClick={() => vote(poll, opt.id)} disabled={!canVote} style={{ width: "100%", padding: "8px", background: canVote ? "var(--rd-dark)" : "#e5e7eb", color: canVote ? "#fff" : "#9ca3af", border: "none", borderRadius: "8px", fontWeight: 700, fontSize: "13px", cursor: canVote ? "pointer" : "not-allowed", display: "flex", alignItems: "center", justifyContent: "center", gap: "6px", transition: "all 0.2s" }}
+                              onMouseEnter={e => { if (canVote) e.currentTarget.style.background = "var(--rd-red)"; }}
+                              onMouseLeave={e => { if (canVote) e.currentTarget.style.background = "var(--rd-dark)"; }}>
+                              🗳️ Голосовать
+                            </button>
+                          )}
+                        </div>
                       </div>
                     );
                   })}
@@ -6802,7 +6876,7 @@ function VotingPage({ polls, savePolls, currentUser, users, saveUsers, notify, c
             return (
               <div key={poll.id} style={{ background: "#fff", border: "1.5px solid var(--rd-gray-border)", borderRadius: "var(--rd-radius)", padding: "24px", marginBottom: "16px", boxShadow: "var(--rd-shadow)" }}>
                 <div style={{ fontWeight: 800, fontSize: "18px", marginBottom: "6px" }}>{poll.title}</div>
-                <div style={{ fontSize: "12px", color: "var(--rd-gray-text)", marginBottom: "16px" }}>📅 Завершено {new Date(poll.endsAt).toLocaleString("ru-RU")}</div>
+                <div style={{ fontSize: "12px", color: "var(--rd-gray-text)", marginBottom: "12px" }}>📅 Завершено {new Date(poll.endsAt).toLocaleString("ru-RU")}</div>
                 {poll.winnersAwarded && (
                   <div style={{ padding: "10px 14px", background: "rgba(34,197,94,0.06)", border: "1px solid rgba(34,197,94,0.2)", borderRadius: "8px", fontSize: "13px", marginBottom: "14px" }}>
                     🏆 Награда выдана победителям: {(poll.awardedUsers || []).join(", ")} (+{poll.prizePerUser} 🪙)
@@ -6813,11 +6887,13 @@ function VotingPage({ polls, savePolls, currentUser, users, saveUsers, notify, c
                     const pct = total > 0 ? Math.round(((opt.votes || []).length / total) * 100) : 0;
                     const isWinner = idx < poll.winners;
                     return (
-                      <div key={opt.id} style={{ border: `2px solid ${isWinner ? "gold" : "var(--rd-gray-border)"}`, borderRadius: "12px", padding: "12px", background: isWinner ? "rgba(250,204,21,0.05)" : "#fff" }}>
-                        {opt.image && <img src={opt.image} alt="" style={{ width: "100%", height: "80px", objectFit: "cover", borderRadius: "8px", marginBottom: "6px", display: "block" }} />}
-                        <div style={{ fontWeight: 700, fontSize: "14px" }}>{isWinner ? "🥇 " : ""}{opt.text}</div>
-                        <div style={{ fontSize: "12px", color: "var(--rd-gray-text)", marginTop: "4px" }}>{(opt.votes || []).length} голосов ({pct}%)</div>
-                        <div style={{ height: "4px", background: "#e5e7eb", borderRadius: "2px", marginTop: "6px" }}><div style={{ height: "100%", width: `${pct}%`, background: isWinner ? "#eab308" : "#94a3b8", borderRadius: "2px" }} /></div>
+                      <div key={opt.id} style={{ border: `2px solid ${isWinner ? "gold" : "var(--rd-gray-border)"}`, borderRadius: "12px", overflow: "hidden", background: isWinner ? "rgba(250,204,21,0.05)" : "#fff" }}>
+                        {opt.image && <img src={opt.image} alt="" style={{ width: "100%", height: "80px", objectFit: "cover", display: "block" }} />}
+                        <div style={{ padding: "10px 12px" }}>
+                          <div style={{ fontWeight: 700, fontSize: "14px" }}>{isWinner ? "🥇 " : ""}{opt.text}</div>
+                          <div style={{ fontSize: "12px", color: "var(--rd-gray-text)", marginTop: "4px" }}>{(opt.votes || []).length} голосов ({pct}%)</div>
+                          <div style={{ height: "4px", background: "#e5e7eb", borderRadius: "2px", marginTop: "6px" }}><div style={{ height: "100%", width: `${pct}%`, background: isWinner ? "#eab308" : "#94a3b8", borderRadius: "2px" }} /></div>
+                        </div>
                       </div>
                     );
                   })}
