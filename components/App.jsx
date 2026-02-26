@@ -455,6 +455,7 @@ function App() {
   const markOrdersSeen = () => { setSeenOrdersCount(orders.length); storage.set('cm_seen_orders', String(orders.length)); };
   const [notifHistory, setNotifHistory] = useState(() => { try { const v = typeof localStorage!=='undefined' ? localStorage.getItem('_store_cm_notif_history') : null; return v ? JSON.parse(v) : []; } catch { return []; } });
   const [bellOpen, setBellOpen] = useState(false);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [notifUnread, setNotifUnread] = useState(() => { try { const v = typeof localStorage!=='undefined' ? localStorage.getItem('_store_cm_notif_unread') : null; return v ? parseInt(JSON.parse(v)) : 0; } catch { return 0; } });
   const pushNotif = (msg, type = "ok") => {
@@ -503,7 +504,9 @@ function App() {
       if (ts) setTaskSubmissions(ts);
       if (au) setAuctions(au);
       if (lt) setLotteries(lt);
+      else { storage.set("cm_lotteries", []); }
       if (pl) setPolls(pl);
+      else { storage.set("cm_polls", []); }
 
       if (fq && fq.length > 0) {
         setFaq(fq);
@@ -629,6 +632,8 @@ function App() {
       if ('cm_tasks'            in data) setTasks(data.cm_tasks);
       if ('cm_task_submissions' in data) setTaskSubmissions(data.cm_task_submissions);
       if ('cm_auctions'         in data) setAuctions(data.cm_auctions);
+      if ('cm_lotteries'        in data) setLotteries(data.cm_lotteries);
+      if ('cm_polls'            in data) setPolls(data.cm_polls);
       if (data.cm_appearance) {
         const ap = data.cm_appearance;
         if (ap.currency) _globalCurrency = { ...ap.currency };
@@ -761,8 +766,8 @@ function App() {
   const saveFaq = (fq) => { setFaq(fq); storage.set("cm_faq", fq); };
   const saveTasks = (tk) => { setTasks(tk); storage.set("cm_tasks", tk); };
   const saveAuctions = (au) => { setAuctions(au); storage.set("cm_auctions", au); };
-  const saveLotteries = (lt) => { setLotteries(lt); storage.set("cm_lotteries", lt); };
-  const savePolls = (pl) => { setPolls(pl); storage.set("cm_polls", pl); };
+  const saveLotteries = (lt) => { const data = lt || []; setLotteries(data); storage.set("cm_lotteries", data); };
+  const savePolls = (pl) => { const data = pl || []; setPolls(data); storage.set("cm_polls", data); };
   const saveTaskSubmissions = (ts) => { setTaskSubmissions(ts); storage.set("cm_task_submissions", ts); };
 
   const addToCart = (product) => {
@@ -876,10 +881,15 @@ function App() {
               <button className={`rd-nav-btn ${page === "shop" ? "active" : ""}`} onClick={() => setPage("shop")}>Магазин</button>
               <button className={`rd-nav-btn ${page === "auction" ? "active" : ""}`} onClick={() => setPage("auction")}>Аукцион</button>
               <button className={`rd-nav-btn ${page === "lottery" ? "active" : ""}`} onClick={() => setPage("lottery")}>Лотерея</button>
-              <button className={`rd-nav-btn ${page === "voting" ? "active" : ""}`} onClick={() => setPage("voting")}>Голосование</button>
+              <button className={`rd-nav-btn ${page === "voting" ? "active" : ""}`} onClick={() => setPage("voting")}>Голосования</button>
               <button className={`rd-nav-btn ${page === "tasks" ? "active" : ""}`} onClick={() => setPage("tasks")}>Задания</button>
-              <button className={`rd-nav-btn ${page === "faq" ? "active" : ""}`} onClick={() => setPage("faq")}>Вопросы и ответы</button>
             </nav>
+            {/* Mobile hamburger button */}
+            <button className="rd-burger" onClick={() => setMobileNavOpen(o => !o)} aria-label="Меню">
+              <span className={`rd-burger-line ${mobileNavOpen ? "open" : ""}`}></span>
+              <span className={`rd-burger-line ${mobileNavOpen ? "open" : ""}`}></span>
+              <span className={`rd-burger-line ${mobileNavOpen ? "open" : ""}`}></span>
+            </button>
             <div className="rd-header-right">
               {currentUser ? <>
                 <div className="balance-pill" onClick={() => setPage("history")} style={{cursor:"pointer"}} title="История операций"><CurrIcon /> {users[currentUser]?.balance || 0} {currName()}</div>
@@ -1010,7 +1020,22 @@ function App() {
         </div>
       </header>
 
-      {/* HERO BANNER */}
+      {/* Mobile nav dropdown */}
+      {mobileNavOpen && (
+        <div className="rd-mobile-nav" onClick={() => setMobileNavOpen(false)}>
+          {[
+            { p: "shop", label: "🛍️ Магазин" },
+            { p: "auction", label: "🔨 Аукцион" },
+            { p: "lottery", label: "🎰 Лотерея" },
+            { p: "voting", label: "🗳️ Голосования" },
+            { p: "tasks", label: "🎯 Задания" },
+          ].map(({ p, label }) => (
+            <button key={p} className={`rd-mobile-nav-btn${page === p ? " active" : ""}`} onClick={() => { setPage(p); setMobileNavOpen(false); }}>
+              {label}
+            </button>
+          ))}
+        </div>
+      )}
       {page === "shop" && (() => {
         const banner = appearance.banner || {};
         const hasBg = !!banner.image;
@@ -6618,6 +6643,21 @@ function LotteryPage({ lotteries, currentUser, currency }) {
 
 // ── VOTING ──────────────────────────────────────────────────────────────
 
+function VoteCountdown({ endsAt }) {
+  const [diff, setDiff] = React.useState(endsAt - Date.now());
+  React.useEffect(() => {
+    const t = setInterval(() => setDiff(endsAt - Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [endsAt]);
+  if (diff <= 0) return <span style={{ color: "var(--rd-red)", fontWeight: 700 }}>Завершается...</span>;
+  const d = Math.floor(diff / 86400000), h = Math.floor((diff % 86400000) / 3600000), m = Math.floor((diff % 3600000) / 60000), s = Math.floor((diff % 60000) / 1000);
+  return (
+    <span style={{ fontWeight: 800, fontSize: "22px", color: "var(--rd-red)", fontVariantNumeric: "tabular-nums" }}>
+      {d > 0 ? `${d}д ` : ""}{String(h).padStart(2,"0")}:{String(m).padStart(2,"0")}:{String(s).padStart(2,"0")}
+    </span>
+  );
+}
+
 function VotingAdminTab({ polls, savePolls, notify, users, saveUsers }) {
   const list = polls || [];
   const emptyForm = { title: "", options: [{ text: "", image: "" }, { text: "", image: "" }], maxVotes: 1, winners: 1, prize: 100, endsAt: "" };
@@ -6625,10 +6665,7 @@ function VotingAdminTab({ polls, savePolls, notify, users, saveUsers }) {
   const [editingId, setEditingId] = useState(null);
   const [editForm, setEditForm] = useState(null);
 
-  const addOption = (setter) => setter(f => ({ ...f, options: [...f.options, { text: "", image: "" }] }));
-  const removeOption = (setter, idx) => setter(f => ({ ...f, options: f.options.filter((_, i) => i !== idx) }));
-  const setOptionText = (setter, idx, val) => setter(f => { const opts = [...f.options]; opts[idx] = { ...opts[idx], text: val }; return { ...f, options: opts }; });
-  const setOptionImage = async (setter, idx, file) => {
+  const setOptImg = async (setter, idx, file) => {
     if (!file) return;
     const r = new FileReader();
     r.onload = async ev => { const c = await compressImage(ev.target.result, 800, 600, 0.82); setter(f => { const opts = [...f.options]; opts[idx] = { ...opts[idx], image: c }; return { ...f, options: opts }; }); };
@@ -6645,12 +6682,17 @@ function VotingAdminTab({ polls, savePolls, notify, users, saveUsers }) {
     notify("Голосование создано ✓");
   };
 
+  const saveEdit = () => {
+    if (!editForm || !editForm.title.trim()) { notify("Введите заголовок", "err"); return; }
+    const updated = list.map(p => p.id === editingId ? { ...p, title: editForm.title, options: editForm.options.map((o, i) => ({ ...o, id: i, votes: p.options[i]?.votes || [] })), maxVotes: parseInt(editForm.maxVotes), winners: parseInt(editForm.winners), prize: parseInt(editForm.prize), endsAt: new Date(editForm.endsAt).getTime() } : p);
+    savePolls(updated); setEditingId(null); setEditForm(null); notify("Голосование обновлено ✓");
+  };
+
   const deletePoll = (id) => { savePolls(list.filter(p => p.id !== id)); notify("Голосование удалено"); };
 
   const awardWinners = (poll) => {
     const sorted = [...poll.options].sort((a, b) => (b.votes || []).length - (a.votes || []).length);
-    const topVotes = sorted[0]?.votes?.length || 0;
-    if (topVotes === 0) { notify("Никто не проголосовал", "err"); return; }
+    if (!sorted[0]?.votes?.length) { notify("Никто не проголосовал", "err"); return; }
     const winnerOptions = sorted.slice(0, poll.winners);
     const allWinners = winnerOptions.flatMap(o => o.votes || []);
     const unique = [...new Set(allWinners)];
@@ -6660,69 +6702,87 @@ function VotingAdminTab({ polls, savePolls, notify, users, saveUsers }) {
       unique.forEach(u => { if (newUsers[u]) newUsers[u] = { ...newUsers[u], balance: (newUsers[u].balance || 0) + prizePerUser }; });
       saveUsers(newUsers);
     }
-    const updated = list.map(p => p.id === poll.id ? { ...p, status: "ended", winnersAwarded: true, awardedUsers: unique, prizePerUser } : p);
-    savePolls(updated);
+    savePolls(list.map(p => p.id === poll.id ? { ...p, status: "ended", winnersAwarded: true, awardedUsers: unique, prizePerUser } : p));
     notify(`Монеты начислены ${unique.length} победителям (+${prizePerUser} 🪙)`);
   };
 
   const now = Date.now();
-  const inputStyle = { width: "100%", padding: "10px 14px", border: "1.5px solid var(--rd-gray-border)", borderRadius: "10px", fontSize: "14px", boxSizing: "border-box", background: "#fff" };
-  const labelStyle = { fontSize: "12px", fontWeight: 700, color: "var(--rd-gray-text)", marginBottom: "6px", display: "block" };
+  const iS = { width: "100%", padding: "10px 14px", border: "1.5px solid var(--rd-gray-border)", borderRadius: "10px", fontSize: "14px", boxSizing: "border-box", background: "#fff" };
+  const lS = { fontSize: "12px", fontWeight: 700, color: "var(--rd-gray-text)", marginBottom: "6px", display: "block" };
 
-  const PollForm = ({ f, setter, onSave, onCancel, saveLabel }) => (
-    <div style={{ background: "var(--rd-gray-bg)", borderRadius: "var(--rd-radius-sm)", padding: "20px", marginBottom: "24px", border: "1.5px solid var(--rd-gray-border)" }}>
+  const Fields = ({ f, onUpdate }) => (
+    <div style={{ background: "var(--rd-gray-bg)", borderRadius: "var(--rd-radius-sm)", padding: "20px", marginBottom: "16px", border: "1.5px solid var(--rd-gray-border)" }}>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
-        <div style={{ gridColumn: "1/-1" }}><label style={labelStyle}>Заголовок голосования</label><input style={inputStyle} value={f.title} onChange={e => setter(s => ({ ...s, title: e.target.value }))} placeholder="Лучший проект квартала" /></div>
-        <div><label style={labelStyle}>Голосов у пользователя</label><input type="number" min="1" style={inputStyle} value={f.maxVotes} onChange={e => setter(s => ({ ...s, maxVotes: e.target.value }))} /></div>
-        <div><label style={labelStyle}>Кол-во победителей (вариантов)</label><input type="number" min="1" style={inputStyle} value={f.winners} onChange={e => setter(s => ({ ...s, winners: e.target.value }))} /></div>
-        <div><label style={labelStyle}>Монет победителям (сумма)</label><input type="number" min="0" style={inputStyle} value={f.prize} onChange={e => setter(s => ({ ...s, prize: e.target.value }))} /></div>
-        <div><label style={labelStyle}>Дата завершения</label><input type="datetime-local" style={inputStyle} value={f.endsAt} onChange={e => setter(s => ({ ...s, endsAt: e.target.value }))} /></div>
         <div style={{ gridColumn: "1/-1" }}>
-          <label style={labelStyle}>Варианты для голосования</label>
+          <label style={lS}>Заголовок голосования</label>
+          <input style={iS} value={f.title} onChange={e => onUpdate({ title: e.target.value })} placeholder="Лучший проект квартала" />
+        </div>
+        <div>
+          <label style={lS}>Голосов у пользователя</label>
+          <input type="number" min="1" style={iS} value={f.maxVotes} onChange={e => onUpdate({ maxVotes: e.target.value })} />
+        </div>
+        <div>
+          <label style={lS}>Победителей (вариантов)</label>
+          <input type="number" min="1" style={iS} value={f.winners} onChange={e => onUpdate({ winners: e.target.value })} />
+        </div>
+        <div>
+          <label style={lS}>Монет победителям</label>
+          <input type="number" min="0" style={iS} value={f.prize} onChange={e => onUpdate({ prize: e.target.value })} />
+        </div>
+        <div>
+          <label style={lS}>Дата завершения</label>
+          <input type="datetime-local" style={iS} value={f.endsAt} onChange={e => onUpdate({ endsAt: e.target.value })} />
+        </div>
+        <div style={{ gridColumn: "1/-1" }}>
+          <label style={lS}>Варианты</label>
           {f.options.map((opt, idx) => (
             <div key={idx} style={{ display: "flex", gap: "8px", alignItems: "center", marginBottom: "8px" }}>
-              <input style={{ ...inputStyle, flex: 1 }} value={opt.text} onChange={e => setOptionText(setter, idx, e.target.value)} placeholder={`Вариант ${idx + 1}`} />
+              <input style={{ ...iS, flex: 1 }} value={opt.text} onChange={e => { const opts = [...f.options]; opts[idx] = { ...opts[idx], text: e.target.value }; onUpdate({ options: opts }); }} placeholder={`Вариант ${idx + 1}`} />
               {opt.image ? (
-                <div style={{ position: "relative" }}>
+                <div style={{ position: "relative", flexShrink: 0 }}>
                   <img src={opt.image} alt="" style={{ width: "44px", height: "44px", objectFit: "cover", borderRadius: "8px" }} />
-                  <button onClick={() => setter(s => { const opts = [...s.options]; opts[idx] = { ...opts[idx], image: "" }; return { ...s, options: opts }; })} style={{ position: "absolute", top: "-6px", right: "-6px", background: "var(--rd-red)", border: "none", borderRadius: "50%", width: "18px", height: "18px", color: "#fff", cursor: "pointer", fontSize: "11px", lineHeight: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>✕</button>
+                  <button onClick={() => { const opts = [...f.options]; opts[idx] = { ...opts[idx], image: "" }; onUpdate({ options: opts }); }} style={{ position: "absolute", top: "-6px", right: "-6px", background: "var(--rd-red)", border: "none", borderRadius: "50%", width: "18px", height: "18px", color: "#fff", cursor: "pointer", fontSize: "11px", display: "flex", alignItems: "center", justifyContent: "center" }}>✕</button>
                 </div>
               ) : (
                 <label style={{ width: "44px", height: "44px", border: "1.5px dashed var(--rd-gray-border)", borderRadius: "8px", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "16px", flexShrink: 0 }}>
-                  🖼️<input type="file" accept="image/*" style={{ display: "none" }} onChange={e => { setOptionImage(setter, idx, e.target.files[0]); e.target.value = ""; }} />
+                  🖼️<input type="file" accept="image/*" style={{ display: "none" }} onChange={e => { setOptImg(f === form ? setForm : setEditForm, idx, e.target.files[0]); e.target.value = ""; }} />
                 </label>
               )}
-              {f.options.length > 2 && <button onClick={() => removeOption(setter, idx)} style={{ background: "#fff0f0", border: "1.5px solid #fecaca", borderRadius: "8px", padding: "6px 10px", cursor: "pointer", color: "var(--rd-red)", fontWeight: 700, flexShrink: 0 }}>✕</button>}
+              {f.options.length > 2 && <button onClick={() => onUpdate({ options: f.options.filter((_, i) => i !== idx) })} style={{ background: "#fff0f0", border: "1.5px solid #fecaca", borderRadius: "8px", padding: "6px 10px", cursor: "pointer", color: "var(--rd-red)", fontWeight: 700, flexShrink: 0 }}>✕</button>}
             </div>
           ))}
-          <button onClick={() => addOption(setter)} style={{ background: "var(--rd-gray-bg)", border: "1.5px dashed var(--rd-gray-border)", borderRadius: "8px", padding: "8px 16px", cursor: "pointer", fontSize: "13px", fontWeight: 700, width: "100%" }}>+ Добавить вариант</button>
+          <button onClick={() => onUpdate({ options: [...f.options, { text: "", image: "" }] })} style={{ background: "var(--rd-gray-bg)", border: "1.5px dashed var(--rd-gray-border)", borderRadius: "8px", padding: "8px 16px", cursor: "pointer", fontSize: "13px", fontWeight: 700, width: "100%" }}>+ Добавить вариант</button>
         </div>
-      </div>
-      <div style={{ display: "flex", gap: "8px", marginTop: "16px" }}>
-        <button onClick={onSave} style={{ background: "var(--rd-red)", color: "#fff", border: "none", borderRadius: "10px", padding: "12px 24px", fontWeight: 700, cursor: "pointer", fontSize: "14px" }}>{saveLabel}</button>
-        {onCancel && <button onClick={onCancel} style={{ background: "var(--rd-gray-bg)", border: "1.5px solid var(--rd-gray-border)", borderRadius: "10px", padding: "12px 24px", fontWeight: 700, cursor: "pointer", fontSize: "14px" }}>Отмена</button>}
       </div>
     </div>
   );
 
   return (
     <div>
-      <PollForm f={form} setter={setForm} onSave={createPoll} saveLabel="🗳️ Создать голосование" />
+      <div style={{ fontWeight: 700, fontSize: "15px", marginBottom: "16px" }}>➕ Создать голосование</div>
+      <Fields f={form} onUpdate={upd => setForm(f => ({ ...f, ...upd }))} />
+      <button onClick={createPoll} style={{ marginBottom: "28px", background: "var(--rd-red)", color: "#fff", border: "none", borderRadius: "10px", padding: "12px 24px", fontWeight: 700, cursor: "pointer", fontSize: "14px" }}>🗳️ Создать голосование</button>
 
       {list.length === 0 && <div style={{ color: "var(--rd-gray-text)", textAlign: "center", padding: "20px", fontSize: "14px" }}>Голосований пока нет</div>}
       {list.map(poll => (
         <div key={poll.id} style={{ border: "1.5px solid var(--rd-gray-border)", borderRadius: "var(--rd-radius-sm)", padding: "16px", marginBottom: "12px", background: "#fff" }}>
-          {editingId === poll.id ? (
-            <PollForm f={editForm} setter={setEditForm} onSave={() => { const updated = list.map(p => p.id === poll.id ? { ...p, title: editForm.title, options: editForm.options.map((o, i) => ({ ...o, id: i, votes: poll.options[i]?.votes || [] })), maxVotes: parseInt(editForm.maxVotes), winners: parseInt(editForm.winners), prize: parseInt(editForm.prize), endsAt: new Date(editForm.endsAt).getTime() } : p); savePolls(updated); setEditingId(null); notify("Голосование обновлено ✓"); }} onCancel={() => setEditingId(null)} saveLabel="Сохранить" />
+          {editingId === poll.id && editForm ? (
+            <div>
+              <Fields f={editForm} onUpdate={upd => setEditForm(f => ({ ...f, ...upd }))} />
+              <div style={{ display: "flex", gap: "8px" }}>
+                <button onClick={saveEdit} style={{ background: "var(--rd-red)", color: "#fff", border: "none", borderRadius: "8px", padding: "10px 20px", fontWeight: 700, cursor: "pointer" }}>Сохранить</button>
+                <button onClick={() => { setEditingId(null); setEditForm(null); }} style={{ background: "var(--rd-gray-bg)", border: "1.5px solid var(--rd-gray-border)", borderRadius: "8px", padding: "10px 20px", fontWeight: 700, cursor: "pointer" }}>Отмена</button>
+              </div>
+            </div>
           ) : (
             <div>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-                <div>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "10px" }}>
+                <div style={{ flex: 1 }}>
                   <div style={{ fontWeight: 700, fontSize: "15px" }}>{poll.title}</div>
                   <div style={{ fontSize: "12px", color: "var(--rd-gray-text)", marginTop: "4px" }}>📅 {new Date(poll.endsAt).toLocaleString("ru-RU")} · {poll.maxVotes} голос(а) · 🏆 {poll.winners} победителей · 💰 {poll.prize} монет</div>
                   <div style={{ fontSize: "12px", color: poll.status === "active" ? "#22c55e" : "var(--rd-gray-text)", fontWeight: 700, marginTop: "4px" }}>{poll.status === "active" ? "✅ Активно" : "🏁 Завершено"}</div>
                 </div>
-                <div style={{ display: "flex", gap: "6px" }}>
+                <div style={{ display: "flex", gap: "6px", flexShrink: 0 }}>
                   {poll.status === "active" && now > poll.endsAt && !poll.winnersAwarded && (
                     <button onClick={() => awardWinners(poll)} style={{ background: "var(--rd-red)", color: "#fff", border: "none", borderRadius: "8px", padding: "8px 14px", fontWeight: 700, cursor: "pointer", fontSize: "13px" }}>🏆 Наградить</button>
                   )}
@@ -6819,7 +6879,10 @@ function VotingPage({ polls, savePolls, currentUser, users, saveUsers, notify, c
                       <span style={{ fontWeight: 800, fontSize: "16px", color: votesLeft > 0 ? "#16a34a" : "var(--rd-gray-text)" }}>{votesLeft}</span>
                       <span style={{ fontSize: "12px", color: "var(--rd-gray-text)", fontWeight: 600 }}>из {poll.maxVotes} голосов доступно</span>
                     </div>
-                    <div style={{ fontSize: "12px", color: "var(--rd-gray-text)", marginLeft: "auto" }}>📅 До {new Date(poll.endsAt).toLocaleString("ru-RU")}</div>
+                    <div style={{ display: "inline-flex", alignItems: "center", gap: "8px", background: "var(--rd-gray-bg)", border: "1px solid var(--rd-gray-border)", borderRadius: "10px", padding: "6px 12px", marginLeft: "auto" }}>
+                      <span style={{ fontSize: "11px", color: "var(--rd-gray-text)", fontWeight: 600 }}>⏱ До завершения:</span>
+                      <VoteCountdown endsAt={poll.endsAt} />
+                    </div>
                   </div>
                 </div>
 
