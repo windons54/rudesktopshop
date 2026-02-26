@@ -2711,10 +2711,11 @@ const EMOJIS = ["🛍️","👕","🧥","🧢","👟","🎒","☕","🍵","📓"
 function WorkdaysTab({ users, currentUser, notify, saveUsers, transfers, saveTransfers, appearance, saveAppearance }) {
   const workdaysCfg = (appearance.workdays) || {};
   const [coinsPerDay, setCoinsPerDay] = useState(String(workdaysCfg.coinsPerDay || 10));
-  const [globalMode, setGlobalMode] = useState(workdaysCfg.globalMode || "employment"); // "employment"|"activation"|"custom"
+  const [globalMode, setGlobalMode] = useState(workdaysCfg.globalMode || "employment");
   const [globalCustomDate, setGlobalCustomDate] = useState(workdaysCfg.globalCustomDate || "");
   const [userOverrides, setUserOverrides] = useState(workdaysCfg.userOverrides || {});
   const [filterStr, setFilterStr] = useState("");
+  const [openUsers, setOpenUsers] = useState({});
 
   const allUsers = Object.entries(users).filter(([u]) => u !== "admin" && u !== currentUser);
   const filtered = allUsers.filter(([u]) => u.toLowerCase().includes(filterStr.toLowerCase()));
@@ -2728,10 +2729,12 @@ function WorkdaysTab({ users, currentUser, notify, saveUsers, transfers, saveTra
   };
 
   const getUserMode = (u) => userOverrides[u]?.mode || null;
+  const getEffectiveMode = (u) => userOverrides[u]?.mode || globalMode;
   const getUserCustomDate = (u) => userOverrides[u]?.customDate || "";
   const setUserMode = (u, mode) => setUserOverrides(prev => ({ ...prev, [u]: { ...(prev[u]||{}), mode } }));
   const setUserCustomDate = (u, d) => setUserOverrides(prev => ({ ...prev, [u]: { ...(prev[u]||{}), customDate: d } }));
   const clearUserOverride = (u) => setUserOverrides(prev => { const n={...prev}; delete n[u]; return n; });
+  const toggleUserOpen = (u) => setOpenUsers(prev => ({ ...prev, [u]: !prev[u] }));
 
   const getStartDate = (u, ud) => {
     const override = userOverrides[u];
@@ -2766,20 +2769,19 @@ function WorkdaysTab({ users, currentUser, notify, saveUsers, transfers, saveTra
       if (days === null || days <= 0) return;
       const amount = coins * days;
       updated[u] = { ...updated[u], balance: (updated[u].balance || 0) + amount };
-      newTransfers.push({ id: Date.now() + Math.random(), from: currentUser, to: u, amount, comment: `Трудодни: ${days} дн. × ${coins} монет`, date: now });
+      newTransfers.push({ id: Date.now() + Math.random(), from: currentUser, to: u, amount, comment: "Трудодни: " + days + " дн. × " + coins + " монет", date: now });
       count++;
     });
     if (count === 0) { notify("Нет пользователей для начисления (не указаны даты)", "err"); return; }
     saveUsers(updated);
     if (saveTransfers) saveTransfers(newTransfers);
-    notify(`Трудодни начислены ${count} пользователям ✓`);
+    notify("Трудодни начислены " + count + " пользователям ✓");
   };
 
   const modeLabel = { employment: "от даты трудоустройства", activation: "от даты активации", custom: "от указанной даты" };
 
   return (
     <div style={{maxWidth:"800px"}}>
-      {/* Settings card */}
       <div style={{background:"#fff",border:"1.5px solid var(--rd-gray-border)",borderRadius:"var(--rd-radius)",padding:"28px",boxShadow:"var(--rd-shadow-md)",marginBottom:"20px"}}>
         <div style={{fontSize:"11px",fontWeight:700,textTransform:"uppercase",letterSpacing:"0.07em",color:"var(--rd-gray-text)",marginBottom:"20px",paddingBottom:"10px",borderBottom:"1px solid var(--rd-gray-border)"}}>⚙️ Параметры начисления</div>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"20px",marginBottom:"20px"}}>
@@ -2788,13 +2790,13 @@ function WorkdaysTab({ users, currentUser, notify, saveUsers, transfers, saveTra
             <div style={{position:"relative"}}>
               <input className="form-input" type="number" min="0" step="0.5" placeholder="10" value={coinsPerDay}
                 onChange={e => setCoinsPerDay(e.target.value)}
-                style={{paddingRight:"64px",fontSize:"20px",fontWeight:700}} />
+                style={{paddingRight:"96px",fontSize:"20px",fontWeight:700}} />
               <span style={{position:"absolute",right:"14px",top:"50%",transform:"translateY(-50%)",fontSize:"12px",fontWeight:700,color:"var(--rd-gray-text)"}}>мон./день</span>
             </div>
             <div style={{display:"flex",gap:"6px",marginTop:"8px",flexWrap:"wrap"}}>
               {[1,5,10,25,50].map(v => (
                 <button key={v} onClick={() => setCoinsPerDay(String(v))}
-                  style={{padding:"4px 10px",borderRadius:"20px",border:"1.5px solid var(--rd-gray-border)",background:coinsPerDay==v?"var(--rd-red)":"#fff",color:coinsPerDay==v?"#fff":"var(--rd-gray-text)",fontSize:"12px",fontWeight:700,cursor:"pointer"}}>
+                  style={{padding:"4px 10px",borderRadius:"20px",border:"1.5px solid var(--rd-gray-border)",background:String(coinsPerDay)===String(v)?"var(--rd-red)":"#fff",color:String(coinsPerDay)===String(v)?"#fff":"var(--rd-gray-text)",fontSize:"12px",fontWeight:700,cursor:"pointer"}}>
                   {v}
                 </button>
               ))}
@@ -2804,7 +2806,7 @@ function WorkdaysTab({ users, currentUser, notify, saveUsers, transfers, saveTra
             <div style={{fontSize:"12px",fontWeight:700,textTransform:"uppercase",letterSpacing:"0.05em",color:"var(--rd-gray-text)",marginBottom:"6px"}}>Способ начисления (по умолчанию)</div>
             <div style={{display:"flex",flexDirection:"column",gap:"8px"}}>
               {[["employment","💼 От даты трудоустройства"],["activation","✅ От даты активации"],["custom","📅 От указанной даты"]].map(([v,l]) => (
-                <label key={v} style={{display:"flex",alignItems:"center",gap:"10px",padding:"10px 14px",border:`1.5px solid ${globalMode===v?"var(--rd-red)":"var(--rd-gray-border)"}`,borderRadius:"10px",background:globalMode===v?"var(--rd-red-light)":"#fff",cursor:"pointer",transition:"all 0.12s"}}>
+                <label key={v} style={{display:"flex",alignItems:"center",gap:"10px",padding:"10px 14px",border:"1.5px solid " + (globalMode===v?"var(--rd-red)":"var(--rd-gray-border)"),borderRadius:"10px",background:globalMode===v?"var(--rd-red-light)":"#fff",cursor:"pointer",transition:"all 0.12s"}}>
                   <input type="radio" checked={globalMode===v} onChange={()=>setGlobalMode(v)} style={{accentColor:"var(--rd-red)"}} />
                   <span style={{fontSize:"13px",fontWeight:globalMode===v?700:400,color:globalMode===v?"var(--rd-red)":"var(--rd-dark)"}}>{l}</span>
                 </label>
@@ -2823,7 +2825,6 @@ function WorkdaysTab({ users, currentUser, notify, saveUsers, transfers, saveTra
         </div>
       </div>
 
-      {/* Users list with overrides */}
       <div style={{background:"#fff",border:"1.5px solid var(--rd-gray-border)",borderRadius:"var(--rd-radius)",padding:"28px",boxShadow:"var(--rd-shadow-md)",marginBottom:"20px"}}>
         <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:"16px",paddingBottom:"10px",borderBottom:"1px solid var(--rd-gray-border)"}}>
           <div style={{fontSize:"11px",fontWeight:700,textTransform:"uppercase",letterSpacing:"0.07em",color:"var(--rd-gray-text)"}}>
@@ -2837,12 +2838,13 @@ function WorkdaysTab({ users, currentUser, notify, saveUsers, transfers, saveTra
             ? <div style={{padding:"24px",textAlign:"center",color:"var(--rd-gray-text)"}}>Пользователи не найдены</div>
             : filtered.map(([u, ud]) => {
                 const override = userOverrides[u];
+                const isOpen = !!openUsers[u];
                 const days = calcDays(u, ud);
-                const effectiveMode = override?.mode || globalMode;
+                const effectiveMode = getEffectiveMode(u);
                 const coins = Number(coinsPerDay) || 0;
                 return (
-                  <div key={u} style={{border:"1.5px solid var(--rd-gray-border)",borderRadius:"12px",padding:"14px 16px",background:override?"rgba(199,22,24,0.03)":"#fff",borderColor:override?"rgba(199,22,24,0.3)":"var(--rd-gray-border)"}}>
-                    <div style={{display:"flex",alignItems:"center",gap:"12px",marginBottom:override?"10px":"0"}}>
+                  <div key={u} style={{border:"1.5px solid " + (override?"rgba(199,22,24,0.3)":"var(--rd-gray-border)"),borderRadius:"12px",padding:"14px 16px",background:override?"rgba(199,22,24,0.03)":"#fff"}}>
+                    <div style={{display:"flex",alignItems:"center",gap:"12px"}}>
                       {ud.avatar
                         ? <img src={ud.avatar} style={{width:"36px",height:"36px",borderRadius:"50%",objectFit:"cover",flexShrink:0}} alt="" />
                         : <div style={{width:"36px",height:"36px",borderRadius:"50%",background:"var(--rd-red-light)",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:800,fontSize:"14px",color:"var(--rd-red)",flexShrink:0}}>{u[0].toUpperCase()}</div>
@@ -2850,23 +2852,29 @@ function WorkdaysTab({ users, currentUser, notify, saveUsers, transfers, saveTra
                       <div style={{flex:1,minWidth:0}}>
                         <div style={{fontWeight:700,fontSize:"14px",color:"var(--rd-dark)"}}>{u}</div>
                         <div style={{fontSize:"12px",color:"var(--rd-gray-text)"}}>
-                          {override ? <span style={{color:"var(--rd-red)",fontWeight:600}}>⚡ Индивид.: {modeLabel[effectiveMode]}</span> : <span>По умолчанию: {modeLabel[effectiveMode]}</span>}
+                          {override
+                            ? <span style={{color:"var(--rd-red)",fontWeight:600}}>⚡ Индивид.: {modeLabel[effectiveMode]}</span>
+                            : <span>По умолчанию: {modeLabel[effectiveMode]}</span>
+                          }
                           {days !== null && <span style={{marginLeft:"8px",fontWeight:700,color:"var(--rd-green)"}}>· {days} дн. · +{days*coins} мон.</span>}
                           {days === null && <span style={{marginLeft:"8px",color:"#f59e0b",fontWeight:600}}>· дата не задана</span>}
                         </div>
                       </div>
                       <div style={{display:"flex",gap:"6px",flexShrink:0}}>
-                        {override && <button onClick={()=>clearUserOverride(u)} className="btn btn-ghost btn-sm" style={{fontSize:"11px",color:"var(--rd-red)"}}>✕ Сбросить</button>}
-                        <button onClick={()=>setUserOverrides(prev=>({...prev,[u]:{...(prev[u]||{}),mode:override?undefined:globalMode,_open:!(prev[u]?._open)}}))}
-                          className="btn btn-ghost btn-sm" style={{fontSize:"11px"}}>{override?._open?"Скрыть":"⚙️ Настроить":"⚙️ Настроить"}</button>
+                        {override && (
+                          <button onClick={()=>clearUserOverride(u)} className="btn btn-ghost btn-sm" style={{fontSize:"11px",color:"var(--rd-red)"}}>✕ Сбросить</button>
+                        )}
+                        <button onClick={()=>toggleUserOpen(u)} className="btn btn-ghost btn-sm" style={{fontSize:"11px"}}>
+                          {isOpen ? "Скрыть" : "⚙️ Настроить"}
+                        </button>
                       </div>
                     </div>
-                    {userOverrides[u]?._open && (
-                      <div style={{paddingTop:"10px",borderTop:"1px solid var(--rd-gray-border)",marginTop:"4px",display:"flex",flexDirection:"column",gap:"8px"}}>
+                    {isOpen && (
+                      <div style={{paddingTop:"10px",borderTop:"1px solid var(--rd-gray-border)",marginTop:"10px",display:"flex",flexDirection:"column",gap:"8px"}}>
                         <div style={{fontSize:"12px",fontWeight:700,color:"var(--rd-gray-text)",textTransform:"uppercase",letterSpacing:"0.05em"}}>Способ начисления для {u}</div>
                         <div style={{display:"flex",gap:"8px",flexWrap:"wrap"}}>
                           {[["employment","💼 Трудоустройство"],["activation","✅ Активация"],["custom","📅 Своя дата"]].map(([v,l]) => (
-                            <label key={v} style={{display:"inline-flex",alignItems:"center",gap:"6px",padding:"6px 12px",border:`1.5px solid ${effectiveMode===v?"var(--rd-red)":"var(--rd-gray-border)"}`,borderRadius:"8px",background:effectiveMode===v?"var(--rd-red-light)":"#fff",cursor:"pointer",fontSize:"12px",fontWeight:effectiveMode===v?700:400}}>
+                            <label key={v} style={{display:"inline-flex",alignItems:"center",gap:"6px",padding:"6px 12px",border:"1.5px solid " + (effectiveMode===v?"var(--rd-red)":"var(--rd-gray-border)"),borderRadius:"8px",background:effectiveMode===v?"var(--rd-red-light)":"#fff",cursor:"pointer",fontSize:"12px",fontWeight:effectiveMode===v?700:400}}>
                               <input type="radio" checked={effectiveMode===v} onChange={()=>setUserMode(u,v)} style={{accentColor:"var(--rd-red)"}} />
                               {l}
                             </label>
@@ -2879,7 +2887,7 @@ function WorkdaysTab({ users, currentUser, notify, saveUsers, transfers, saveTra
                           </div>
                         )}
                         {effectiveMode==="employment" && !ud.employmentDate && (
-                          <div style={{fontSize:"12px",color:"#f59e0b",fontWeight:600}}>⚠️ Дата трудоустройства не задана в профиле</div>
+                          <div style={{fontSize:"12px",color:"#f59e0b",fontWeight:600}}>⚠️ Дата трудоустройства не задана в профиле пользователя</div>
                         )}
                         {effectiveMode==="activation" && !ud.activationDate && !ud.createdAt && (
                           <div style={{fontSize:"12px",color:"#f59e0b",fontWeight:600}}>⚠️ Дата активации не задана</div>
@@ -2893,7 +2901,6 @@ function WorkdaysTab({ users, currentUser, notify, saveUsers, transfers, saveTra
         </div>
       </div>
 
-      {/* Accrue button */}
       <div style={{background:"#fff",border:"1.5px solid var(--rd-gray-border)",borderRadius:"var(--rd-radius)",padding:"20px 28px",boxShadow:"var(--rd-shadow-md)",display:"flex",alignItems:"center",justifyContent:"space-between",gap:"16px"}}>
         <div>
           <div style={{fontWeight:700,fontSize:"15px",color:"var(--rd-dark)",marginBottom:"2px"}}>Начислить трудодни вручную</div>
