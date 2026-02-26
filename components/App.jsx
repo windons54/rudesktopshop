@@ -5610,9 +5610,22 @@ function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbC
                   <div className="settings-card">
                     <div className="settings-section-title">🔍 Диагностика соединения</div>
                     <div style={{fontSize:"13px",color:"var(--rd-gray-text)",marginBottom:"10px"}}>Проверяет что сервер реально использует PostgreSQL — видит ли он конфиг, подключается ли к БД.</div>
+                    <div style={{display:"flex",gap:"10px",flexWrap:"wrap"}}>
                     <button className="btn" onClick={runDiag} disabled={debugLoading} style={{background:"#7c3aed",color:"#fff",fontWeight:700,border:"none"}}>
                       {debugLoading ? "⏳ Диагностика…" : "🔍 Запустить диагностику"}
                     </button>
+                    <button className="btn" onClick={async () => {
+                      if (!confirm("Перенести данные из store.json в PostgreSQL?\n\nЭто перезапишет данные в PG текущими данными из JSON-файла.")) return;
+                      try {
+                        const r = await fetch('/api/store', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ action:'migrate' }) });
+                        const d = await r.json();
+                        if (d.ok) { notify("✅ Мигрировано " + d.migrated + " ключей в PostgreSQL", "ok"); runDiag(); }
+                        else notify("Ошибка миграции: " + d.error, "err");
+                      } catch(e) { notify("Ошибка: " + e.message, "err"); }
+                    }} style={{background:"#0369a1",color:"#fff",fontWeight:700,border:"none"}}>
+                      📤 Перенести JSON → PG
+                    </button>
+                    </div>
                     {debugInfo && (
                       <div style={{marginTop:"12px",background:"#0f172a",color:"#e2e8f0",borderRadius:"10px",padding:"14px 16px",fontSize:"12px",fontFamily:"monospace",lineHeight:1.8,overflowX:"auto"}}>
                         <div style={{color:"#94a3b8",marginBottom:"8px",fontWeight:700}}>── РЕЗУЛЬТАТ ──</div>

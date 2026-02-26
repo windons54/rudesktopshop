@@ -1,18 +1,21 @@
 // pages/api/store.js
-// Слой хранения данных через Prisma (PostgreSQL) с fallback на JSON-файл.
+// Слой хранения данных: PostgreSQL (через pg Pool + pg-config.json) с fallback на JSON-файл.
 //
-// Porядок подключения:
-//   1. DATABASE_URL (env) → Prisma автоматически использует его
-//   2. Файл data/store.json — только локальная разработка без БД
+// Порядок подключения к PostgreSQL:
+//   1. DATABASE_URL (env)
+//   2. PG_HOST (env)
+//   3. data/pg-config.json (сохранённый через UI)
+// Если ни один не настроен — fallback на data/store.json
 
 import fs from 'fs';
 import path from 'path';
 
-const DATA_DIR   = path.join(process.cwd(), 'data');
-const STORE_FILE = path.join(DATA_DIR, 'store.json');
-const PG_CFG_KEY = '__pg_config__';
+const DATA_DIR    = path.join(process.cwd(), 'data');
+const STORE_FILE  = path.join(DATA_DIR, 'store.json');
+const PG_CFG_FILE = path.join(DATA_DIR, 'pg-config.json');
+const PG_CFG_KEY  = '__pg_config__';
 
-// ── JSON-файл (локальная разработка без БД) ────────────────────────────────
+// ── JSON-файл fallback ─────────────────────────────────────────────────────
 let _lock = Promise.resolve();
 const lock = fn => { const r = _lock.then(fn); _lock = r.catch(() => {}); return r; };
 const ensureDir = () => {
@@ -26,112 +29,154 @@ function writeJSON(data) {
   try { ensureDir(); fs.writeFileSync(STORE_FILE, JSON.stringify(data), 'utf8'); } catch (e) { console.error(e); }
 }
 
-// ── Prisma-клиент (только если DATABASE_URL задан) ─────────────────────────
-function hasDatabaseUrl() {
-  return !!(process.env.DATABASE_URL || process.env.PG_HOST);
+// ── Читаем конфиг PG (env или файл) ───────────────────────────────────────
+function readPgConfig() {
+  if (process.env.DATABASE_URL) {
+    return { connectionString: process.env.DATABASE_URL, source: 'env_url' };
+  }
+  if (process.env.PG_HOST) {
+    return {
+      host: process.env.PG_HOST,
+      port: parseInt(process.env.PG_PORT) || 5432,
+      database: process.env.PG_DATABASE || process.env.PG_DB || 'postgres',
+      user: process.env.PG_USER,
+      password: process.env.PG_PASSWORD,
+      ssl: process.env.PG_SSL === 'true',
+      source: 'env_host',
+    };
+  }
+  try {
+    if (fs.existsSync(PG_CFG_FILE)) {
+      const c = JSON.parse(fs.readFileSync(PG_CFG_FILE, 'utf8'));
+      if (c && (c.host || c.connectionString)) {
+        return { ...c, source: 'file' };
+      }
+    }
+  } catch {}
+  return null;
 }
 
-async function getPrisma() {
-  if (!hasDatabaseUrl()) return null;
+// ── pg Pool singleton ──────────────────────────────────────────────────────
+let _pool = null;
+let _poolCfgKey = null;
+
+async function getPool() {
+  const cfg = readPgConfig();
+  if (!cfg) return null;
+
+  const { source, ...poolCfg } = cfg;
+  const cfgKey = JSON.stringify(poolCfg);
+
+  if (_pool && _poolCfgKey === cfgKey) return _pool;
+
   try {
-    const { default: prisma } = await import('../../lib/prisma.js');
-    await prisma.$queryRaw`SELECT 1`;
-    // Убеждаемся что таблица существует (на случай первого запуска без миграции)
-    await prisma.$executeRawUnsafe(`
+    const { Pool } = await import('pg');
+    if (_pool) { try { await _pool.end(); } catch {} }
+
+    const opts = poolCfg.connectionString
+      ? {
+          connectionString: poolCfg.connectionString,
+          ssl: { rejectUnauthorized: false },
+          max: 10,
+          connectionTimeoutMillis: 8000,
+          idleTimeoutMillis: 30000,
+        }
+      : {
+          host: poolCfg.host,
+          port: poolCfg.port || 5432,
+          database: poolCfg.database,
+          user: poolCfg.user,
+          password: poolCfg.password,
+          ssl: poolCfg.ssl ? { rejectUnauthorized: false } : false,
+          max: 10,
+          connectionTimeoutMillis: 8000,
+          idleTimeoutMillis: 30000,
+        };
+
+    _pool = new Pool(opts);
+    _poolCfgKey = cfgKey;
+
+    await _pool.query('SELECT 1');
+    await _pool.query(`
       CREATE TABLE IF NOT EXISTS kv (
         key TEXT PRIMARY KEY,
         value TEXT NOT NULL,
         updated_at TIMESTAMPTZ DEFAULT NOW()
       )
     `);
-    return prisma;
+    return _pool;
   } catch (e) {
-    console.error('[Prisma] Ошибка подключения:', e.message);
+    console.error('[PG Pool] Ошибка подключения:', e.message);
+    _pool = null;
+    _poolCfgKey = null;
     return null;
   }
 }
 
-// Утилита: сериализовать значение
+// ── Утилиты сериализации ───────────────────────────────────────────────────
 function serialize(value) {
   return typeof value === 'string' ? value : JSON.stringify(value);
 }
-
-// Утилита: десериализовать значение
 function deserialize(raw) {
   if (raw == null) return null;
   try { return JSON.parse(raw); } catch { return raw; }
 }
 
-// ── Prisma: операции с kv ────────────────────────────────────────────────
-const prismaKv = {
-  async get(prisma, key) {
-    const row = await prisma.kv.findUnique({ where: { key } });
-    return row ? deserialize(row.value) : null;
+// ── CRUD через pg Pool ─────────────────────────────────────────────────────
+const pgKv = {
+  async get(pool, key) {
+    const r = await pool.query('SELECT value FROM kv WHERE key=$1', [key]);
+    return r.rows.length ? deserialize(r.rows[0].value) : null;
   },
-  async set(prisma, key, value) {
-    const serialized = serialize(value);
-    await prisma.kv.upsert({
-      where: { key },
-      update: { value: serialized, updated_at: new Date() },
-      create: { key, value: serialized },
-    });
+  async set(pool, key, value) {
+    const v = serialize(value);
+    await pool.query(
+      `INSERT INTO kv(key,value,updated_at) VALUES($1,$2,NOW())
+       ON CONFLICT(key) DO UPDATE SET value=$2, updated_at=NOW()`,
+      [key, v]
+    );
   },
-  async delete(prisma, key) {
-    await prisma.kv.deleteMany({ where: { key } });
+  async delete(pool, key) {
+    await pool.query('DELETE FROM kv WHERE key=$1', [key]);
   },
-  async getAll(prisma) {
-    const rows = await prisma.kv.findMany({
-      where: { key: { not: PG_CFG_KEY } },
-      orderBy: { key: 'asc' },
-    });
+  async getAll(pool) {
+    const r = await pool.query(`SELECT key,value FROM kv WHERE key!=$1 ORDER BY key`, [PG_CFG_KEY]);
     const out = {};
-    rows.forEach(({ key, value }) => { out[key] = deserialize(value); });
+    r.rows.forEach(({ key, value }) => { out[key] = deserialize(value); });
     return out;
   },
-  async setMany(prisma, data) {
-    await prisma.$transaction(
-      Object.entries(data || {}).map(([key, value]) =>
-        prisma.kv.upsert({
-          where: { key },
-          update: { value: serialize(value), updated_at: new Date() },
-          create: { key, value: serialize(value) },
-        })
-      )
-    );
+  async setMany(pool, data) {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      for (const [key, value] of Object.entries(data || {})) {
+        const v = serialize(value);
+        await client.query(
+          `INSERT INTO kv(key,value,updated_at) VALUES($1,$2,NOW())
+           ON CONFLICT(key) DO UPDATE SET value=$2, updated_at=NOW()`,
+          [key, v]
+        );
+      }
+      await client.query('COMMIT');
+    } catch (e) {
+      await client.query('ROLLBACK');
+      throw e;
+    } finally {
+      client.release();
+    }
   },
 };
 
-// ── pg_config операции ─────────────────────────────────────────────────────
-async function getPgConfigForUI() {
-  const PG_CFG_FILE = path.join(DATA_DIR, 'pg-config.json');
-  try {
-    if (fs.existsSync(PG_CFG_FILE)) {
-      const c = JSON.parse(fs.readFileSync(PG_CFG_FILE, 'utf8'));
-      if (c?.host || c?.connectionString) return { cfg: c, source: 'file' };
-    }
-  } catch {}
-  if (process.env.DATABASE_URL) return { cfg: { connectionString: process.env.DATABASE_URL }, source: 'env_url' };
-  if (process.env.PG_HOST) return { cfg: {
-    host: process.env.PG_HOST, port: process.env.PG_PORT || '5432',
-    database: process.env.PG_DATABASE || process.env.PG_DB || 'postgres',
-    user: process.env.PG_USER, password: process.env.PG_PASSWORD,
-    ssl: process.env.PG_SSL === 'true',
-  }, source: 'env_host' };
-  return { cfg: null, source: 'none' };
-}
-
+// ── Сохранение конфига PG ──────────────────────────────────────────────────
 async function persistPgConfig(cfg) {
-  const PG_CFG_FILE = path.join(DATA_DIR, 'pg-config.json');
-  try {
-    ensureDir();
-    if (cfg) fs.writeFileSync(PG_CFG_FILE, JSON.stringify(cfg), 'utf8');
-    else if (fs.existsSync(PG_CFG_FILE)) fs.unlinkSync(PG_CFG_FILE);
-  } catch {}
-  const prisma = await getPrisma();
-  if (prisma) {
-    if (cfg) await prismaKv.set(prisma, PG_CFG_KEY, cfg);
-    else await prismaKv.delete(prisma, PG_CFG_KEY);
+  ensureDir();
+  if (cfg) {
+    fs.writeFileSync(PG_CFG_FILE, JSON.stringify(cfg), 'utf8');
+  } else {
+    if (fs.existsSync(PG_CFG_FILE)) fs.unlinkSync(PG_CFG_FILE);
   }
+  _pool = null;
+  _poolCfgKey = null;
 }
 
 // ── Handler ────────────────────────────────────────────────────────────────
@@ -146,11 +191,11 @@ export default async function handler(req, res) {
 
   if (action === 'pg_get') {
     try {
-      const { cfg, source } = await getPgConfigForUI();
+      const cfg = readPgConfig();
       if (!cfg) return res.json({ ok: true, config: null, source: 'none' });
-      const { password, ...safe } = cfg;
-      safe._passwordSaved = !!(password);
-      return res.json({ ok: true, config: safe, source });
+      const { password, source, ...safe } = cfg;
+      safe._passwordSaved = !!password;
+      return res.json({ ok: true, config: safe, source: source || 'unknown' });
     } catch (e) {
       return res.json({ ok: true, config: null, source: 'none', error: e.message });
     }
@@ -175,27 +220,26 @@ export default async function handler(req, res) {
   }
 
   if (action === 'pg_diag') {
-    const prisma = await getPrisma();
-    const { cfg, source } = await getPgConfigForUI().catch(() => ({ cfg: null, source: 'error' }));
-    let pgTest = null, pgKeys = [], rowCounts = {}, dbSize = '—';
-    if (prisma) {
+    const cfg = readPgConfig();
+    let pgTest = null, pgKeys = [], rowCounts = {}, dbSize = '—', pgError = null;
+    const pool = await getPool();
+    if (pool) {
       try {
-        const cnt = await prisma.kv.count();
-        const rows = await prisma.kv.findMany({ select: { key: true, value: true }, orderBy: { key: 'asc' } });
-        pgKeys = rows.map(r => r.key);
+        const cntRes = await pool.query('SELECT COUNT(*) as c FROM kv');
+        const cnt = parseInt(cntRes.rows[0].c);
+        const rows = await pool.query('SELECT key, value FROM kv ORDER BY key');
+        pgKeys = rows.rows.map(r => r.key);
         pgTest = { ok: true, rows: cnt };
-        // Считаем количество записей в массивах для каждого ключа
-        for (const row of rows) {
+
+        for (const row of rows.rows) {
           try {
             const parsed = JSON.parse(row.value);
             if (Array.isArray(parsed)) {
               rowCounts[row.key] = parsed.length;
             } else if (parsed && typeof parsed === 'object') {
               rowCounts[row.key] = Object.keys(parsed).length;
-              // Считаем суммарные монеты пользователей
               if (row.key === 'cm_users') {
-                const totalCoins = Object.values(parsed).reduce((sum, u) => sum + (u?.balance || 0), 0);
-                rowCounts['_total_coins'] = totalCoins;
+                rowCounts['_total_coins'] = Object.values(parsed).reduce((s, u) => s + (u?.balance || 0), 0);
               }
             } else {
               rowCounts[row.key] = 1;
@@ -203,38 +247,60 @@ export default async function handler(req, res) {
           } catch { rowCounts[row.key] = 1; }
         }
         rowCounts['_total_keys'] = cnt;
-        // Получаем размер БД через raw query
-        try {
-          const sizeRes = await prisma.$queryRaw`SELECT pg_size_pretty(pg_database_size(current_database())) as size`;
-          dbSize = sizeRes[0]?.size || '—';
-        } catch {}
-      } catch (e) { pgTest = { ok: false, error: e.message }; }
+
+        const szRes = await pool.query('SELECT pg_size_pretty(pg_database_size(current_database())) as size');
+        dbSize = szRes.rows[0]?.size || '—';
+      } catch (e) {
+        pgTest = { ok: false, error: e.message };
+        pgError = e.message;
+      }
     }
-    const PG_CFG_FILE = path.join(DATA_DIR, 'pg-config.json');
+
+    const jsonData = readJSON();
+    const jsonKeys = Object.keys(jsonData).filter(k => k !== PG_CFG_KEY);
+
     return res.json({
-      ok: true, usingPg: !!prisma, usingPrisma: true, source,
+      ok: true,
+      usingPg: !!pool,
+      source: cfg?.source || 'none',
       hasPgCfgFile: fs.existsSync(PG_CFG_FILE),
-      hasEnvPg: !!process.env.PG_HOST, hasEnvDbUrl: !!process.env.DATABASE_URL,
+      hasEnvPg: !!process.env.PG_HOST,
+      hasEnvDbUrl: !!process.env.DATABASE_URL,
       cfgHost: cfg?.host || (cfg?.connectionString ? '(connectionString)' : null),
-      pgTest, pgKeys, rowCounts, dbSize, cwd: process.cwd(),
+      pgTest, pgKeys, rowCounts, dbSize,
+      pgError,
+      jsonKeys,
+      cwd: process.cwd(),
     });
   }
 
-  // ── Основные data-операции ──
-  try {
-    const prisma = await getPrisma();
+  if (action === 'migrate') {
+    const pool = await getPool();
+    if (!pool) return res.json({ ok: false, error: 'PostgreSQL не подключён' });
+    try {
+      const source = data || readJSON();
+      await pgKv.setMany(pool, source);
+      return res.json({ ok: true, migrated: Object.keys(source).length });
+    } catch (e) {
+      return res.json({ ok: false, error: e.message });
+    }
+  }
 
-    if (prisma) {
-      if (action === 'get') return res.json({ ok: true, value: await prismaKv.get(prisma, key) });
-      if (action === 'set') { await prismaKv.set(prisma, key, value); return res.json({ ok: true }); }
-      if (action === 'delete') { await prismaKv.delete(prisma, key); return res.json({ ok: true }); }
-      if (action === 'getAll') return res.json({ ok: true, data: await prismaKv.getAll(prisma) });
-      if (action === 'setMany') { await prismaKv.setMany(prisma, data); return res.json({ ok: true }); }
+  // ── Основные CRUD операции ──
+  try {
+    const pool = await getPool();
+
+    if (pool) {
+      if (action === 'get')     return res.json({ ok: true, value: await pgKv.get(pool, key) });
+      if (action === 'set')     { await pgKv.set(pool, key, value); return res.json({ ok: true }); }
+      if (action === 'delete')  { await pgKv.delete(pool, key); return res.json({ ok: true }); }
+      if (action === 'getAll')  return res.json({ ok: true, data: await pgKv.getAll(pool) });
+      if (action === 'setMany') { await pgKv.setMany(pool, data); return res.json({ ok: true }); }
     } else {
-      if (action === 'get') { const s = readJSON(); return res.json({ ok: true, value: s[key] !== undefined ? s[key] : null }); }
-      if (action === 'getAll') return res.json({ ok: true, data: readJSON() });
-      if (action === 'set') { await lock(() => { const s = readJSON(); s[key] = value; writeJSON(s); }); return res.json({ ok: true }); }
-      if (action === 'delete') { await lock(() => { const s = readJSON(); delete s[key]; writeJSON(s); }); return res.json({ ok: true }); }
+      if (action === 'get')     { const s = readJSON(); return res.json({ ok: true, value: s[key] !== undefined ? s[key] : null }); }
+      if (action === 'getAll')  return res.json({ ok: true, data: readJSON() });
+      if (action === 'set')     { await lock(() => { const s = readJSON(); s[key] = value; writeJSON(s); }); return res.json({ ok: true }); }
+      if (action === 'delete')  { await lock(() => { const s = readJSON(); delete s[key]; writeJSON(s); }); return res.json({ ok: true }); }
       if (action === 'setMany') { await lock(() => { const s = readJSON(); Object.assign(s, data || {}); writeJSON(s); }); return res.json({ ok: true }); }
     }
 
