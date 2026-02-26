@@ -4516,11 +4516,41 @@ function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbC
     try {
       const res = await fetch('/api/store', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'pg_diag' }),
+        body: JSON.stringify({ action: 'getAll' }),
       });
       const data = await res.json();
-      if (data.ok) setPgStats({ ok: true, total: data.pgTest?.rows ?? 0, size: data.dbSize || '—', rowCounts: data.rowCounts || { '_total_keys': data.pgTest?.rows ?? 0 } });
-      else notify("Ошибка загрузки статистики: " + data.error, "err");
+      if (data.ok && data.data) {
+        const d = data.data;
+        const countOf = (v) => {
+          if (!v) return 0;
+          if (Array.isArray(v)) return v.length;
+          if (typeof v === 'object') return Object.keys(v).length;
+          return 1;
+        };
+        const rowCounts = {
+          cm_users:      countOf(d.cm_users),
+          cm_products:   countOf(d.cm_products),
+          cm_orders:     countOf(d.cm_orders),
+          cm_transfers:  countOf(d.cm_transfers),
+          cm_categories: countOf(d.cm_categories),
+          _total_keys:   Object.keys(d).length,
+          _total_coins:  d.cm_users
+            ? Object.values(d.cm_users).reduce((s, u) => s + (u?.balance || 0), 0)
+            : 0,
+        };
+        let dbSize = '—';
+        try {
+          const dr = await fetch('/api/store', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'pg_diag' }),
+          });
+          const dd = await dr.json();
+          if (dd.ok && dd.dbSize) dbSize = dd.dbSize;
+        } catch {}
+        setPgStats({ ok: true, total: rowCounts._total_keys, size: dbSize, rowCounts });
+      } else {
+        notify("Ошибка загрузки статистики: " + (data.error || 'нет данных'), "err");
+      }
     } catch(err) { notify("Ошибка: " + err.message, "err"); }
     setPgStatsLoading(false);
   };
