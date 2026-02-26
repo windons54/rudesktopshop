@@ -104,8 +104,7 @@ let _initVersion = null;
 
 async function initStore() {
   try {
-    // Таймаут 10 секунд — если PG не отвечает, не зависаем
-    const timeout = new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 10000));
+    const timeout = new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 8000));
     const r = await Promise.race([_apiCall('getAll'), timeout]);
     if (r.ok && r.data) {
       _applyData(r.data);
@@ -428,8 +427,7 @@ function App() {
   const markNotifRead = () => { setNotifUnread(0); storage.set('cm_notif_unread', '0'); };
   const clearNotifHistory = () => { setNotifHistory([]); storage.set('cm_notif_history', []); setNotifUnread(0); storage.set('cm_notif_unread', '0'); };
   const [toast, setToast] = useState(null);
-  const [loaded, setLoaded] = useState(false);
-  const [loadingTooLong, setLoadingTooLong] = useState(false);
+
   const [sqliteInitError, setSqliteInitError] = useState(null);
 
   useEffect(() => {
@@ -440,10 +438,8 @@ function App() {
       .then(r => { if (r.ok && r.config) savePgConfigState(r.config); })
       .catch(() => {});
 
-    // Загружаем ВСЕ данные с сервера (PostgreSQL или JSON-файл)
-    // Если загрузка занимает > 8 сек — показываем предупреждение
-    const loadingTimer = setTimeout(() => setLoadingTooLong(true), 8000);
-    initStore().then(() => { clearTimeout(loadingTimer); setLoadingTooLong(false);
+    // Загружаем данные с сервера в фоне — страница рендерится сразу
+    initStore().then(() => {
       const u  = storage.get("cm_users");
       const o  = storage.get("cm_orders");
       const cp = storage.get("cm_products");
@@ -498,7 +494,6 @@ function App() {
       // НЕ вызываем storage.set("cm_users") здесь — не затираем данные других браузеров!
 
       setDbConfig({ connected: true, dbSize: Object.keys(storage.all()).length, rowCounts: getSQLiteStats() });
-      setLoaded(true);
 
       // Восстанавливаем сессию из localStorage
       const savedSession = _lsGet("cm_session");
@@ -575,10 +570,7 @@ function App() {
         }
       }
     }).catch(err => {
-      clearTimeout(loadingTimer);
       console.error('Store init failed', err);
-      setSqliteInitError(err.message || String(err));
-      setLoaded(true);
     });
 
     const handleUnload = () => storage.flush();
@@ -780,20 +772,7 @@ function App() {
   const shopCategories = ["Все", ...allCategories];
   const filtered = filterCat === "Все" ? activeProducts : activeProducts.filter(p => p.category === filterCat);
 
-  if (!loaded) return (
-    <div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",height:"100vh",gap:"16px",color:"var(--rd-gray-text)",padding:"24px",textAlign:"center"}}>
-      <div style={{fontSize:"32px"}}>{loadingTooLong ? "⚠️" : "🗄️"}</div>
-      <div style={{fontWeight:700,fontSize:"16px",color:"var(--rd-dark)"}}>Загрузка данных…</div>
-      <div style={{fontSize:"13px"}}>Подключение к базе данных</div>
-      {loadingTooLong && (
-        <div style={{marginTop:"8px",padding:"12px 20px",background:"rgba(234,179,8,0.1)",border:"1px solid rgba(234,179,8,0.3)",borderRadius:"10px",fontSize:"13px",color:"#92400e",maxWidth:"380px"}}>
-          ⏳ Подключение занимает дольше обычного.<br/>
-          Проверьте доступность PostgreSQL или обновите страницу.
-          <br/><button className="btn" style={{marginTop:"10px",background:"#d97706",color:"#fff",border:"none",fontWeight:700}} onClick={() => window.location.reload()}>🔄 Перезагрузить</button>
-        </div>
-      )}
-    </div>
-  );
+
   if (sqliteInitError) return (
     <div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",height:"100vh",gap:"12px",padding:"24px",textAlign:"center"}}>
       <div style={{fontSize:"32px"}}>⚠️</div>
