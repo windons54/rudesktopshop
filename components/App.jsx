@@ -22,6 +22,18 @@ function getCurrName(currency) {
   const c = currency || _globalCurrency;
   return (c && c.name) ? c.name : "RuDeCoin";
 }
+
+// Returns true if product has an active (non-expired) discount
+function isDiscountActive(product) {
+  if (!product || !product.discount || product.discount <= 0) return false;
+  if (!product.discountUntil) return true; // бессрочная скидка
+  return Date.now() < new Date(product.discountUntil).getTime();
+}
+// Returns effective price considering timed discount
+function getEffectivePrice(product) {
+  if (isDiscountActive(product)) return Math.round(product.price * (1 - product.discount / 100));
+  return product.price;
+}
 function CurrencyIcon({ currency, size = 16 }) {
   const c = currency || _globalCurrency;
   if (c && c.logo) return <img src={c.logo} alt="" style={{width:size+"px",height:size+"px",objectFit:"contain",verticalAlign:"middle"}} />;
@@ -1818,6 +1830,22 @@ function AuctionCard({ auction, currentUser, users, saveUsers, saveAuctions, all
       }
       const updated = allAuctions.map(a => a.id === auction.id ? { ...a, settled: true } : a);
       saveAuctions(updated);
+
+      // Telegram notification about auction winner
+      try {
+        const ap = storage.get("cm_appearance") || {};
+        const integ = ap.integrations || {};
+        if (integ.tgEnabled && integ.tgBotToken && integ.tgChatId) {
+          const winnerData = users[winner];
+          const winnerName = winnerData ? ((winnerData.firstName || "") + " " + (winnerData.lastName || "")).trim() || winner : winner;
+          const msg = `🏆 <b>Аукцион завершён!</b>\n\n🔨 Лот: <b>${auction.name}</b>\n👤 Победитель: ${winnerName} (<code>${winner}</code>)\n💰 Финальная ставка: <b>${amt}</b> монет\n📅 ${new Date().toLocaleString("ru-RU")}`;
+          fetch('/api/telegram', {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ token: integ.tgBotToken.trim(), chat_id: integ.tgChatId.trim(), text: msg, parse_mode: "HTML" })
+          }).catch(() => {});
+        }
+      } catch {}
     }
   }, [isEnded]);
 
@@ -1972,6 +2000,9 @@ function AuctionAdminTab({ auctions, saveAuctions, notify }) {
   const list = auctions || [];
   const [form, setForm] = useState({ name: "", image: "", startPrice: "", step: "", endsAt: "" });
   const [imgPreview, setImgPreview] = useState("");
+  const [editingId, setEditingId] = useState(null);
+  const [editForm, setEditForm] = useState(null);
+  const [editImgPreview, setEditImgPreview] = useState("");
 
   const handleImage = (e) => {
     const file = e.target.files[0];
@@ -1983,6 +2014,46 @@ function AuctionAdminTab({ auctions, saveAuctions, notify }) {
       setImgPreview(compressed);
     };
     reader.readAsDataURL(file);
+  };
+
+  const handleEditImage = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = async (ev) => {
+      const compressed = await compressImage(ev.target.result, 1200, 1200, 0.85, 300);
+      setEditForm(f => ({ ...f, image: compressed }));
+      setEditImgPreview(compressed);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const startEdit = (a) => {
+    const endsAtLocal = new Date(a.endsAt - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+    setEditingId(a.id);
+    setEditForm({ name: a.name, image: a.image || "", startPrice: String(a.startPrice), step: String(a.step), endsAt: endsAtLocal });
+    setEditImgPreview(a.image || "");
+  };
+
+  const cancelEdit = () => { setEditingId(null); setEditForm(null); setEditImgPreview(""); };
+
+  const saveEdit = () => {
+    if (!editForm.name.trim()) { notify("Введите название", "err"); return; }
+    if (!editForm.startPrice || parseInt(editForm.startPrice) <= 0) { notify("Укажите стартовую цену", "err"); return; }
+    if (!editForm.step || parseInt(editForm.step) <= 0) { notify("Укажите шаг ставки", "err"); return; }
+    if (!editForm.endsAt) { notify("Укажите дату завершения", "err"); return; }
+    const endsAt = new Date(editForm.endsAt).getTime();
+    const updated = list.map(a => a.id === editingId ? {
+      ...a,
+      name: editForm.name.trim(),
+      image: editForm.image,
+      startPrice: parseInt(editForm.startPrice),
+      step: parseInt(editForm.step),
+      endsAt,
+    } : a);
+    saveAuctions(updated);
+    cancelEdit();
+    notify("Аукцион обновлён ✓");
   };
 
   const create = () => {
@@ -2027,6 +2098,47 @@ function AuctionAdminTab({ auctions, saveAuctions, notify }) {
               const isEnded = Date.now() >= a.endsAt;
               const lastBid = a.bids && a.bids.length > 0 ? a.bids[a.bids.length - 1] : null;
               const currentPrice = lastBid ? lastBid.amount : a.startPrice;
+
+              // Edit mode for this auction
+              if (editingId === a.id && editForm) {
+                return (
+                  <div key={a.id} className="product-form-card" style={{position:"relative",top:"auto"}}>
+                    <div className="product-form-title">✏️ Редактировать аукцион</div>
+                    <div className="form-field">
+                      <label className="form-label">Название товара</label>
+                      <input className="form-input" value={editForm.name} onChange={e => setEditForm(f=>({...f,name:e.target.value}))} />
+                    </div>
+                    <div className="form-field" style={{marginTop:"12px"}}>
+                      <label className="form-label">Фотография</label>
+                      <input type="file" accept="image/*" style={{display:"none"}} id={"auction-edit-img-"+a.id} onChange={handleEditImage} />
+                      <div style={{display:"flex",gap:"10px",alignItems:"center",flexWrap:"wrap"}}>
+                        <label htmlFor={"auction-edit-img-"+a.id} className="btn btn-secondary btn-sm" style={{cursor:"pointer"}}>📷 Загрузить фото</label>
+                        {editImgPreview && <button className="btn btn-ghost btn-sm" style={{color:"var(--rd-red)"}} onClick={() => {setEditImgPreview(""); setEditForm(f=>({...f,image:""}));}}>✕ Удалить</button>}
+                      </div>
+                      {editImgPreview && <img src={editImgPreview} alt="" style={{marginTop:"10px",width:"120px",height:"80px",objectFit:"cover",borderRadius:"8px",border:"1.5px solid var(--rd-gray-border)"}} />}
+                    </div>
+                    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"12px",marginTop:"12px"}}>
+                      <div className="form-field">
+                        <label className="form-label">Стартовая цена</label>
+                        <input className="form-input" type="number" min="1" value={editForm.startPrice} onChange={e => setEditForm(f=>({...f,startPrice:e.target.value}))} />
+                      </div>
+                      <div className="form-field">
+                        <label className="form-label">Шаг аукциона</label>
+                        <input className="form-input" type="number" min="1" value={editForm.step} onChange={e => setEditForm(f=>({...f,step:e.target.value}))} />
+                      </div>
+                    </div>
+                    <div className="form-field" style={{marginTop:"12px"}}>
+                      <label className="form-label">Дата и время завершения</label>
+                      <input className="form-input" type="datetime-local" value={editForm.endsAt} onChange={e => setEditForm(f=>({...f,endsAt:e.target.value}))} />
+                    </div>
+                    <div style={{display:"flex",gap:"10px",marginTop:"16px"}}>
+                      <button className="btn btn-primary" onClick={saveEdit}>💾 Сохранить</button>
+                      <button className="btn btn-secondary" onClick={cancelEdit}>Отмена</button>
+                    </div>
+                  </div>
+                );
+              }
+
               return (
                 <div key={a.id} className="auction-admin-card">
                   <div className="auction-admin-thumb">
@@ -2043,7 +2155,10 @@ function AuctionAdminTab({ auctions, saveAuctions, notify }) {
                           {isEnded ? "✅ Завершён" : `⏱ До ${new Date(a.endsAt).toLocaleString("ru-RU")}`} · {a.bids?.length || 0} ставок
                         </div>
                       </div>
-                      <button className="btn btn-ghost btn-sm" onClick={() => deleteAuction(a.id)} style={{color:"var(--rd-red)",flexShrink:0}}>🗑️</button>
+                      <div style={{display:"flex",gap:"6px",flexShrink:0}}>
+                        <button className="btn btn-ghost btn-sm" onClick={() => startEdit(a)}>✏️</button>
+                        <button className="btn btn-ghost btn-sm" onClick={() => deleteAuction(a.id)} style={{color:"var(--rd-red)"}}>🗑️</button>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -2053,7 +2168,7 @@ function AuctionAdminTab({ auctions, saveAuctions, notify }) {
       }
 
       {/* Create form */}
-      <div className="product-form-card">
+      <div className="product-form-card" style={{position:"relative",top:"auto"}}>
         <div className="product-form-title">🔨 Создать аукцион</div>
         <div className="form-field">
           <label className="form-label">Название товара</label>
@@ -2364,10 +2479,11 @@ function ProductModal({ product, onClose, addToCart, currency }) {
   const sizes = (product.sizes && product.sizes.length > 0) ? product.sizes : SIZES;
   const imgs = product.images && product.images.length > 0 ? product.images : (product.image ? [product.image] : []);
 
-  const finalPrice = product.discount > 0 ? Math.round(product.price * (1 - product.discount / 100)) : product.price;
+  const discountActive = isDiscountActive(product);
+  const finalPrice = getEffectivePrice(product);
   const handleAddToCart = () => {
     if (isClothing && !selectedSize) return;
-    addToCart({ ...product, price: finalPrice, originalPrice: product.discount > 0 ? product.price : null,
+    addToCart({ ...product, price: finalPrice, originalPrice: discountActive ? product.price : null,
       size: isClothing ? selectedSize : null,
       cartKey: isClothing ? (product.id + "_" + selectedSize) : ("" + product.id) });
     onClose();
@@ -2427,13 +2543,16 @@ function ProductModal({ product, onClose, addToCart, currency }) {
             <div className="modal-desc">{product.desc || "Описание отсутствует."}</div>
             <div className="modal-divider"></div>
             <div className="modal-price-row">
-              {product.discount > 0 && <div className="modal-price-original">{product.price} {cName}</div>}
+              {discountActive && <div className="modal-price-original">{product.price} {cName}</div>}
               <div style={{display:"flex",alignItems:"baseline",gap:"8px",flexWrap:"wrap"}}>
-                <span className="modal-price-val" style={product.discount > 0 ? {color:"var(--rd-red)"} : {}}>
-                  {product.discount > 0 ? Math.round(product.price * (1 - product.discount / 100)) : product.price}
+                <span className="modal-price-val" style={discountActive ? {color:"var(--rd-red)"} : {}}>
+                  {finalPrice}
                 </span>
                 <span className="modal-price-unit">{cName}</span>
-                {product.discount > 0 && <span className="discount-pill" style={{fontSize:"12px",padding:"3px 10px"}}>&#8722;{product.discount}%</span>}
+                {discountActive && <span className="discount-pill" style={{fontSize:"12px",padding:"3px 10px"}}>&#8722;{product.discount}%</span>}
+                {discountActive && product.discountUntil && (
+                  <span style={{fontSize:"11px",color:"var(--rd-gray-text)"}}>до {new Date(product.discountUntil).toLocaleString("ru-RU",{day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"})}</span>
+                )}
               </div>
             </div>
             {isClothing && (
@@ -2508,9 +2627,9 @@ function ProductCard({ product, addToCart, onOpen, favorites, toggleFavorite }) 
       <div className="pc-desc">{product.desc}</div>
       <div className="pc-footer">
         <div className="price-block">
-          {product.discount > 0 && <span className="price-original">{product.price} {cName}</span>}
-          <span className={"price-final" + (product.discount > 0 ? " has-discount" : "")}>
-            {product.discount > 0 ? Math.round(product.price * (1 - product.discount / 100)) : product.price}
+          {isDiscountActive(product) && <span className="price-original">{product.price} {cName}</span>}
+          <span className={"price-final" + (isDiscountActive(product) ? " has-discount" : "")}>
+            {getEffectivePrice(product)}
             <span className="price-unit-small"> {cName}</span>
           </span>
           {(function() {
@@ -2818,7 +2937,7 @@ function UserEditForm({ username, user, users, saveUsers, notify, onClose, isAdm
 
 // ── ADMIN ─────────────────────────────────────────────────────────────────
 
-const BLANK_PRODUCT = { name: "", price: "", category: "Одежда", emoji: "🛍️", desc: "", images: [], sizes: ["S","M","L","XL","XXL"], sku: "", badge: "", discount: 0, inactive: false, stock: "", sizeStock: {} };
+const BLANK_PRODUCT = { name: "", price: "", category: "Одежда", emoji: "🛍️", desc: "", images: [], sizes: ["S","M","L","XL","XXL"], sku: "", badge: "", discount: 0, discountUntil: "", inactive: false, stock: "", sizeStock: {} };
 const ALL_CATEGORIES = ["Одежда", "Аксессуары", "Посуда", "Канцелярия"];
 const EMOJIS = ["🛍️","👕","🧥","🧢","👟","🎒","☕","🍵","📓","✏️","📌","🎨","☂️","🧦","🏅","💼","🕶️","🧤","🧣","⌚"];
 
@@ -3269,7 +3388,7 @@ function FaqAdminTab({ faq, saveFaq, notify }) {
 function AdminPage({ users, saveUsers, orders, saveOrders, products, saveProducts, categories, saveCategories, notify, setPage, currentUser, transfers, saveTransfers, activeTab, setActiveTab, faq, saveFaq, embedded }) {
   const isAdmin = currentUser && users[currentUser]?.role === "admin";
   const cName = getCurrName();
-  const [internalTab, setInternalTab] = useState("users");
+  const [internalTab, setInternalTab] = useState("products");
   const tab = activeTab || internalTab;
   const setTab = (t) => { if (setActiveTab) setActiveTab(t); else setInternalTab(t); };
   const [amounts, setAmounts] = useState({});
@@ -3552,7 +3671,7 @@ function AdminPage({ users, saveUsers, orders, saveOrders, products, saveProduct
 
   const startEdit = (p) => {
     setEditingProduct(p.id);
-    setForm({ name: p.name, price: p.price, category: p.category, emoji: p.emoji, desc: p.desc, images: p.images || (p.image ? [p.image] : []), sizes: p.sizes || ["S","M","L","XL","XXL"], sku: p.sku || "", badge: p.badge || "", discount: p.discount || 0, inactive: !!p.inactive, stock: p.stock !== undefined && p.stock !== null ? String(p.stock) : "", sizeStock: p.sizeStock || {} });
+    setForm({ name: p.name, price: p.price, category: p.category, emoji: p.emoji, desc: p.desc, images: p.images || (p.image ? [p.image] : []), sizes: p.sizes || ["S","M","L","XL","XXL"], sku: p.sku || "", badge: p.badge || "", discount: p.discount || 0, discountUntil: p.discountUntil || "", inactive: !!p.inactive, stock: p.stock !== undefined && p.stock !== null ? String(p.stock) : "", sizeStock: p.sizeStock || {} });
     setImgPreviews(p.images || (p.image ? [p.image] : []));
     setShowProductModal(true);
   };
@@ -3813,6 +3932,24 @@ function AdminPage({ users, saveUsers, orders, saveOrders, products, saveProduct
                     </div>
                   </div>
                 </div>
+
+                {(form.discount || 0) > 0 && (
+                  <div className="form-field">
+                    <label className="form-label">Скидка действует до</label>
+                    <input className="form-input" type="datetime-local"
+                      value={form.discountUntil || ""}
+                      onChange={e => setForm(f=>({...f, discountUntil: e.target.value}))}
+                      style={{maxWidth:"260px"}} />
+                    {form.discountUntil && (
+                      <div style={{fontSize:"12px",color:"var(--rd-gray-text)",marginTop:"4px"}}>
+                        Скидка истечёт: {new Date(form.discountUntil).toLocaleString("ru-RU")}
+                        <button type="button" onClick={() => setForm(f=>({...f, discountUntil:""}))}
+                          style={{marginLeft:"8px",background:"none",border:"none",color:"var(--rd-red)",cursor:"pointer",fontSize:"12px",fontWeight:700}}>✕ Убрать</button>
+                      </div>
+                    )}
+                    {!form.discountUntil && <div style={{fontSize:"12px",color:"var(--rd-gray-text)",marginTop:"4px"}}>Не указано — скидка действует бессрочно</div>}
+                  </div>
+                )}
 
                 <div className="form-field">
                   <label className="form-label">Эмодзи (если нет фото)</label>
@@ -4467,7 +4604,7 @@ function CurrencySettingsTab({ appearance, saveAppearance, notify }) {
 function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbConfig, refreshDbConfig, pgConfig, savePgConfig, isPgActive, isAdmin, orders, saveOrders, products, saveProducts, categories, saveCategories, appearance, saveAppearance, markOrdersSeen, transfers, saveTransfers, faq, saveFaq, tasks, saveTasks, taskSubmissions, saveTaskSubmissions, auctions, saveAuctions, sqliteDisabled, setSqliteDisabled }) {
   const [tab, setTab] = useState("profile");
   const setTabSafe = (t) => { if (!isAdmin && t !== "profile") return; setTab(t); };
-  const [adminTab, setAdminTab] = useState("users");
+  const [adminTab, setAdminTab] = useState("products");
   const [currencySubTab, setCurrencySubTab] = useState("currency_settings");
   const [bdBonus, setBdBonus] = useState(String(appearance.birthdayBonus ?? 100));
   const [bdEnabled, setBdEnabled] = useState(appearance.birthdayEnabled !== false);
@@ -4834,7 +4971,6 @@ function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbC
     { id: "currency_settings", icon: "✏️", label: "Настройки" },
   ];
   const ADMIN_SUB_TABS = [
-    { id: "users",      icon: "👥", label: "Пользователи" },
     { id: "products",   icon: "🛍️", label: "Товары" },
     { id: "categories", icon: "🏷️", label: "Категории" },
     { id: "orders",     icon: "📦", label: "Заказы" },
