@@ -4238,11 +4238,14 @@ function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbC
     try {
       const res = await fetch('/api/store', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'pg_diag' }),
+        body: JSON.stringify({ action: 'pg_stats' }),
       });
       const data = await res.json();
-      if (data.ok) setPgStats({ ok: true, total: data.pgTest?.rows ?? 0, size: '—', rowCounts: { '_total_keys': data.pgTest?.rows ?? 0 } });
-      else notify("Ошибка загрузки статистики: " + data.error, "err");
+      if (data.ok) {
+        setPgStats({ ok: true, total: data.total ?? 0, size: data.size || '—', rowCounts: data.rowCounts || {} });
+      } else {
+        notify("Ошибка загрузки статистики: " + data.error, "err");
+      }
     } catch(err) { notify("Ошибка: " + err.message, "err"); }
     setPgStatsLoading(false);
   };

@@ -174,6 +174,56 @@ export default async function handler(req, res) {
     }
   }
 
+  if (action === 'pg_stats') {
+    const prisma = await getPrisma();
+    if (!prisma) return res.json({ ok: false, error: 'PostgreSQL не подключён' });
+    try {
+      const totalRows = await prisma.kv.count();
+
+      // Получаем размер БД
+      let dbSize = '—';
+      try {
+        const sizeResult = await prisma.$queryRaw`
+          SELECT pg_size_pretty(pg_database_size(current_database())) as size
+        `;
+        dbSize = sizeResult[0]?.size || '—';
+      } catch {}
+
+      // Читаем нужные ключи и считаем количество записей в каждом
+      const statKeys = ['cm_users', 'cm_products', 'cm_orders', 'cm_transfers', 'cm_categories'];
+      const rowCounts = { _total_keys: totalRows };
+
+      const rows = await prisma.kv.findMany({
+        where: { key: { in: statKeys } },
+        select: { key: true, value: true },
+      });
+
+      for (const { key, value } of rows) {
+        try {
+          const parsed = JSON.parse(value);
+          if (Array.isArray(parsed)) {
+            rowCounts[key] = parsed.length;
+          } else if (parsed && typeof parsed === 'object') {
+            rowCounts[key] = Object.keys(parsed).length;
+          } else {
+            rowCounts[key] = 1;
+          }
+        } catch {
+          rowCounts[key] = value ? 1 : 0;
+        }
+      }
+
+      // Для отсутствующих ключей — 0
+      for (const k of statKeys) {
+        if (!(k in rowCounts)) rowCounts[k] = 0;
+      }
+
+      return res.json({ ok: true, total: totalRows, size: dbSize, rowCounts });
+    } catch (e) {
+      return res.json({ ok: false, error: e.message });
+    }
+  }
+
   if (action === 'pg_diag') {
     const prisma = await getPrisma();
     const { cfg, source } = await getPgConfigForUI().catch(() => ({ cfg: null, source: 'error' }));
