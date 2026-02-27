@@ -581,7 +581,7 @@ body {
   background: #fff;
   border-bottom: 1px solid var(--rd-gray-border);
   max-width: 1152px;
-  margin: 0 auto;
+  margin: 24px auto 0;
 }
 .filter-bar-inner {
   display: flex;
@@ -1220,13 +1220,14 @@ input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; }
 .hero-banner {
   width: 100%;
   max-width: 1152px;
-  margin: 0 auto;
+  margin: 24px auto 0;
   position: relative;
   overflow: hidden;
   background: linear-gradient(135deg, #1a1a1a 0%, #2d1a1a 50%, #1a1a1a 100%);
   min-height: 340px;
   display: flex;
   align-items: stretch;
+  border-radius: 10px;
 }
 .hero-banner-bg {
   position: absolute;
@@ -2423,7 +2424,7 @@ input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; }
 .section-banner-wrap {
   position: relative;
   max-width: 1152px;
-  margin: 0 auto;
+  margin: 24px auto 0;
 }
 .section-banner-stats-overlay {
   position: absolute;
