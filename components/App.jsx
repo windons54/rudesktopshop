@@ -950,7 +950,7 @@ ym(${integ.ymCounterId}, "init", { clickmap:true, trackLinks:true, accurateTrack
             </button>
             <div className="rd-header-right">
               {currentUser ? <>
-                <div className="balance-pill" onClick={() => setPage("history")} style={{cursor:"pointer"}} title="История операций"><CurrIcon /> {users[currentUser]?.balance || 0} {currName()}</div>
+                <div className="balance-pill" onClick={() => setPage("history")} style={{cursor:"pointer"}} title="История операций"><CurrIcon /> {users[currentUser]?.balance || 0} <span className="balance-label">{currName()}</span></div>
                 {users[currentUser]?.role === "admin" && (() => {
                   const newCount = orders.length - seenOrdersCount;
                   const totalUnread = notifUnread;
@@ -975,7 +975,7 @@ ym(${integ.ymCounterId}, "init", { clickmap:true, trackLinks:true, accurateTrack
                         )}
                       </button>
                       {bellOpen && (
-                        <div style={{position:"absolute",top:"calc(100% + 8px)",right:0,width:"340px",background:"#fff",border:"1.5px solid var(--rd-gray-border)",borderRadius:"var(--rd-radius)",boxShadow:"var(--rd-shadow-lg)",zIndex:300,overflow:"hidden",animation:"dropIn 0.15s ease"}}>
+                        <div style={{position:"absolute",top:"calc(100% + 8px)",right:0,width:"min(340px, calc(100vw - 24px))",background:"#fff",border:"1.5px solid var(--rd-gray-border)",borderRadius:"var(--rd-radius)",boxShadow:"var(--rd-shadow-lg)",zIndex:300,overflow:"hidden",animation:"dropIn 0.15s ease"}}>
                           <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"14px 16px 10px",borderBottom:"1.5px solid var(--rd-gray-border)",background:"var(--rd-gray-bg)"}}>
                             <div style={{fontWeight:800,fontSize:"15px",color:"var(--rd-dark)"}}>🔔 Уведомления</div>
                             <div style={{display:"flex",gap:"8px",alignItems:"center"}}>
