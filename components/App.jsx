@@ -1404,14 +1404,40 @@ function TasksPage({ tasks, currentUser, taskSubmissions, saveTaskSubmissions, n
   const mySubmissions = (taskSubmissions || []).filter(s => s.user === currentUser);
 
   return (
-    <div className="page-inner page-fade">
-      <div className="page-eyebrow">Активности</div>
-      <h2 className="page-title">Задания за монеты</h2>
+    <div style={{minHeight:"60vh"}}>
+      {/* Hero header */}
+      <div style={{background:"#fff",borderBottom:"1.5px solid var(--rd-gray-border)",padding:"40px 0 32px"}}>
+        <div className="container">
+          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:"12px"}}>
+            <div>
+              <h1 style={{fontSize:"clamp(26px,5vw,40px)",fontWeight:900,color:"var(--rd-dark)",letterSpacing:"-0.02em"}}>Задания</h1>
+              <p style={{fontSize:"15px",color:"var(--rd-gray-text)",marginTop:"6px"}}>Выполняйте задания и получайте монеты</p>
+            </div>
+            {activeTasks.length > 0 && (
+              <div style={{display:"flex",gap:"16px",flexWrap:"wrap"}}>
+                <div style={{textAlign:"center",background:"var(--rd-gray-bg)",borderRadius:"12px",padding:"12px 20px"}}>
+                  <div style={{fontSize:"22px",fontWeight:900,color:"var(--rd-red)"}}>{activeTasks.length}</div>
+                  <div style={{fontSize:"11px",color:"var(--rd-gray-text)",textTransform:"uppercase",letterSpacing:"0.08em"}}>Активных</div>
+                </div>
+                {mySubmissions.length > 0 && (
+                  <div style={{textAlign:"center",background:"var(--rd-gray-bg)",borderRadius:"12px",padding:"12px 20px"}}>
+                    <div style={{fontSize:"22px",fontWeight:900,color:"var(--rd-dark)"}}>{mySubmissions.filter(s=>s.status==="approved").length}</div>
+                    <div style={{fontSize:"11px",color:"var(--rd-gray-text)",textTransform:"uppercase",letterSpacing:"0.08em"}}>Выполнено</div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
 
+      <div className="container auction-page">
       {activeTasks.length === 0 ? (
         <div className="empty-state"><div className="empty-state-icon">🎯</div><div className="empty-state-text">Заданий пока нет — следите за обновлениями</div></div>
       ) : (
-        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(340px,1fr))",gap:"24px",marginBottom:"48px"}}>
+        <>
+        <div style={{fontSize:"13px",fontWeight:700,textTransform:"uppercase",letterSpacing:"0.1em",color:"var(--rd-gray-text)",marginBottom:"16px"}}>Активные задания</div>
+        <div className="auction-grid" style={{marginBottom:"40px"}}>
           {activeTasks.map(task => {
             const submitted = (taskSubmissions || []).some(s => s.taskId === task.id && s.user === currentUser && (s.status === "pending" || s.status === "approved"));
             const isQuiz = task.taskType === "quiz";
@@ -1457,6 +1483,7 @@ function TasksPage({ tasks, currentUser, taskSubmissions, saveTaskSubmissions, n
             );
           })}
         </div>
+        </>
       )}
 
       {currentUser && mySubmissions.length > 0 && (
@@ -1483,6 +1510,7 @@ function TasksPage({ tasks, currentUser, taskSubmissions, saveTaskSubmissions, n
           </div>
         </div>
       )}
+      </div>
 
       {/* Regular task modal */}
       {modalTask && !quizState && (
@@ -3314,8 +3342,8 @@ function WorkdaysTab({ users, currentUser, notify, saveUsers, transfers, saveTra
   const modeLabel = { employment: "от даты трудоустройства", activation: "от даты активации", custom: "от указанной даты" };
 
   return (
-    <div style={{maxWidth:"800px"}}>
-      <div style={{background:"#fff",border:"1.5px solid var(--rd-gray-border)",borderRadius:"var(--rd-radius)",padding:"28px",boxShadow:"var(--rd-shadow-md)",marginBottom:"20px"}}>
+    <div>
+      <div className="settings-card" style={{marginBottom:"16px"}}>
         <div style={{fontSize:"11px",fontWeight:700,textTransform:"uppercase",letterSpacing:"0.07em",color:"var(--rd-gray-text)",marginBottom:"20px",paddingBottom:"10px",borderBottom:"1px solid var(--rd-gray-border)"}}>⚙️ Параметры начисления</div>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"20px",marginBottom:"20px"}}>
           <div>
@@ -3358,7 +3386,7 @@ function WorkdaysTab({ users, currentUser, notify, saveUsers, transfers, saveTra
         </div>
       </div>
 
-      <div style={{background:"#fff",border:"1.5px solid var(--rd-gray-border)",borderRadius:"var(--rd-radius)",padding:"28px",boxShadow:"var(--rd-shadow-md)",marginBottom:"20px"}}>
+      <div className="settings-card" style={{marginBottom:"16px"}}>
         <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:"16px",paddingBottom:"10px",borderBottom:"1px solid var(--rd-gray-border)"}}>
           <div style={{fontSize:"11px",fontWeight:700,textTransform:"uppercase",letterSpacing:"0.07em",color:"var(--rd-gray-text)"}}>
             👥 Индивидуальные настройки ({allUsers.length} польз.)
@@ -3481,8 +3509,8 @@ function BulkAccrualTab({ users, currentUser, notify, saveUsers, transfers, save
   };
 
   return (
-    <div style={{maxWidth:"760px"}}>
-      <div style={{background:"#fff",border:"1.5px solid var(--rd-gray-border)",borderRadius:"var(--rd-radius)",padding:"28px",boxShadow:"var(--rd-shadow-md)",marginBottom:"20px"}}>
+    <div>
+      <div className="settings-card" style={{marginBottom:"16px"}}>
         <div style={{fontSize:"11px",fontWeight:700,textTransform:"uppercase",letterSpacing:"0.07em",color:"var(--rd-gray-text)",marginBottom:"20px",paddingBottom:"10px",borderBottom:"1px solid var(--rd-gray-border)"}}>Параметры начисления</div>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"16px",marginBottom:"16px"}}>
           <div>
@@ -3518,7 +3546,7 @@ function BulkAccrualTab({ users, currentUser, notify, saveUsers, transfers, save
         )}
       </div>
 
-      <div style={{background:"#fff",border:"1.5px solid var(--rd-gray-border)",borderRadius:"var(--rd-radius)",padding:"28px",boxShadow:"var(--rd-shadow-md)",marginBottom:"20px"}}>
+      <div className="settings-card" style={{marginBottom:"16px"}}>
         <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:"16px",paddingBottom:"10px",borderBottom:"1px solid var(--rd-gray-border)"}}>
           <div style={{fontSize:"11px",fontWeight:700,textTransform:"uppercase",letterSpacing:"0.07em",color:"var(--rd-gray-text)"}}>
             Получатели ({bulkSelected.size} из {allUsers.length})
@@ -4930,13 +4958,13 @@ function CurrencySettingsTab({ appearance, saveAppearance, notify }) {
           Настройте название и значок валюты — они применяются по всему магазину: баланс, цены, заказы, переводы.
         </div>
         {/* Preview */}
-        <div style={{padding:"16px 20px",background:"var(--rd-green-light)",border:"1.5px solid rgba(5,150,105,0.2)",borderRadius:"var(--rd-radius-sm)",marginBottom:"24px",display:"flex",alignItems:"center",gap:"12px"}}>
-          <div style={{fontSize:"12px",fontWeight:700,color:"var(--rd-gray-text)",textTransform:"uppercase",letterSpacing:"0.5px",minWidth:"60px"}}>Превью:</div>
-          <div style={{display:"inline-flex",alignItems:"center",gap:"6px",background:"var(--rd-green-light)",border:"1px solid rgba(5,150,105,0.2)",padding:"6px 14px",borderRadius:"20px",fontSize:"14px",fontWeight:700,color:"var(--rd-green)"}}>
+        <div style={{marginBottom:"24px"}}>
+          <div style={{fontSize:"12px",fontWeight:700,color:"var(--rd-gray-text)",textTransform:"uppercase",letterSpacing:"0.5px",marginBottom:"10px"}}>Превью — так выглядит в шапке сайта:</div>
+          <div style={{display:"inline-flex",alignItems:"center",gap:"6px",background:"var(--rd-green-light)",border:"1px solid rgba(5,150,105,0.2)",padding:"6px 14px",borderRadius:"var(--rd-radius-sm)",fontSize:"13px",fontWeight:700,color:"var(--rd-green)"}}>
             {cForm.logo
-              ? <img src={cForm.logo} alt="" style={{width:"18px",height:"18px",objectFit:"contain",verticalAlign:"middle"}} />
-              : <span style={{fontSize:"16px"}}>{cForm.icon || "🪙"}</span>}
-            <span>1 250 {cForm.name || "RuDeCoin"}</span>
+              ? <img src={cForm.logo} alt="" style={{width:"16px",height:"16px",objectFit:"contain",verticalAlign:"middle"}} />
+              : <span style={{fontSize:"14px"}}>{cForm.icon || "🪙"}</span>}
+            <span>1 250 <span style={{opacity:0.85}}>{cForm.name || "RuDeCoin"}</span></span>
           </div>
         </div>
         <div className="form-field">
