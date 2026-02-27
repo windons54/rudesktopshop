@@ -123,16 +123,16 @@ async function getPool() {
       const opts = poolCfg.connectionString
         ? { connectionString: poolCfg.connectionString,
             ssl: { rejectUnauthorized: false },
-            max: 5, min: 1,
+            max: 20, min: 2,
             connectionTimeoutMillis: 5000,
-            idleTimeoutMillis: 60000,
+            idleTimeoutMillis: 30000,
             allowExitOnIdle: false }
         : { host: poolCfg.host, port: poolCfg.port || 5432,
             database: poolCfg.database, user: poolCfg.user, password: poolCfg.password,
             ssl: poolCfg.ssl ? { rejectUnauthorized: false } : false,
-            max: 5, min: 1,
+            max: 20, min: 2,
             connectionTimeoutMillis: 5000,
-            idleTimeoutMillis: 60000,
+            idleTimeoutMillis: 30000,
             allowExitOnIdle: false };
 
       g._pgPool = new Pool(opts);
@@ -163,7 +163,14 @@ async function getPool() {
 // ── Версия данных для polling (ETag) ───────────────────────────────────────
 // Инкрементируется при каждом set/delete/setMany — клиент не тянет данные если версия не изменилась
 if (!g._dataVersion) g._dataVersion = Date.now();
-const bumpVersion = () => { g._dataVersion = Date.now(); };
+const bumpVersion = () => { g._dataVersion = Date.now(); g._allCache = null; g._allCacheExpiry = 0; };
+
+// ── Серверный кэш getAll (1 секунда TTL) ──────────────────────────────────
+// При 100 пользователях polling каждые 5 секунд = ~20 запросов/сек на getAll
+// Кэш избегает 20 одинаковых запросов к БД в секунду
+if (!g._allCache) g._allCache = null;
+if (!g._allCacheExpiry) g._allCacheExpiry = 0;
+const ALL_CACHE_TTL = 1000; // 1 секунда
 
 // ── Утилиты ────────────────────────────────────────────────────────────────
 const serialize   = v => typeof v === 'string' ? v : JSON.stringify(v);
@@ -348,6 +355,7 @@ export default async function handler(req, res) {
 
   // ── Версия данных (для polling без лишних запросов) ──
   if (action === 'version') {
+    res.setHeader('Cache-Control', 'no-store');
     return res.json({ ok: true, version: g._dataVersion });
   }
 
@@ -479,7 +487,16 @@ export default async function handler(req, res) {
       if (action === 'get')     return res.json({ ok: true, value: await pgKv.get(pool, key) });
       if (action === 'set')     { await pgKv.set(pool, key, value); return res.json({ ok: true }); }
       if (action === 'delete')  { await pgKv.delete(pool, key); return res.json({ ok: true }); }
-      if (action === 'getAll')  return res.json({ ok: true, data: await pgKv.getAll(pool), version: g._dataVersion });
+      if (action === 'getAll') {
+        const now = Date.now();
+        if (g._allCache && now < g._allCacheExpiry) {
+          return res.json({ ok: true, data: g._allCache, version: g._dataVersion });
+        }
+        const data = await pgKv.getAll(pool);
+        g._allCache = data;
+        g._allCacheExpiry = now + ALL_CACHE_TTL;
+        return res.json({ ok: true, data, version: g._dataVersion });
+      }
       if (action === 'setMany') { await pgKv.setMany(pool, data); return res.json({ ok: true }); }
     } else {
       if (action === 'get')     { const s = readJSON(); return res.json({ ok: true, value: s[key] !== undefined ? s[key] : null }); }

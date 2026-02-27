@@ -1,7 +1,16 @@
 'use client';
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, memo } from 'react';
 import Head from 'next/head';
-import * as XLSX from 'xlsx';
+// XLSX loaded lazily — only when import/export is used
+let _xlsxModule = null;
+async function getXLSX() {
+  if (!_xlsxModule) _xlsxModule = await import('xlsx');
+  return _xlsxModule;
+}
+const XLSX = { utils: null, writeFile: null, read: null };
+if (typeof window !== 'undefined') {
+  import('xlsx').then(m => { Object.assign(XLSX, m); _xlsxModule = m; });
+}
 
 // ─── DEFAULT PRODUCTS (fallback if no custom products in DB) ──────────────────
 const PRODUCTS = [
@@ -80,6 +89,22 @@ const compressImage = (dataUrl, maxW = 1200, maxH = 1200, quality = 0.85, target
   });
 };
 
+// ── Утилита debounce ──────────────────────────────────────────────────────
+function debounce(fn, ms) {
+  let timer;
+  return (...args) => { clearTimeout(timer); timer = setTimeout(() => fn(...args), ms); };
+}
+
+// ── Дедупликация запросов — один и тот же запрос не летит параллельно ──────
+const _inflightRequests = new Map();
+function deduplicatedFetch(action, body = {}) {
+  const cacheKey = action + (body.key || '');
+  if (_inflightRequests.has(cacheKey)) return _inflightRequests.get(cacheKey);
+  const promise = _apiCall(action, body).finally(() => _inflightRequests.delete(cacheKey));
+  _inflightRequests.set(cacheKey, promise);
+  return promise;
+}
+
 // ══════════════════════════════════════════════════════════════
 // Серверное хранилище — данные общие для всех браузеров
 // pgConfig хранится ТОЛЬКО на сервере (env или файл)
@@ -91,6 +116,7 @@ async function _apiCall(action, body = {}) {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ action, ...body }),
+    keepalive: action === 'version',
   });
   return res.json();
 }
@@ -146,6 +172,41 @@ const _lsDel = (k) => { try { localStorage.removeItem('_store_'+k); } catch {} }
 const _pendingWrites = new Set();
 const _writePromises = [];
 
+// ── Write batching: группирует быстрые последовательные set() в один setMany запрос ──
+const _writeBatch = {};
+let _batchTimer = null;
+const BATCH_DELAY = 80; // мс задержки для группировки
+
+function _flushBatch() {
+  _batchTimer = null;
+  const batch = { ..._writeBatch };
+  const keys = Object.keys(batch);
+  if (keys.length === 0) return;
+  keys.forEach(k => delete _writeBatch[k]);
+
+  const doFlush = (attempt) => {
+    const action = keys.length === 1 ? 'set' : 'setMany';
+    const body = keys.length === 1 ? { key: keys[0], value: batch[keys[0]] } : { data: batch };
+    return _apiCall(action, body)
+      .then((r) => {
+        keys.forEach(k => _pendingWrites.delete(k));
+        if (r && !r.ok && attempt < 3) {
+          return new Promise(res => setTimeout(res, 500 * (attempt + 1))).then(() => doFlush(attempt + 1));
+        }
+      })
+      .catch(e => {
+        if (attempt < 3) {
+          return new Promise(res => setTimeout(res, 1000 * (attempt + 1))).then(() => doFlush(attempt + 1));
+        }
+        keys.forEach(k => _pendingWrites.delete(k));
+        console.error('[Storage] batch write error (final)', e.message);
+      });
+  };
+  const p = doFlush(0);
+  _writePromises.push(p);
+  p.finally(() => { const idx = _writePromises.indexOf(p); if (idx !== -1) _writePromises.splice(idx, 1); });
+}
+
 const storage = {
   get: (k) => {
     if (_LOCAL_KEYS.has(k)) return _lsGet(k);
@@ -155,34 +216,9 @@ const storage = {
     if (_LOCAL_KEYS.has(k)) { _lsSet(k, v); return; }
     _cache[k] = v; // обновляем кэш немедленно
     _pendingWrites.add(k);
-    const doWrite = (attempt) => {
-      return _apiCall('set', { key: k, value: v })
-        .then((r) => {
-          _pendingWrites.delete(k);
-          const idx = _writePromises.indexOf(p);
-          if (idx !== -1) _writePromises.splice(idx, 1);
-          if (r && !r.ok && attempt < 3) {
-            console.warn('[Storage] set failed, retrying', k, r.error, 'attempt', attempt+1);
-            return new Promise(res => setTimeout(res, 500 * (attempt + 1))).then(() => doWrite(attempt + 1));
-          }
-          if (r && !r.ok) {
-            console.error('[Storage] set failed permanently', k, r.error);
-          }
-        })
-        .catch(e => {
-          if (attempt < 3) {
-            console.warn('[Storage] set error, retrying', k, e.message, 'attempt', attempt+1);
-            return new Promise(res => setTimeout(res, 1000 * (attempt + 1))).then(() => doWrite(attempt + 1));
-          }
-          _pendingWrites.delete(k);
-          const idx = _writePromises.indexOf(p);
-          if (idx !== -1) _writePromises.splice(idx, 1);
-          console.error('[Storage] set error (final)', k, e.message);
-        });
-    };
-    const p = doWrite(0);
-    _writePromises.push(p);
-    return p;
+    _writeBatch[k] = v;
+    if (_batchTimer) clearTimeout(_batchTimer);
+    _batchTimer = setTimeout(_flushBatch, BATCH_DELAY);
   },
   delete: (k) => {
     if (_LOCAL_KEYS.has(k)) { _lsDel(k); return; }
@@ -199,7 +235,7 @@ const storage = {
   // Обновить кэш с сервера (вызывается polling-ом)
   refresh: async () => {
     try {
-      const r = await _apiCall('getAll');
+      const r = await deduplicatedFetch('getAll');
       if (r.ok && r.data) _applyData(r.data);
     } catch(e) { console.warn('Store refresh error', e); }
   },
@@ -661,7 +697,11 @@ function App() {
 
     // Polling с проверкой версии — не тянем данные если ничего не изменилось
     let _lastKnownVersion = _initVersion;
+    let _pollActive = true;
+    const handleVisChange = () => { _pollActive = !document.hidden; };
+    document.addEventListener('visibilitychange', handleVisChange);
     const pollInterval = setInterval(async () => {
+      if (!_pollActive) return; // не опрашиваем если вкладка скрыта
       try {
         // Сначала проверяем версию (лёгкий запрос)
         const vRes = await fetch('/api/store', {
@@ -691,10 +731,11 @@ function App() {
           _applyServerData(filtered);
         }
       } catch(e) { /* ignore */ }
-    }, 10000);
+    }, 5000);
 
     return () => {
       clearInterval(pollInterval);
+      document.removeEventListener('visibilitychange', handleVisChange);
       window.removeEventListener('beforeunload', handleUnload);
     };
   }, []);
@@ -746,9 +787,9 @@ function App() {
     setUsers(safe);
     storage.set("cm_users", safe);
   };
-  const saveOrders = (o) => { setOrders(o); storage.set("cm_orders", o); };
-  const saveProducts = (p) => { setCustomProducts(p); storage.set("cm_products", p); };
-  const saveTransfers = (t) => { setTransfers(t); storage.set("cm_transfers", t); };
+  const saveOrders = useCallback((o) => { setOrders(o); storage.set("cm_orders", o); }, []);
+  const saveProducts = useCallback((p) => { setCustomProducts(p); storage.set("cm_products", p); }, []);
+  const saveTransfers = useCallback((t) => { setTransfers(t); storage.set("cm_transfers", t); }, []);
   const saveDbConfig = (db) => { setDbConfig(db); };
   const saveAppearance = (ap) => {
     if (ap.currency) _globalCurrency = { ...ap.currency };
@@ -802,15 +843,15 @@ ym(${integ.ymCounterId}, "init", { clickmap:true, trackLinks:true, accurateTrack
     }
   }, [appearance.integrations?.ymEnabled, appearance.integrations?.ymCounterId]);
 
-  const saveCategories = (cc) => { setCustomCategories(cc); storage.set("cm_categories", cc); };
-  const saveFaq = (fq) => { setFaq(fq); storage.set("cm_faq", fq); };
-  const saveTasks = (tk) => { setTasks(tk); storage.set("cm_tasks", tk); };
-  const saveAuctions = (au) => { setAuctions(au); storage.set("cm_auctions", au); };
-  const saveLotteries = (lt) => { const data = lt || []; setLotteries(data); storage.set("cm_lotteries", data); };
-  const savePolls = (pl) => { const data = pl || []; setPolls(data); storage.set("cm_polls", data); };
-  const saveDeposits = (dp) => { const data = dp || []; setDeposits(data); storage.set("cm_deposits", data); };
-  const saveUserDeposits = (ud) => { const data = ud || []; setUserDeposits(data); storage.set("cm_user_deposits", data); };
-  const saveTaskSubmissions = (ts) => { setTaskSubmissions(ts); storage.set("cm_task_submissions", ts); };
+  const saveCategories = useCallback((cc) => { setCustomCategories(cc); storage.set("cm_categories", cc); }, []);
+  const saveFaq = useCallback((fq) => { setFaq(fq); storage.set("cm_faq", fq); }, []);
+  const saveTasks = useCallback((tk) => { setTasks(tk); storage.set("cm_tasks", tk); }, []);
+  const saveAuctions = useCallback((au) => { setAuctions(au); storage.set("cm_auctions", au); }, []);
+  const saveLotteries = useCallback((lt) => { const data = lt || []; setLotteries(data); storage.set("cm_lotteries", data); }, []);
+  const savePolls = useCallback((pl) => { const data = pl || []; setPolls(data); storage.set("cm_polls", data); }, []);
+  const saveDeposits = useCallback((dp) => { const data = dp || []; setDeposits(data); storage.set("cm_deposits", data); }, []);
+  const saveUserDeposits = useCallback((ud) => { const data = ud || []; setUserDeposits(data); storage.set("cm_user_deposits", data); }, []);
+  const saveTaskSubmissions = useCallback((ts) => { setTaskSubmissions(ts); storage.set("cm_task_submissions", ts); }, []);
 
   const [cartAnimating, setCartAnimating] = useState(false);
   const addToCart = (product) => {
@@ -896,10 +937,10 @@ ym(${integ.ymCounterId}, "init", { clickmap:true, trackLinks:true, accurateTrack
 
   const isAdmin = currentUser && users[currentUser]?.role === "admin";
   const allProducts = customProducts !== null ? customProducts : PRODUCTS;
-  const activeProducts = allProducts.filter(p => !p.inactive);
+  const activeProducts = useMemo(() => allProducts.filter(p => !p.inactive), [allProducts]);
   const allCategories = customCategories !== null ? customCategories : ["Одежда", "Аксессуары", "Посуда", "Канцелярия"];
-  const shopCategories = ["Все", ...allCategories];
-  const filtered = filterCat === "Все" ? activeProducts : activeProducts.filter(p => p.category === filterCat);
+  const shopCategories = useMemo(() => ["Все", ...allCategories], [allCategories]);
+  const filtered = useMemo(() => filterCat === "Все" ? activeProducts : activeProducts.filter(p => p.category === filterCat), [filterCat, activeProducts]);
 
 
   if (sqliteInitError) return (
@@ -2817,7 +2858,7 @@ function ProductModal({ product, onClose, addToCart, currency }) {
   );
 }
 
-function ProductCard({ product, addToCart, onOpen, favorites, toggleFavorite }) {
+const ProductCard = memo(function ProductCard({ product, addToCart, onOpen, favorites, toggleFavorite }) {
   const cName = getCurrName();
   const [imgIdx, setImgIdx] = useState(0);
   const imgs = product.images && product.images.length > 0 ? product.images : (product.image ? [product.image] : []);
@@ -2907,7 +2948,7 @@ function ProductCard({ product, addToCart, onOpen, favorites, toggleFavorite }) 
       </div>
     </div>
   );
-}
+});
 
 // ── FAVORITES ────────────────────────────────────────────────────────────
 

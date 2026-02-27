@@ -35,6 +35,13 @@ copySqlWasm();
 
 const nextConfig = {
   reactStrictMode: false,
+  compress: true,
+  poweredByHeader: false,
+
+  // Оптимизация для продакшена
+  compiler: {
+    removeConsole: process.env.NODE_ENV === 'production' ? { exclude: ['error', 'warn'] } : false,
+  },
 
   async headers() {
     return [
@@ -43,6 +50,21 @@ const nextConfig = {
         headers: [
           { key: 'Content-Type', value: 'application/wasm' },
           { key: 'Cache-Control', value: 'public, max-age=31536000, immutable' },
+        ],
+      },
+      // Кэширование статических ресурсов
+      {
+        source: '/_next/static/:path*',
+        headers: [
+          { key: 'Cache-Control', value: 'public, max-age=31536000, immutable' },
+        ],
+      },
+      // API — без кэша
+      {
+        source: '/api/:path*',
+        headers: [
+          { key: 'Cache-Control', value: 'no-store, no-cache, must-revalidate' },
+          { key: 'X-Content-Type-Options', value: 'nosniff' },
         ],
       },
     ];
