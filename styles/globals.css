@@ -68,6 +68,8 @@ body {
   justify-content: space-between;
   height: 64px;
   gap: 16px;
+  min-width: 0;
+  overflow: hidden;
 }
 .rd-logo {
   cursor: pointer;
@@ -123,6 +125,7 @@ body {
   display: flex;
   align-items: center;
   gap: 12px;
+  flex-shrink: 0;
 }
 .balance-pill {
   display: inline-flex;
@@ -2218,6 +2221,6 @@ input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; }
   .rd-nav { display: none !important; }
   .rd-burger { display: flex !important; }
   .rd-mobile-nav { display: block; }
-  .rd-header-inner { height: 58px; }
+  .rd-header-inner { height: 58px; overflow: visible; }
   .rd-logo img { height: 52px; }
 }

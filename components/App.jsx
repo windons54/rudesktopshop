@@ -446,7 +446,7 @@ function App() {
     if (appearance.currency && appearance.currency.logo) return <img src={appearance.currency.logo} alt="" style={{width:"16px",height:"16px",objectFit:"contain",verticalAlign:"middle"}} />;
     return <span>{(appearance.currency && appearance.currency.icon) ? appearance.currency.icon : "🪙"}</span>;
   };
-  const [appearance, setAppearance] = useState({ logo: null, theme: "default", headerBg: "", footerBg: "", pageBg: "", accentColor: "", socials: { telegram: "", max: "", vk: "", rutube: "", vkvideo: "" }, birthdayBonus: 100, birthdayEnabled: true, integrations: { tgEnabled: false, tgBotToken: "", tgChatId: "", maxEnabled: false, maxBotToken: "", maxChatId: "" }, currency: { name: "RuDeCoin", icon: "🪙", logo: "" }, seo: { title: "", description: "", favicon: "" }, registrationEnabled: true, bitrix24: { enabled: false, clientId: "", clientSecret: "", portalUrl: "" } });
+  const [appearance, setAppearance] = useState({ logo: null, theme: "default", headerBg: "", footerBg: "", pageBg: "", accentColor: "", socials: { telegram: "", max: "", vk: "", rutube: "", vkvideo: "" }, birthdayBonus: 100, birthdayEnabled: true, integrations: { tgEnabled: false, tgBotToken: "", tgChatId: "", maxEnabled: false, maxBotToken: "", maxChatId: "" }, currency: { name: "RuDeCoin", icon: "🪙", logo: "" }, seo: { title: "", description: "", favicon: "" }, registrationEnabled: true, bitrix24: { enabled: false, clientId: "", clientSecret: "", portalUrl: "" }, features: { auction: true, lottery: true, voting: true, bank: true, tasks: true } });
   const [currentUser, setCurrentUser] = useState(null);
   const [cart, setCart] = useState([]);
   const [orderSuccess, setOrderSuccess] = useState(false);
@@ -772,6 +772,35 @@ function App() {
     }
   }
 
+  // Apply Yandex Metrika counter
+  React.useEffect(() => {
+    const integ = appearance.integrations || {};
+    const existingScript = document.getElementById('ym-script');
+    if (integ.ymEnabled && integ.ymCounterId) {
+      if (!existingScript) {
+        const s = document.createElement('script');
+        s.id = 'ym-script';
+        s.type = 'text/javascript';
+        s.text = `(function(m,e,t,r,i,k,a){m[i]=m[i]||function(){(m[i].a=m[i].a||[]).push(arguments)};
+m[i].l=1*new Date();
+for (var j = 0; j < document.scripts.length; j++) {if (document.scripts[j].src === r) { return; }}
+k=e.createElement(t),a=e.getElementsByTagName(t)[0],k.async=1,k.src=r,a.parentNode.insertBefore(k,a)})
+(window, document, "script", "https://mc.yandex.ru/metrika/tag.js", "ym");
+ym(${integ.ymCounterId}, "init", { clickmap:true, trackLinks:true, accurateTrackBounce:true });`;
+        document.head.appendChild(s);
+        // noscript pixel
+        const ns = document.createElement('noscript');
+        ns.id = 'ym-noscript';
+        ns.innerHTML = `<div><img src="https://mc.yandex.ru/watch/${integ.ymCounterId}" style="position:absolute; left:-9999px;" alt="" /></div>`;
+        document.body.appendChild(ns);
+      }
+    } else {
+      if (existingScript) existingScript.remove();
+      const ns = document.getElementById('ym-noscript');
+      if (ns) ns.remove();
+    }
+  }, [appearance.integrations?.ymEnabled, appearance.integrations?.ymCounterId]);
+
   const saveCategories = (cc) => { setCustomCategories(cc); storage.set("cm_categories", cc); };
   const saveFaq = (fq) => { setFaq(fq); storage.set("cm_faq", fq); };
   const saveTasks = (tk) => { setTasks(tk); storage.set("cm_tasks", tk); };
@@ -907,11 +936,11 @@ function App() {
             <div className="rd-logo" onClick={() => setPage("shop")}>{appearance.logo ? <img src={appearance.logo} alt="logo" /> : <img src="data:image/svg+xml;base64,PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0iVVRGLTgiPz4NCjwhRE9DVFlQRSBzdmcgUFVCTElDICItLy9XM0MvL0RURCBTVkcgMS4xLy9FTiIgImh0dHA6Ly93d3cudzMub3JnL0dyYXBoaWNzL1NWRy8xLjEvRFREL3N2ZzExLmR0ZCI+DQo8IS0tIENyZWF0b3I6IENvcmVsRFJBVyAtLT4NCjxzdmcgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIiB4bWw6c3BhY2U9InByZXNlcnZlIiB3aWR0aD0iMTg2LjYwNW1tIiBoZWlnaHQ9IjczLjI1bW0iIHZlcnNpb249IjEuMSIgc3R5bGU9InNoYXBlLXJlbmRlcmluZzpnZW9tZXRyaWNQcmVjaXNpb247IHRleHQtcmVuZGVyaW5nOmdlb21ldHJpY1ByZWNpc2lvbjsgaW1hZ2UtcmVuZGVyaW5nOm9wdGltaXplUXVhbGl0eTsgZmlsbC1ydWxlOmV2ZW5vZGQ7IGNsaXAtcnVsZTpldmVub2RkIg0Kdmlld0JveD0iMCAwIDE4NjYwLjUyIDczMjUiDQogeG1sbnM6eGxpbms9Imh0dHA6Ly93d3cudzMub3JnLzE5OTkveGxpbmsiDQogeG1sbnM6eG9kbT0iaHR0cDovL3d3dy5jb3JlbC5jb20vY29yZWxkcmF3L29kbS8yMDAzIj4NCiA8ZGVmcz4NCiAgPGZvbnQgaWQ9IkZvbnRJRDAiIGhvcml6LWFkdi14PSI3NjAiIGZvbnQtdmFyaWFudD0ibm9ybWFsIiBzdHlsZT0iZmlsbC1ydWxlOm5vbnplcm8iIGZvbnQtd2VpZ2h0PSI1MDAiPg0KCTxmb250LWZhY2UgDQoJCWZvbnQtZmFtaWx5PSJTdG9semwgTWVkaXVtIj4NCgkJPGZvbnQtZmFjZS1zcmM+DQoJCQk8Zm9udC1mYWNlLW5hbWUgbmFtZT0iU3RvbHpsLU1lZGl1bSIvPg0KCQk8L2ZvbnQtZmFjZS1zcmM+DQoJPC9mb250LWZhY2U+DQogICA8bWlzc2luZy1nbHlwaD48cGF0aCBkPSJNMCAweiIvPjwvbWlzc2luZy1nbHlwaD4NCiAgIDxnbHlwaCB1bmljb2RlPSJEIiBob3Jpei1hZHYteD0iNzMzIiBkPSJNMzI5LjAwMyA2OTkuOTk5YzEwMiwwIDE4NywtMy4yOTk2OGUrMDAxIDI1NS45OTcsLTkuOTk5NmUrMDAxIDY3Ljk5ODEsLTYuNzAwNTllKzAwMSAxMDIsLTEuNTAwMDFlKzAwMiAxMDIsLTIuNTAwMDNlKzAwMiAwLC05Ljk5OTZlKzAwMSAtMy40MDAyNGUrMDAxLC0xLjgyOTk3ZSswMDIgLTEuMDJlKzAwMiwtMi40OTk5N2UrMDAyIC02Ljg5OTY5ZSswMDEsLTYuNzAwNTllKzAwMSAtMS41Mzk5NmUrMDAyLC0xLjAwMDAzZSswMDIgLTIuNTU5OTdlKzAwMiwtMS4wMDAwM2UrMDAybC0yLjUzZSswMDIgMCAwIDY5OS45OTkgMjUzIDB6bTAgLTUuNjM5OTZlKzAwMmM2Mi45OTY5LDAgMTE0Ljk5OSwxOS45OTc4IDE1NC45OTUsNjAuMDAwMyA0MC4wMDI0LDM5Ljk5NTcgNjAuMDAwMyw5MC45OTkzIDYwLjAwMDMsMTUzLjk5NiAwLDYzLjAwMzcgLTEuOTk5NzhlKzAwMSwxMTQuMDAxIC02LjAwMDAzZSswMDEsMTU0LjAwMyAtMy45OTk1N2UrMDAxLDM5Ljk5NTcgLTkuMTk5ODJlKzAwMSw2MC4wMDAzIC0xLjU0OTk1ZSswMDIsNjAuMDAwM2wtMS4xMDAwNWUrMDAyIDAgMCAtNC4yOGUrMDAyIDExMC4wMDUgMHoiLz4NCiAgIDxnbHlwaCB1bmljb2RlPSJSIiBob3Jpei1hZHYteD0iNjgxIiBkPSJNNDc5LjAwMyAwbC0xLjgxMDA2ZSswMDIgMjUyLjAwMSAtNy44OTk5MmUrMDAxIDAgMCAtMi41MjAwMWUrMDAyIC0xLjQyOTk1ZSswMDIgMCAwIDY5OS45OTkgMzAxIDBjNzQuOTk3LDAgMTMyLjk5OSwtMS45OTk3OGUrMDAxIDE3NS45OTksLTYuMDk5OTFlKzAwMSA0Mi4wMDAyLC00LjEwMDEzZSswMDEgNjIuOTk2OSwtOS42OTk5M2UrMDAxIDYyLjk5NjksLTEuNjcwMDJlKzAwMiAwLC01LjU5OThlKzAwMSAtMS4zOTk3OGUrMDAxLC0xLjAyZSswMDIgLTQuMTAwMTNlKzAwMSwtMS4zNjk5NWUrMDAyIC0yLjY5OTY3ZSswMDEsLTMuNTAwMTNlKzAwMSAtNi42MDAwM2UrMDAxLC01LjkwMDE0ZSswMDEgLTEuMTU5OThlKzAwMiwtNy4yMDAwM2UrMDAxbDE5Ni4wMDMgLTIuNjMwMDJlKzAwMiAtMS43NTk5OWUrMDAyIDB6bS0yLjYwMDA2ZSswMDIgNTY0LjAwM2wwIC0xLjg3ZSswMDIgMTQyLjAwMyAwYzM2Ljk5OSwwIDY0LjAwMjUsNy45OTc3OSA4My4wMDE1LDI0Ljk5OSAxOC4wMDAxLDE1Ljk5NTYgMjYuOTk2NywzOC45OTY4IDI2Ljk5NjcsNjcuOTk4MSAwLDI5LjAwMTMgLTguOTk2NjdlKzAwMCw1Mi4wMDI1IC0yLjc5OTU2ZSswMDEsNjguOTk2OSAtMS45MDA1N2UrMDAxLDE3LjAwMTIgLTQuNjAwMjVlKzAwMSwyNS4wMDU3IC04LjIwMDI2ZSswMDEsMjUuMDA1N2wtMS40MjAwM2UrMDAyIDB6Ii8+DQogICA8Z2x5cGggdW5pY29kZT0iZSIgaG9yaXotYWR2LXg9IjY1MSIgZD0iTTMzMSA1NjEuOTk4YzkwLjAwMDQsMCAxNjEuMDAyLC0zLjA5OTllKzAwMSAyMTMuOTk2LC05LjI5OTdlKzAwMSA1Mi4wMDI1LC02LjE5OThlKzAwMSA3NC4wMDQ4LC0xLjM5ZSswMDIgNjcuMDA1OSwtMi4zMDk5OGUrMDAybC00LjIyZSswMDIgMGM0Ljk5NDQsLTQuMzAwNThlKzAwMSAxOS45OTc4LC03LjUwMDM3ZSswMDEgNDUuOTk1NywtOS44MDA0OWUrMDAxIDI1Ljk5NzksLTIuMzAwMTJlKzAwMSA1OC4wMDI1LC0zLjM5OTU3ZSswMDEgOTYuOTk5MywtMy4zOTk1N2UrMDAxIDI4LjAwMjQsMCA1My4wMDE0LDYuMDAwMDMgNzUuMDAzNywxOC45OTkgMjEuOTk1NiwxMi4wMDAxIDM3Ljk5NzksMjkuMDAxMyA0Ny4wMDEzLDQ5Ljk5OGwxNDcuOTk2IDBjLTEuODk5OWUrMDAxLC02LjE5OThlKzAwMSAtNS4zMDAxNGUrMDAxLC0xLjA4OTk5ZSswMDIgLTEuMDJlKzAwMiwtMS4zOTk5OGUrMDAyIC00Ljg5OTkxZSswMDEsLTMuMDk5OWUrMDAxIC0xLjAzOTk4ZSswMDIsLTQuNzAwMTNlKzAwMSAtMS42NzAwMmUrMDAyLC00LjcwMDEzZSswMDEgLTguNDk5OTNlKzAwMSwwIC0xLjU0OTk1ZSswMDIsMjYuOTk2NyAtMi4wODk5NWUrMDAyLDgwLjk5NyAtNS40MDAwMmUrMDAxLDU0LjAwMDIgLTguMTAwMzdlKzAwMSwxMjIuMDA1IC04LjEwMDM3ZSswMDEsMjA1IDAsODMuMDAxNSAyNy4wMDM1LDE1MS4wMDYgODEuMDAzNywyMDYuMDA1IDU0LjAwMDIsNTQuOTk5MSAxMjIuOTk3LDgxLjk5NTkgMjA1Ljk5OSw4MS45OTU5em0tOS45ODg4ZS0wMDEgLTEuMTc5OTZlKzAwMmMtMy40MDAyNGUrMDAxLDAgLTYuMjAwNDhlKzAwMSwtOS4wMDM0MmUrMDAwIC04LjQ5OTkzZSswMDEsLTIuNzAwMzVlKzAwMSAtMi4zMDAxMmUrMDAxLC0xLjg5OTllKzAwMSAtMy45MDAzNmUrMDAxLC00LjI5OTkxZSswMDEgLTQuODAwMDJlKzAwMSwtNy4zOTk4MWUrMDAxbDI2Mi45OTYgMGMtNy45OTc3OWUrMDAwLDMwLjk5OSAtMi4yOTk0NWUrMDAxLDU0Ljk5OTEgLTQuNTk5NTdlKzAwMSw3My45OTgxIC0yLjMwMDEyZSswMDEsMTguMDAwMSAtNS4xMDAzNmUrMDAxLDI3LjAwMzUgLTguNDAwMDRlKzAwMSwyNy4wMDM1eiIvPg0KICAgPGdseXBoIHVuaWNvZGU9ImsiIGhvcml6LWFkdi14PSI2MzMiIGQ9Ik02MTMuMDAyIDBsLTEuODMwMDRlKzAwMiAwIC0yLjI0OTk4ZSswMDIgMjQwLjAwMSAwIC0yLjQwMDAxZSswMDIgLTEuNDMwMDJlKzAwMiAwIDAgNzcwLjAwMSAxNDMuMDAyIDAgMCAtNC40OTAwM2UrMDAyIDIwOS4wMDIgMjI5IDE4MS45OTkgMCAtMi41MTAwMmUrMDAyIC0yLjYxOTk3ZSswMDIgMjY4LjAwMyAtMi44ODAwMWUrMDAyeiIvPg0KICAgPGdseXBoIHVuaWNvZGU9Im8iIGhvcml6LWFkdi14PSI2NjAiIGQ9Ik0xMjYuOTk5IDQ4MC4wMDJjNTQuOTk5MSw1NC45OTkxIDEyMy4wMDQsODEuOTk1OSAyMDMuMDAyLDgxLjk5NTkgNzkuOTk4MSwwIDE0Ny45OTYsLTIuNjk5NjdlKzAwMSAyMDQuMDAxLC04LjE5OTU5ZSswMDEgNTQuOTk5MSwtNS40OTk5MWUrMDAxIDgyLjk5NDcsLTEuMjMwMDRlKzAwMiA4Mi45OTQ3LC0yLjA1ZSswMDIgMCwtOC4zMDAxNWUrMDAxIC0yLjY5OTY3ZSswMDEsLTEuNTFlKzAwMiAtOC4xOTk1OWUrMDAxLC0yLjA1ZSswMDIgLTUuNDk5OTFlKzAwMSwtNS41MDA1OWUrMDAxIC0xLjI0MDAzZSswMDIsLTguMjAwMjZlKzAwMSAtMi4wNWUrMDAyLC04LjIwMDI2ZSswMDEgLTguMTAwMzdlKzAwMSwwIC0xLjQ4MDAzZSswMDIsMjYuOTk2NyAtMi4wMzAwMmUrMDAyLDgyLjAwMjYgLTUuNDk5OTFlKzAwMSw1NC45OTkxIC04LjMwMDE1ZSswMDEsMTIyLjk5NyAtOC4zMDAxNWUrMDAxLDIwNSAwLDgxLjk5NTkgMjguMDAyNCwxNTAuMDAxIDgzLjAwMTUsMjA1em0zMDQuMDA0IC05LjYwMDA0ZSswMDFjLTIuNzAwMzVlKzAwMSwyNy45OTU2IC02LjAwMDAzZSswMDEsNDIuMDAwMiAtMS4wMTAwMmUrMDAyLDQyLjAwMDIgLTQuMTAwMTNlKzAwMSwwIC03LjQwMDQ4ZSswMDEsLTEuNDAwNDZlKzAwMSAtMS4wMTAwMmUrMDAyLC00LjIwMDAyZSswMDEgLTIuNjk5NjdlKzAwMSwtMi44MDAyNGUrMDAxIC00LjEwMDEzZSswMDEsLTYuNDAwMjVlKzAwMSAtNC4xMDAxM2UrMDAxLC0xLjA4OTk5ZSswMDIgMCwtNC41MDAzNmUrMDAxIDE0LjAwNDYsLTguMTAwMzdlKzAwMSA0MS4wMDEzLC0xLjA4OTk5ZSswMDIgMjYuOTk2NywtMi44MDAyNGUrMDAxIDYwLjAwMDMsLTQuMjAwMDJlKzAwMSAxMDEuMDAyLC00LjIwMDAyZSswMDEgNDEuMDAxMywwIDc0Ljk5NywxMy45OTc4IDEwMiw0Mi4wMDAyIDI2Ljk5NjcsMjcuOTk1NiAzOS45OTU3LDYzLjk5NTggMzkuOTk1NywxMDguOTk5IDAsNDQuOTk2OCAtMS4zOTk3OGUrMDAxLDgwLjk5NyAtNC4wOTk0NmUrMDAxLDEwOC45OTl6Ii8+DQogICA8Z2x5cGggdW5pY29kZT0icCIgaG9yaXotYWR2LXg9IjY3MyIgZD0iTTM3OS4wMDEgNTYxLjk5OGM3MS4wMDE0LDAgMTMxLjAwMiwtMi42OTk2N2UrMDAxIDE3OS4wMDIsLTcuOTk5ODFlKzAwMSA0OC4wMDAyLC01LjQwMDAyZSswMDEgNzIuMDAwMywtMS4yMjk5N2UrMDAyIDcyLjAwMDMsLTIuMDY5OThlKzAwMiAwLC04LjQwMDA0ZSswMDEgLTIuNDAwMDFlKzAwMSwtMS41MzAwNGUrMDAyIC03LjEwMDE0ZSswMDEsLTIuMDYwMDVlKzAwMiAtNC44MDAwMmUrMDAxLC01LjQwMDAyZSswMDEgLTEuMDhlKzAwMiwtOC4wOTk3ZSswMDEgLTEuODAwMDFlKzAwMiwtOC4wOTk3ZSswMDEgLTcuMjk5OTJlKzAwMSwwIC0xLjMxMDAyZSswMDIsMjkuMDAxMyAtMS43NDAwMWUrMDAyLDg1Ljk5ODFsMCAtMy4yNDAwMWUrMDAyIC0xLjQzMDAyZSswMDIgMCAwIDgwMC4wMDEgMTQzLjAwMiAwIDAgLTcuNjk5NDdlKzAwMWM0Mi45OTkxLDU4Ljk5NDYgMTAxLjAwMiw4OC45OTQ4IDE3NC4wMDEsODguOTk0OHptLTMuMzAwMzVlKzAwMSAtNC4zNzk5NWUrMDAyYzQwLjAwMjQsMCA3My4wMDYsMTMuOTk3OCAxMDAuMDAzLDQyLjAwMDIgMjUuOTk3OSwyNy45OTU2IDM5LjAwMzYsNjMuOTk1OCAzOS4wMDM2LDEwOC45OTkgMCw0NC45OTY4IC0xLjMwMDU3ZSswMDEsODAuOTk3IC0zLjkwMDM2ZSswMDEsMTA4Ljk5OSAtMi41OTk3OWUrMDAxLDI3Ljk5NTYgLTUuOTAwMTRlKzAwMSw0Mi4wMDAyIC0xLjAwMDAzZSswMDIsNDIuMDAwMiAtNC4wOTk0NmUrMDAxLDAgLTcuMzk5ODFlKzAwMSwtMS40MDA0NmUrMDAxIC0xLjAwOTk1ZSswMDIsLTQuMjAwMDJlKzAwMSAtMi43MDAzNWUrMDAxLC0yLjgwMDI0ZSswMDEgLTQuMDAwMjRlKzAwMSwtNi40MDAyNWUrMDAxIC00LjAwMDI0ZSswMDEsLTEuMDg5OTllKzAwMiAwLC00LjUwMDM2ZSswMDEgMTIuOTk4OSwtOC4xMDAzN2UrMDAxIDQwLjAwMjQsLTEuMDg5OTllKzAwMiAyNi45OTY3LC0yLjgwMDI0ZSswMDEgNjAuMDAwMywtNC4yMDAwMmUrMDAxIDEwMC45OTUsLTQuMjAwMDJlKzAwMXoiLz4NCiAgIDxnbHlwaCB1bmljb2RlPSJzIiBob3Jpei1hZHYteD0iNTkxIiBkPSJNMzExLjAwMyAtMS4yMDAwMWUrMDAxYy03LjQwMDQ4ZSswMDEsMCAtMS4zNjAwM2UrMDAyLDE3LjAwMTIgLTEuODUwMDJlKzAwMiw1Mi4wMDI1IC00Ljg5OTkxZSswMDEsMzMuOTk1NyAtNy44OTk5MmUrMDAxLDgwLjk5NyAtOC45MDAxNWUrMDAxLDE0MC45OTdsMTQ1IDBjMTIuMDAwMSwtNC44OTk5MWUrMDAxIDU2LjAwNDgsLTcuMzk5ODFlKzAwMSAxMzIuOTk5LC03LjM5OTgxZSswMDEgNjIuMDA0OCwwIDkzLjAwMzgsMTQuOTk2NyA5My4wMDM4LDQ0Ljk5NjggMCw0LjAwMjI3IDAsOC4wMDQ1NCAtOS45ODg4ZS0wMDEsMTEuMDAxMiAtMS4wMDU2M2UrMDAwLDMuMDAzMzkgLTMuMDAzMzllKzAwMCw2LjAwMDAzIC01LjAwMTE1ZSswMDAsOS4wMDM0MiAtMy4wMDMzOWUrMDAwLDIuOTk2NjQgLTUuMDAxMTVlKzAwMCw0Ljk5NDQgLTguMDA0NTRlKzAwMCw3Ljk5Nzc5IC0yLjk5NjY0ZSswMDAsMS45OTc3NiAtNi4wMDAwM2UrMDAwLDQuMDAyMjcgLTEuMDk5NDRlKzAwMSw2LjAwMDAzIC01LjAwMTE1ZSswMDAsMS45OTc3NiAtMS4wMDAyM2UrMDAxLDQuMDAyMjcgLTEuNDAwNDZlKzAwMSw1LjAwMTE1IC0zLjk5NTUyZSswMDAsMC45OTg4OCAtOS45OTU1NWUrMDAwLDIuOTk2NjQgLTEuNzAwMTJlKzAwMSw1LjAwMTE1IC03Ljk5Nzc5ZSswMDAsMS45OTc3NiAtMS40OTk2N2UrMDAxLDMuOTk1NTIgLTEuOTk5NzhlKzAwMSw0Ljk5NDQgLTYuMDAwMDNlKzAwMCwxLjAwNTYzIC0xLjM5OTc4ZSswMDEsMy4wMDMzOSAtMi40MDAwMWUrMDAxLDUuMDAxMTUgLTEuMDAwMjNlKzAwMSwyLjAwNDUxIC0xLjg5OTllKzAwMSw0LjAwMjI3IC0yLjU5OTc5ZSswMDEsNi4wMDAwMyAtOC4yMDAyNmUrMDAxLDE4Ljk5OSAtMS4zOWUrMDAyLDQxLjAwMTMgLTEuNzEwMDRlKzAwMiw2NC4wMDI1IC0zLjI5OTY4ZSswMDEsMjMuMDAxMiAtNC44OTk5MWUrMDAxLDU2Ljk5NjkgLTQuODk5OTFlKzAwMSwxMDIuOTk5IDAsNTYuOTk2OSAyMi4wMDIzLDEwMiA2Ni4wMDAzLDEzNC45OTcgNDIuOTk5MSwzMi4wMDQ2IDEwMiw0OC4wMDAyIDE3NSw0OC4wMDAyIDcyLjk5OTIsMCAxMzAuMDAzLC0xLjU5OTU2ZSswMDEgMTcxLjAwNCwtNC43MDAxM2UrMDAxIDQwLjk5NDYsLTMuMTk5NzllKzAwMSA2Ni4wMDAzLC03LjQ5OTdlKzAwMSA3NS45OTU4LC0xLjI4OTk3ZSswMDJsLTEuNDVlKzAwMiAwYy0xLjIwMDAxZSswMDEsMzYuOTk5IC00LjgwMDAyZSswMDEsNTUuOTk4IC0xLjA3MDAyZSswMDIsNTUuOTk4IC02LjA5OTkxZSswMDEsMCAtOS4xOTk4MmUrMDAxLC0xLjQ5OTY3ZSswMDEgLTkuMTk5ODJlKzAwMSwtNC41OTk1N2UrMDAxIDAsLTEuMjAwMDFlKzAwMSA2LjAwMDAzLC0yLjEwMDM1ZSswMDEgMTguOTk5LC0yLjYwMDQ2ZSswMDEgMTMuMDA1NywtNC45OTQ0ZSswMDAgNDEuMDAxMywtMS4yOTk4OWUrMDAxIDg2LjAwNDksLTIuMjk5NDVlKzAwMSA0NC45OTY4LC0xLjAwMDIzZSswMDEgNzkuOTk4MSwtMS45MDA1N2UrMDAxIDEwNS45OTYsLTIuNzAwMzVlKzAwMSAyNi4wMDQ2LC04Ljk5NjY3ZSswMDAgNTEuMDAzNiwtMS45OTk3OGUrMDAxIDc0LjAwNDgsLTMuMjk5NjhlKzAwMSAyMi45OTQ1LC0xLjMwMDU3ZSswMDEgMzkuOTk1NywtMi45MDAxM2UrMDAxIDQ5Ljk5OCwtNC44MDAwMmUrMDAxIDkuOTk1NTUsLTEuODk5OWUrMDAxIDE0Ljk5NjcsLTQuMTAwMTNlKzAwMSAxNC45OTY3LC02LjgwMDQ4ZSswMDEgMCwtNS44OTk0NmUrMDAxIC0yLjMwMDEyZSswMDEsLTEuMDQ5OTdlKzAwMiAtNi44OTk2OWUrMDAxLC0xLjM1OTk2ZSswMDIgLTQuNjAwMjVlKzAwMSwtMy4wOTk5ZSswMDEgLTEuMDUwMDRlKzAwMiwtNC43MDAxM2UrMDAxIC0xLjc1OTk5ZSswMDIsLTQuNzAwMTNlKzAwMXoiLz4NCiAgIDxnbHlwaCB1bmljb2RlPSJ0IiBob3Jpei1hZHYteD0iNTI1IiBkPSJNNDY1Ljk5OCAxNDguMDAzbDI0LjAwMDEgLTEuMTYwMDVlKzAwMmMtMS42OTk0NWUrMDAxLC0xLjEwMDEyZSswMDEgLTMuOTk5NTdlKzAwMSwtMi4wOTk2N2UrMDAxIC03LjA5OTQ3ZSswMDEsLTMuMDAwMDFlKzAwMSAtMy4xMDA1OGUrMDAxLC05Ljk5NTU1ZSswMDAgLTYuMjAwNDhlKzAwMSwtMS4zOTk3OGUrMDAxIC05LjMwMDM4ZSswMDEsLTEuMzk5NzhlKzAwMSAtNS45MDAxNGUrMDAxLDAgLTEuMDhlKzAwMiwxOC45OTkgLTEuNDY5OTdlKzAwMiw1NS45OTggLTMuOTAwMzZlKzAwMSwzNi45OTkgLTUuOTAwMTRlKzAwMSw5My4wMDM4IC01LjkwMDE0ZSswMDEsMTY4LjAwMWwwIDIwMy4wMDIgLTkuNzk5ODJlKzAwMSAwIDAgMTM0Ljk5NyA5Ny45OTgyIDAgMCAxMTkuMDAyIDE0My4wMDIgMzAuOTk5IDAgLTEuNTAwMDFlKzAwMiAyMDQuMDAxIDAgMCAtMS4zNDk5N2UrMDAyIC0yLjA0MDAxZSswMDIgMCAwIC0xLjk0OTk4ZSswMDJjMCwtNi42MDAwM2UrMDAxIDI4Ljk5NDUsLTkuOTAwMzhlKzAwMSA4Ny45OTU5LC05LjkwMDM4ZSswMDEgMjYuMDA0NiwwIDY0LjAwMjUsOS4wMDM0MiAxMTQuOTk5LDI3LjAwMzV6Ii8+DQogICA8Z2x5cGggdW5pY29kZT0idSIgaG9yaXotYWR2LXg9IjYxNiIgZD0iTTQxNy45OTcgNTQ5Ljk5OGwxNDMuMDAyIDAgMCAtNS40OTk5OGUrMDAyIC0xLjQzMDAyZSswMDIgMCAwIDc2LjAwMjZjLTQuMjAwMDJlKzAwMSwtNS45MDAxNGUrMDAxIC05Ljg5OTcxZSswMDEsLTguODAwMjZlKzAwMSAtMS42OTk5OWUrMDAyLC04LjgwMDI2ZSswMDEgLTYuMDk5OTFlKzAwMSwwIC0xLjA4ZSswMDIsMTkuOTk3OCAtMS40MzAwMmUrMDAyLDU5LjAwMTQgLTMuNDk5NDVlKzAwMSwzOC45OTY4IC01LjI5OTQ2ZSswMDEsOTAuOTk5MyAtNS4yOTk0NmUrMDAxLDE1Ny45OThsMCAzNDQuOTk4IDE0Mi45OTUgMCAwIC0zLjEzOTk5ZSswMDJjMCwtMy42OTk5ZSswMDEgOC4wMDQ1NCwtNi41MDAxNGUrMDAxIDI0LjAwMDEsLTguNDAwMDRlKzAwMSAxNS4wMDM0LC0xLjg5OTllKzAwMSA0MS4wMDEzLC0yLjc5OTU2ZSswMDEgNzcuMDAxNSwtMi43OTk1NmUrMDAxIDM5LjAwMzYsMCA3MC4wMDI2LDEyLjAwMDEgOTAuOTk5MywzNC45OTQ1IDIxLjAwMzUsMjMuMDAxMiAzMC45OTksNTcuMDAzNiAzMC45OTksMTAybDAgMjg5eiIvPg0KICA8L2ZvbnQ+DQogIDxzdHlsZSB0eXBlPSJ0ZXh0L2NzcyI+DQogICA8IVtDREFUQVsNCiAgICBAZm9udC1mYWNlIHsgZm9udC1mYW1pbHk6IlN0b2x6bCBNZWRpdW0iO2ZvbnQtdmFyaWFudDpub3JtYWw7Zm9udC13ZWlnaHQ6NTAwO3NyYzp1cmwoIiNGb250SUQwIikgZm9ybWF0KHN2Zyl9DQogICAgLmZpbDEge2ZpbGw6IzJCMkIyQX0NCiAgICAuZmlsMCB7ZmlsbDojRDEyRDJGfQ0KICAgIC5mbnQwIHtmb250LXdlaWdodDo1MDA7Zm9udC1zaXplOjE0ODEuNjZweDtmb250LWZhbWlseTonU3RvbHpsIE1lZGl1bSd9DQogICBdXT4NCiAgPC9zdHlsZT4NCiA8L2RlZnM+DQogPGcgaWQ9ItCh0LvQvtC5X3gwMDIwXzEiPg0KICA8bWV0YWRhdGEgaWQ9IkNvcmVsQ29ycElEXzBDb3JlbC1MYXllciIvPg0KICA8cGF0aCBjbGFzcz0iZmlsMCIgZD0iTTM1ODIuOTkgMTcxMy41NmwxNzI0LjA1IDBjNTEzLjYyLDAgOTMzLjg0LDQyMC4yMiA5MzMuODQsOTMzLjg0bDAgMTcyNC4wNWMwLDUxMy42MiAtNDIwLjIyLDkzMy44NCAtOTMzLjg0LDkzMy44NGwtMTcyNC4wNSAwYy01MTMuNjIsMCAtOTMzLjg0LC00MjAuMjIgLTkzMy44NCwtOTMzLjg0bDAgLTE3MjQuMDVjMCwtNTEzLjYyIDQyMC4yMiwtOTMzLjg0IDkzMy44NCwtOTMzLjg0em0yNjggMjM1MS42OWMtNzYuNjcsLTQ0LjI4IC0xNDMuODksLTEwMy4yMyAtMTk3LjgxLC0xNzMuNDYgLTUzLjg5LC03MC4yNSAtOTMuNDMsLTE1MC40MyAtMTE2LjM1LC0yMzUuOTcgLTIyLjkyLC04NS41MiAtMjguNzcsLTE3NC43NCAtMTcuMjEsLTI2Mi41MiAxMS41NSwtODcuODEgNDAuMywtMTcyLjQ1IDg0LjU4LC0yNDkuMTUgNDQuMjUsLTc2LjY4IDEwMy4yLC0xNDMuOSAxNzMuNDYsLTE5Ny43OSA3MC4yNSwtNTMuOTEgMTUwLjQzLC05My40NiAyMzUuOTcsLTExNi4zOCA4NS41MiwtMjIuOTIgMTc0Ljc0LC0yOC43NSAyNjIuNTIsLTE3LjIgODcuNzksMTEuNTcgMTcyLjQ1LDQwLjMgMjQ5LjEzLDg0LjU4bC0zMzcuMTMgNTgzLjk0IC0zMzcuMTYgNTgzLjk1em0xMDc1LjY3IC0xMzk0LjY1YzEwMi4yMyw1OS4wMiAxOTEuODcsMTM3LjYzIDI2My43MywyMzEuMjkgNzEuODgsOTMuNjYgMTI0LjYsMjAwLjU4IDE1NS4xNiwzMTQuNiAzMC41NSwxMTQuMDUgMzguMzYsMjMzLjAxIDIyLjk0LDM1MC4wNSAtMTUuNDIsMTE3LjA2IC01My43NCwyMjkuOTQgLTExMi43NSwzMzIuMTggLTU5LjA0LDEwMi4yNCAtMTM3LjYzLDE5MS44NyAtMjMxLjMxLDI2My43MyAtOTMuNjYsNzEuODggLTIwMC41NiwxMjQuNjEgLTMxNC42MSwxNTUuMTYgLTExNC4wNSwzMC41NSAtMjMyLjk4LDM4LjM2IC0zNTAuMDQsMjIuOTQgLTExNy4wNiwtMTUuNCAtMjI5LjkyLC01My43MSAtMzMyLjE4LC0xMTIuNzVsNDQ5LjUzIC03NzguNjEgNDQ5LjUzIC03NzguNTl6Ii8+DQogIDx0ZXh0IHg9IjcxNjguMTIiIHk9IjQwMTUuODUiICBjbGFzcz0iZmlsMSBmbnQwIj5SdURlc2t0b3A8L3RleHQ+DQogPC9nPg0KPC9zdmc+DQo=" alt="RuDesktop" />}</div>
             <nav className="rd-nav">
               <button className={`rd-nav-btn ${page === "shop" ? "active" : ""}`} onClick={() => setPage("shop")}>Магазин</button>
-              <button className={`rd-nav-btn ${page === "auction" ? "active" : ""}`} onClick={() => setPage("auction")}>Аукцион</button>
-              <button className={`rd-nav-btn ${page === "lottery" ? "active" : ""}`} onClick={() => setPage("lottery")}>Лотерея</button>
-              <button className={`rd-nav-btn ${page === "voting" ? "active" : ""}`} onClick={() => setPage("voting")}>Голосования</button>
-              <button className={`rd-nav-btn ${page === "bank" ? "active" : ""}`} onClick={() => setPage("bank")}>Банк</button>
-              <button className={`rd-nav-btn ${page === "tasks" ? "active" : ""}`} onClick={() => setPage("tasks")}>Задания</button>
+              <button className={`rd-nav-btn ${page === "auction" ? "active" : ""}`} onClick={() => setPage("auction")} style={{display: appearance.features?.auction === false ? "none" : ""}}>Аукцион</button>
+              <button className={`rd-nav-btn ${page === "lottery" ? "active" : ""}`} onClick={() => setPage("lottery")} style={{display: appearance.features?.lottery === false ? "none" : ""}}>Лотерея</button>
+              <button className={`rd-nav-btn ${page === "voting" ? "active" : ""}`} onClick={() => setPage("voting")} style={{display: appearance.features?.voting === false ? "none" : ""}}>Голосования</button>
+              <button className={`rd-nav-btn ${page === "bank" ? "active" : ""}`} onClick={() => setPage("bank")} style={{display: appearance.features?.bank === false ? "none" : ""}}>Банк</button>
+              <button className={`rd-nav-btn ${page === "tasks" ? "active" : ""}`} onClick={() => setPage("tasks")} style={{display: appearance.features?.tasks === false ? "none" : ""}}>Задания</button>
             </nav>
             {/* Mobile hamburger button */}
             <button className="rd-burger" onClick={() => setMobileNavOpen(o => !o)} aria-label="Меню">
@@ -1049,16 +1078,16 @@ function App() {
         </div>
       </header>
 
-      {/* Mobile nav dropdown */}
       {mobileNavOpen && (
         <div className="rd-mobile-nav" onClick={() => setMobileNavOpen(false)}>
           {[
-            { p: "shop", label: "🛍️ Магазин" },
-            { p: "auction", label: "🔨 Аукцион" },
-            { p: "lottery", label: "🎰 Лотерея" },
-            { p: "voting", label: "🗳️ Голосования" },
-            { p: "tasks", label: "🎯 Задания" },
-          ].map(({ p, label }) => (
+            { p: "shop", label: "🛍️ Магазин", flag: null },
+            { p: "auction", label: "🔨 Аукцион", flag: "auction" },
+            { p: "lottery", label: "🎰 Лотерея", flag: "lottery" },
+            { p: "voting", label: "🗳️ Голосования", flag: "voting" },
+            { p: "tasks", label: "🎯 Задания", flag: "tasks" },
+            { p: "bank", label: "🏦 Банк", flag: "bank" },
+          ].filter(({ flag }) => !flag || appearance.features?.[flag] !== false).map(({ p, label }) => (
             <button key={p} className={`rd-mobile-nav-btn${page === p ? " active" : ""}`} onClick={() => { setPage(p); setMobileNavOpen(false); }}>
               {label}
             </button>
@@ -1106,11 +1135,16 @@ function App() {
       <main className="page-fade" style={{flex:1}}>
         {page === "shop" && <ShopPage products={filtered} allProducts={activeProducts} categories={shopCategories} filterCat={filterCat} setFilterCat={setFilterCat} addToCart={addToCart} setPage={setPage} currentUser={currentUser} users={users} favorites={favorites} toggleFavorite={toggleFavorite} currency={appearance.currency} faq={faq} tasks={tasks} auctions={auctions} />}
         {page === "faq" && <FaqPage faq={faq} />}
-        {page === "auction" && <AuctionPage auctions={auctions} saveAuctions={saveAuctions} currentUser={currentUser} users={users} saveUsers={saveUsers} notify={notify} currency={appearance.currency} />}
-        {page === "lottery" && <LotteryPage lotteries={lotteries} currentUser={currentUser} currency={appearance.currency} />}
-        {page === "voting" && <VotingPage polls={polls} savePolls={savePolls} currentUser={currentUser} users={users} saveUsers={saveUsers} notify={notify} currency={appearance.currency} />}
-        {page === "bank" && <BankPage deposits={deposits} userDeposits={userDeposits} saveUserDeposits={saveUserDeposits} currentUser={currentUser} users={users} saveUsers={saveUsers} notify={notify} currency={appearance.currency} />}
-        {page === "tasks" && <TasksPage tasks={tasks} currentUser={currentUser} taskSubmissions={taskSubmissions} saveTaskSubmissions={saveTaskSubmissions} notify={notify} appearance={appearance} users={users} saveUsers={saveUsers} />}
+        {page === "auction" && appearance.features?.auction !== false && <AuctionPage auctions={auctions} saveAuctions={saveAuctions} currentUser={currentUser} users={users} saveUsers={saveUsers} notify={notify} currency={appearance.currency} />}
+        {page === "auction" && appearance.features?.auction === false && <div className="empty-state"><div className="empty-state-icon">🔨</div><div className="empty-state-text">Раздел «Аукцион» недоступен</div></div>}
+        {page === "lottery" && appearance.features?.lottery !== false && <LotteryPage lotteries={lotteries} currentUser={currentUser} currency={appearance.currency} />}
+        {page === "lottery" && appearance.features?.lottery === false && <div className="empty-state"><div className="empty-state-icon">🎰</div><div className="empty-state-text">Раздел «Лотерея» недоступен</div></div>}
+        {page === "voting" && appearance.features?.voting !== false && <VotingPage polls={polls} savePolls={savePolls} currentUser={currentUser} users={users} saveUsers={saveUsers} notify={notify} currency={appearance.currency} />}
+        {page === "voting" && appearance.features?.voting === false && <div className="empty-state"><div className="empty-state-icon">🗳️</div><div className="empty-state-text">Раздел «Голосования» недоступен</div></div>}
+        {page === "bank" && appearance.features?.bank !== false && <BankPage deposits={deposits} userDeposits={userDeposits} saveUserDeposits={saveUserDeposits} currentUser={currentUser} users={users} saveUsers={saveUsers} notify={notify} currency={appearance.currency} />}
+        {page === "bank" && appearance.features?.bank === false && <div className="empty-state"><div className="empty-state-icon">🏦</div><div className="empty-state-text">Раздел «Банк» недоступен</div></div>}
+        {page === "tasks" && appearance.features?.tasks !== false && <TasksPage tasks={tasks} currentUser={currentUser} taskSubmissions={taskSubmissions} saveTaskSubmissions={saveTaskSubmissions} notify={notify} appearance={appearance} users={users} saveUsers={saveUsers} />}
+        {page === "tasks" && appearance.features?.tasks === false && <div className="empty-state"><div className="empty-state-icon">🎯</div><div className="empty-state-text">Раздел «Задания» недоступен</div></div>}
         {page === "favorites" && currentUser && <FavoritesPage products={activeProducts.filter(p => favorites.includes(p.id))} favorites={favorites} toggleFavorite={toggleFavorite} addToCart={addToCart} setPage={setPage} />}
         {page === "history" && currentUser && <HistoryPage currentUser={currentUser} transfers={transfers} orders={orders} taskSubmissions={taskSubmissions} />}
         {page === "cart" && <CartPage cart={cart} removeFromCart={removeFromCart} cartTotal={cartTotal} checkout={checkout} currentUser={currentUser} setPage={setPage} users={users} currency={appearance.currency} />}
@@ -4274,20 +4308,20 @@ function AdminPage({ users, saveUsers, orders, saveOrders, products, saveProduct
       {tab === "users" && (
         <div>
           <div style={{marginBottom:"12px",display:"flex",alignItems:"center",gap:"10px",flexWrap:"wrap"}}>
-            <input className="form-input" style={{maxWidth:"260px"}} placeholder="Поиск по логину…" value={search} onChange={e => setSearch(e.target.value)} />
+            <input className="form-input" style={{maxWidth:"220px"}} placeholder="Поиск по логину…" value={search} onChange={e => setSearch(e.target.value)} />
+            <button className="btn btn-primary btn-sm" onClick={() => setShowCreateUser(true)}>➕ Создать пользователя</button>
             <div style={{display:"flex",gap:"6px"}}>
-              {[["all","Все"],["user","Пользователи"],["admin","Администраторы"]].map(([v,l]) => (
+              {[["all","Все пользователи"],["user","Пользователи"],["admin","Администраторы"]].map(([v,l]) => (
                 <button key={v} onClick={() => setUserRoleFilter(v)}
-                  style={{padding:"7px 14px",borderRadius:"20px",fontSize:"12px",fontWeight:700,cursor:"pointer",border:"1.5px solid",transition:"all 0.15s",
-                    background:userRoleFilter===v?"var(--rd-red)":"#fff",
-                    color:userRoleFilter===v?"#fff":"var(--rd-gray-text)",
-                    borderColor:userRoleFilter===v?"var(--rd-red)":"var(--rd-gray-border)"}}>
+                  style={{padding:"6px 14px",borderRadius:"var(--rd-radius-sm)",fontSize:"13px",fontWeight:700,cursor:"pointer",border:"1.5px solid",transition:"all 0.15s",
+                    background:userRoleFilter===v?"var(--rd-green-light)":"#fff",
+                    color:userRoleFilter===v?"var(--rd-green)":"var(--rd-gray-text)",
+                    borderColor:userRoleFilter===v?"rgba(5,150,105,0.3)":"var(--rd-gray-border)"}}>
                   {l}
                 </button>
               ))}
             </div>
             <div style={{marginLeft:"auto",display:"flex",gap:"8px",flexWrap:"wrap"}}>
-              <button className="btn btn-primary btn-sm" onClick={() => setShowCreateUser(true)}>➕ Создать пользователя</button>
               <button className="btn btn-secondary btn-sm" onClick={exportUsersCSV}>⬇ CSV</button>
               <button className="btn btn-secondary btn-sm" onClick={exportUsersXLSX}>⬇ XLSX</button>
               <label className="btn btn-secondary btn-sm" style={{cursor:"pointer",position:"relative"}}>
@@ -4388,7 +4422,7 @@ function AdminPage({ users, saveUsers, orders, saveOrders, products, saveProduct
       )}
 
       {tab === "categories" && (
-        <div style={{maxWidth:"560px"}}>
+        <div>
           <div className="product-form-card" style={{marginBottom:"20px",position:"relative",top:"auto"}}>
             <div className="product-form-title">🏷️ Добавить категорию</div>
             <div style={{display:"flex",gap:"10px"}}>
@@ -4972,6 +5006,10 @@ function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbC
   }, [JSON.stringify(appearance.bitrix24)]);
 
   const [registrationEnabled, setRegistrationEnabled] = useState(appearance.registrationEnabled !== false);
+  const [features, setFeatures] = useState(() => ({ auction: true, lottery: true, voting: true, bank: true, tasks: true, ...(appearance.features || {}) }));
+  useEffect(() => {
+    if (appearance.features) setFeatures(prev => ({ ...prev, ...appearance.features }));
+  }, [JSON.stringify(appearance.features)]);
   const user = users[currentUser] || {};
   const [form, setForm] = useState({ email: user.email || "", firstName: user.firstName || "", lastName: user.lastName || "", currentPassword: "", newPassword: "", confirmPassword: "", avatar: user.avatar || "" });
   const [ap, setAp] = useState({ ...appearance });
@@ -5425,6 +5463,42 @@ function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbC
                 </div>
                 <button className="btn btn-primary" style={{marginTop:"8px"}} onClick={() => {
                   notify("Версия портала обновлена ✓");
+                }}>Сохранить</button>
+              </div>
+
+              {/* Feature toggles */}
+              <div className="settings-card" style={{marginBottom:"16px"}}>
+                <div className="settings-section-title">🧩 Разделы сайта</div>
+                <p style={{fontSize:"13px",color:"var(--rd-gray-text)",marginBottom:"20px",lineHeight:1.6}}>
+                  Включайте и отключайте разделы сайта. При отключении раздел скрывается из верхнего меню и становится недоступен для пользователей.
+                </p>
+                {[
+                  { key: "auction", label: "🔨 Аукцион", desc: "Раздел аукционов" },
+                  { key: "lottery", label: "🎰 Лотерея", desc: "Раздел лотерей" },
+                  { key: "voting", label: "🗳️ Голосования", desc: "Раздел голосований и опросов" },
+                  { key: "bank", label: "🏦 Банк", desc: "Раздел вкладов и банковских операций" },
+                  { key: "tasks", label: "🎯 Задания", desc: "Раздел заданий для пользователей" },
+                ].map(({ key, label, desc }) => {
+                  const enabled = features[key] !== false;
+                  return (
+                    <div key={key} style={{display:"flex",alignItems:"center",gap:"14px",padding:"12px 16px",background:enabled?"rgba(34,197,94,0.04)":"var(--rd-gray-bg)",borderRadius:"var(--rd-radius-sm)",border:"1.5px solid",borderColor:enabled?"rgba(34,197,94,0.2)":"var(--rd-gray-border)",transition:"all 0.2s",marginBottom:"8px"}}>
+                      <div style={{position:"relative",width:"44px",height:"24px",flexShrink:0}}>
+                        <input type="checkbox" checked={enabled} onChange={e => setFeatures(prev => ({...prev, [key]: e.target.checked}))}
+                          style={{position:"absolute",inset:0,opacity:0,cursor:"pointer",zIndex:1,width:"100%",height:"100%"}} />
+                        <div style={{width:"44px",height:"24px",borderRadius:"12px",background:enabled?"#22c55e":"#d1d5db",transition:"background 0.2s",display:"flex",alignItems:"center",padding:"2px"}}>
+                          <div style={{width:"20px",height:"20px",borderRadius:"50%",background:"#fff",transition:"transform 0.2s",transform:enabled?"translateX(20px)":"translateX(0)",boxShadow:"0 1px 3px rgba(0,0,0,0.2)"}}></div>
+                        </div>
+                      </div>
+                      <div style={{flex:1}}>
+                        <div style={{fontWeight:700,fontSize:"14px",color:"var(--rd-dark)"}}>{label}</div>
+                        <div style={{fontSize:"12px",color:"var(--rd-gray-text)",marginTop:"2px"}}>{enabled ? desc + " — включён" : desc + " — скрыт"}</div>
+                      </div>
+                    </div>
+                  );
+                })}
+                <button className="btn btn-primary" style={{marginTop:"12px"}} onClick={() => {
+                  saveAppearance({ ...appearance, features });
+                  notify("Настройки разделов сохранены ✓");
                 }}>Сохранить</button>
               </div>
             </div>
@@ -5913,7 +5987,7 @@ function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbC
           )}
 
           {tab === "integrations" && isAdmin && (
-            <div style={{maxWidth:"580px"}}>
+            <div>
               {/* Telegram */}
               <div className="settings-card" style={{marginBottom:"16px"}}>
                 <div className="settings-section-title" style={{display:"flex",alignItems:"center",gap:"10px"}}>
@@ -6149,6 +6223,57 @@ function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbC
                 <button className="btn btn-primary" onClick={() => {
                   saveAppearance({ ...appearance, bitrix24, integrations: integ });
                   notify("Настройки Битрикс24 сохранены ✓");
+                }}>Сохранить</button>
+              </div>
+
+              {/* Yandex Metrika */}
+              <div className="settings-card" style={{marginTop:"16px"}}>
+                <div className="settings-section-title" style={{display:"flex",alignItems:"center",gap:"10px"}}>
+                  <span style={{width:"32px",height:"32px",borderRadius:"8px",background:"#FC3F1D",display:"inline-flex",alignItems:"center",justifyContent:"center",fontSize:"16px",color:"#fff",fontWeight:900}}>Я</span>
+                  Яндекс Метрика
+                </div>
+                <p style={{fontSize:"13px",color:"var(--rd-gray-text)",marginBottom:"20px",lineHeight:1.6}}>
+                  Вставьте номер счётчика Яндекс Метрики — скрипт будет автоматически добавлен на все страницы сайта.
+                </p>
+
+                <div style={{display:"flex",alignItems:"center",gap:"14px",padding:"14px 16px",background:integ.ymEnabled?"rgba(252,63,29,0.06)":"var(--rd-gray-bg)",borderRadius:"var(--rd-radius-sm)",border:"1.5px solid",borderColor:integ.ymEnabled?"rgba(252,63,29,0.3)":"var(--rd-gray-border)",transition:"all 0.2s",marginBottom:"20px"}}>
+                  <div style={{position:"relative",width:"44px",height:"24px",flexShrink:0}}>
+                    <input type="checkbox" checked={!!integ.ymEnabled} onChange={e => setInteg(prev => ({...prev, ymEnabled: e.target.checked}))}
+                      style={{position:"absolute",inset:0,opacity:0,cursor:"pointer",zIndex:1,width:"100%",height:"100%"}} />
+                    <div style={{width:"44px",height:"24px",borderRadius:"12px",background:integ.ymEnabled?"#FC3F1D":"#d1d5db",transition:"background 0.2s",display:"flex",alignItems:"center",padding:"2px"}}>
+                      <div style={{width:"20px",height:"20px",borderRadius:"50%",background:"#fff",transition:"transform 0.2s",transform:integ.ymEnabled?"translateX(20px)":"translateX(0)",boxShadow:"0 1px 3px rgba(0,0,0,0.2)"}}></div>
+                    </div>
+                  </div>
+                  <div>
+                    <div style={{fontWeight:700,fontSize:"14px",color:"var(--rd-dark)"}}>
+                      {integ.ymEnabled ? "Метрика включена" : "Метрика отключена"}
+                    </div>
+                    <div style={{fontSize:"12px",color:"var(--rd-gray-text)",marginTop:"2px"}}>
+                      Счётчик будет загружаться на каждой странице
+                    </div>
+                  </div>
+                </div>
+
+                <div className="form-field">
+                  <label className="form-label">Номер счётчика</label>
+                  <input className="form-input" placeholder="12345678"
+                    value={integ.ymCounterId || ""}
+                    onChange={e => setInteg(prev => ({...prev, ymCounterId: e.target.value.replace(/\D/g,"")}))} />
+                  <div style={{fontSize:"11px",color:"var(--rd-gray-text)",marginTop:"4px"}}>
+                    Найдите номер в <a href="https://metrika.yandex.ru" target="_blank" rel="noopener noreferrer" style={{color:"#FC3F1D"}}>Яндекс Метрике</a> → Настройки счётчика
+                  </div>
+                </div>
+
+                {integ.ymEnabled && integ.ymCounterId && (
+                  <div style={{padding:"12px 14px",background:"rgba(252,63,29,0.06)",borderRadius:"8px",border:"1.5px solid rgba(252,63,29,0.2)",marginBottom:"16px",fontSize:"12px",color:"var(--rd-gray-text)",lineHeight:1.7}}>
+                    <div style={{fontWeight:700,color:"#FC3F1D",marginBottom:"4px"}}>✅ Скрипт подключён</div>
+                    Счётчик <strong>#{integ.ymCounterId}</strong> будет загружаться на всех страницах сайта.
+                  </div>
+                )}
+
+                <button className="btn btn-primary" onClick={() => {
+                  saveAppearance({ ...appearance, integrations: integ });
+                  notify("Настройки Яндекс Метрики сохранены ✓");
                 }}>Сохранить</button>
               </div>
             </div>
@@ -6750,7 +6875,7 @@ function LotteryAdminTab({ lotteries, saveLotteries, notify, users, saveUsers, a
                 )}
               </div>
             </div>
-            <button onClick={addLottery} style={{ marginTop: "16px", background: "var(--rd-red)", color: "#fff", border: "none", borderRadius: "10px", padding: "12px 24px", fontWeight: 700, cursor: "pointer", fontSize: "14px" }}>🎰 Создать лотерею</button>
+            <button onClick={addLottery} style={{ marginTop: "16px", background: "var(--rd-red)", color: "#fff", border: "none", borderRadius: "10px", padding: "12px 24px", fontWeight: 700, cursor: "pointer", fontSize: "14px", width: "100%" }}>🎰 Создать лотерею</button>
           </div>
 
           {filteredActive.length > 0 && <div style={{ fontWeight: 700, fontSize: "14px", marginBottom: "12px", color: "var(--rd-dark)" }}>Активные лотереи</div>}
@@ -7110,7 +7235,7 @@ function VotingAdminTab({ polls, savePolls, notify, users, saveUsers }) {
         onImgChange={formImgChg}
         onMainImgChange={formMainImgChg}
       />
-      <button onClick={createPoll} style={{ marginBottom: "28px", background: "var(--rd-red)", color: "#fff", border: "none", borderRadius: "10px", padding: "12px 24px", fontWeight: 700, cursor: "pointer", fontSize: "14px" }}>🗳️ Создать голосование</button>
+      <button onClick={createPoll} style={{ marginBottom: "28px", background: "var(--rd-red)", color: "#fff", border: "none", borderRadius: "10px", padding: "12px 24px", fontWeight: 700, cursor: "pointer", fontSize: "14px", width: "100%" }}>🗳️ Создать голосование</button>
 
       {list.length > 0 && (
         <div style={{display:"flex",gap:"10px",marginBottom:"16px",flexWrap:"wrap",alignItems:"center"}}>
@@ -7457,7 +7582,7 @@ function BankAdminTab({ deposits, saveDeposits, notify }) {
           </label>
         )}
       </div>
-      <button onClick={createDeposit} style={{ marginBottom: "28px", background: "var(--rd-red)", color: "#fff", border: "none", borderRadius: "10px", padding: "12px 24px", fontWeight: 700, cursor: "pointer", fontSize: "14px" }}>
+      <button onClick={createDeposit} style={{ marginBottom: "28px", background: "var(--rd-red)", color: "#fff", border: "none", borderRadius: "10px", padding: "12px 24px", fontWeight: 700, cursor: "pointer", fontSize: "14px", width: "100%" }}>
         🏦 Создать вклад
       </button>
 
