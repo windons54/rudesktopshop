@@ -1109,7 +1109,7 @@ function App() {
         {page === "auction" && <AuctionPage auctions={auctions} saveAuctions={saveAuctions} currentUser={currentUser} users={users} saveUsers={saveUsers} notify={notify} currency={appearance.currency} />}
         {page === "lottery" && <LotteryPage lotteries={lotteries} currentUser={currentUser} currency={appearance.currency} />}
         {page === "voting" && <VotingPage polls={polls} savePolls={savePolls} currentUser={currentUser} users={users} saveUsers={saveUsers} notify={notify} currency={appearance.currency} />}
-        {page === "bank" && <BankPage currentUser={currentUser} users={users} saveUsers={saveUsers} notify={notify} currency={appearance.currency} />}
+        {page === "bank" && <BankPage deposits={deposits} userDeposits={userDeposits} saveUserDeposits={saveUserDeposits} currentUser={currentUser} users={users} saveUsers={saveUsers} notify={notify} currency={appearance.currency} />}
         {page === "tasks" && <TasksPage tasks={tasks} currentUser={currentUser} taskSubmissions={taskSubmissions} saveTaskSubmissions={saveTaskSubmissions} notify={notify} appearance={appearance} users={users} saveUsers={saveUsers} />}
         {page === "favorites" && currentUser && <FavoritesPage products={activeProducts.filter(p => favorites.includes(p.id))} favorites={favorites} toggleFavorite={toggleFavorite} addToCart={addToCart} setPage={setPage} />}
         {page === "history" && currentUser && <HistoryPage currentUser={currentUser} transfers={transfers} orders={orders} taskSubmissions={taskSubmissions} />}
@@ -6542,7 +6542,7 @@ function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbC
               <div style={{fontWeight:700,fontSize:"18px",color:"var(--rd-dark)",marginBottom:"20px",paddingBottom:"14px",borderBottom:"1.5px solid var(--rd-gray-border)"}}>
                 🏦 Управление вкладами
               </div>
-              <BankAdminTab notify={notify} />
+              <BankAdminTab deposits={deposits} saveDeposits={saveDeposits} notify={notify} />
             </div>
           )}
 
@@ -7341,16 +7341,10 @@ function VotingPage({ polls, savePolls, currentUser, users, saveUsers, notify, c
 
 // ── BANK ──────────────────────────────────────────────────────────────
 
-function BankAdminTab({ notify }) {
-  const [deposits, setDepositsState] = useState(() => storage.get("cm_deposits") || []);
+function BankAdminTab({ deposits, saveDeposits, notify }) {
   const [form, setForm] = useState({ name: "", duration: "", rate: "" });
   const [editingId, setEditingId] = useState(null);
   const [editForm, setEditForm] = useState(null);
-
-  const saveDeposits = (dp) => {
-    setDepositsState(dp);
-    storage.set("cm_deposits", dp);
-  };
 
   const createDeposit = () => {
     if (!form.name.trim()) { notify("Введите название вклада", "err"); return; }
@@ -7431,9 +7425,7 @@ function BankAdminTab({ notify }) {
   );
 }
 
-function BankPage({ currentUser, users, saveUsers, notify, currency }) {
-  const [deposits, setDepositsState] = useState(() => storage.get("cm_deposits") || []);
-  const [userDeposits, setUserDepositsState] = useState(() => storage.get("cm_user_deposits") || []);
+function BankPage({ deposits, userDeposits, saveUserDeposits, currentUser, users, saveUsers, notify, currency }) {
   const [selectedDeposit, setSelectedDeposit] = useState(null);
   const [amount, setAmount] = useState("");
   const [showCalculator, setShowCalculator] = useState(false);
@@ -7441,11 +7433,6 @@ function BankPage({ currentUser, users, saveUsers, notify, currency }) {
   const [calcAmount, setCalcAmount] = useState("");
   const cName = getCurrName(currency);
   const myBalance = users[currentUser]?.balance || 0;
-
-  const saveUserDeposits = (ud) => {
-    setUserDepositsState(ud);
-    storage.set("cm_user_deposits", ud);
-  };
 
   // Проверяем и завершаем истекшие вклады
   React.useEffect(() => {
