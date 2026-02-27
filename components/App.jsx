@@ -484,7 +484,7 @@ function App() {
     if (appearance.currency && appearance.currency.logo) return <img src={appearance.currency.logo} alt="" style={{width:"16px",height:"16px",objectFit:"contain",verticalAlign:"middle"}} />;
     return <span>{(appearance.currency && appearance.currency.icon) ? appearance.currency.icon : "🪙"}</span>;
   };
-  const [appearance, setAppearance] = useState({ logo: null, theme: "default", headerBg: "", footerBg: "", pageBg: "", accentColor: "", socials: { telegram: "", max: "", vk: "", rutube: "", vkvideo: "" }, birthdayBonus: 100, birthdayEnabled: true, integrations: { tgEnabled: false, tgBotToken: "", tgChatId: "", maxEnabled: false, maxBotToken: "", maxChatId: "" }, currency: { name: "RuDeCoin", icon: "🪙", logo: "" }, seo: { title: "", description: "", favicon: "" }, registrationEnabled: true, bitrix24: { enabled: false, clientId: "", clientSecret: "", portalUrl: "" }, features: { auction: true, lottery: true, voting: true, bank: true, tasks: true } });
+  const [appearance, setAppearance] = useState({ logo: null, theme: "default", headerBg: "", footerBg: "", pageBg: "", accentColor: "", socials: { telegram: "", max: "", vk: "", rutube: "", vkvideo: "" }, birthdayBonus: 100, birthdayEnabled: true, integrations: { tgEnabled: false, tgBotToken: "", tgChatId: "", maxEnabled: false, maxBotToken: "", maxChatId: "" }, currency: { name: "RuDeCoin", icon: "🪙", logo: "" }, seo: { title: "", description: "", favicon: "" }, registrationEnabled: true, bitrix24: { enabled: false, clientId: "", clientSecret: "", portalUrl: "" }, features: { auction: true, lottery: true, voting: true, bank: true, tasks: true }, sectionSettings: { auction: { title: "Аукцион", description: "Делайте ставки и выигрывайте эксклюзивные товары", banner: "" }, lottery: { title: "Лотерея", description: "Участвуйте в розыгрышах и выигрывайте призы", banner: "" }, voting: { title: "Голосования", description: "Участвуйте в опросах и влияйте на решения", banner: "" }, bank: { title: "Банк", description: "Управляйте своими депозитами и получайте проценты", banner: "" }, tasks: { title: "Задания за монеты", description: "Выполняйте задания и получайте корпоративные монеты", banner: "" } } });
   const [currentUser, setCurrentUser] = useState(null);
   const [cart, setCart] = useState([]);
   const [orderSuccess, setOrderSuccess] = useState(false);
@@ -1181,15 +1181,15 @@ ym(${integ.ymCounterId}, "init", { clickmap:true, trackLinks:true, accurateTrack
       })()}
 
       <main className="page-fade" style={{flex:1}}>
-        {page === "shop" && <ShopPage products={filtered} allProducts={activeProducts} categories={shopCategories} filterCat={filterCat} setFilterCat={setFilterCat} addToCart={addToCart} setPage={setPage} currentUser={currentUser} users={users} favorites={favorites} toggleFavorite={toggleFavorite} currency={appearance.currency} faq={faq} videos={videos} tasks={tasks} auctions={auctions} />}
+        {page === "shop" && <ShopPage products={filtered} allProducts={activeProducts} categories={shopCategories} filterCat={filterCat} setFilterCat={setFilterCat} addToCart={addToCart} setPage={setPage} currentUser={currentUser} users={users} favorites={favorites} toggleFavorite={toggleFavorite} currency={appearance.currency} faq={faq} videos={videos} tasks={tasks} auctions={auctions} appearance={appearance} />}
         {page === "faq" && <FaqPage faq={faq} />}
-        {page === "auction" && appearance.features?.auction !== false && <AuctionPage auctions={auctions} saveAuctions={saveAuctions} currentUser={currentUser} users={users} saveUsers={saveUsers} notify={notify} currency={appearance.currency} />}
+        {page === "auction" && appearance.features?.auction !== false && <AuctionPage auctions={auctions} saveAuctions={saveAuctions} currentUser={currentUser} users={users} saveUsers={saveUsers} notify={notify} currency={appearance.currency} appearance={appearance} />}
         {page === "auction" && appearance.features?.auction === false && <div className="empty-state"><div className="empty-state-icon">🔨</div><div className="empty-state-text">Раздел «Аукцион» недоступен</div></div>}
-        {page === "lottery" && appearance.features?.lottery !== false && <LotteryPage lotteries={lotteries} currentUser={currentUser} currency={appearance.currency} />}
+        {page === "lottery" && appearance.features?.lottery !== false && <LotteryPage lotteries={lotteries} currentUser={currentUser} currency={appearance.currency} appearance={appearance} />}
         {page === "lottery" && appearance.features?.lottery === false && <div className="empty-state"><div className="empty-state-icon">🎰</div><div className="empty-state-text">Раздел «Лотерея» недоступен</div></div>}
-        {page === "voting" && appearance.features?.voting !== false && <VotingPage polls={polls} savePolls={savePolls} currentUser={currentUser} users={users} saveUsers={saveUsers} notify={notify} currency={appearance.currency} />}
+        {page === "voting" && appearance.features?.voting !== false && <VotingPage polls={polls} savePolls={savePolls} currentUser={currentUser} users={users} saveUsers={saveUsers} notify={notify} currency={appearance.currency} appearance={appearance} />}
         {page === "voting" && appearance.features?.voting === false && <div className="empty-state"><div className="empty-state-icon">🗳️</div><div className="empty-state-text">Раздел «Голосования» недоступен</div></div>}
-        {page === "bank" && appearance.features?.bank !== false && <BankPage deposits={deposits} userDeposits={userDeposits} saveUserDeposits={saveUserDeposits} currentUser={currentUser} users={users} saveUsers={saveUsers} notify={notify} currency={appearance.currency} />}
+        {page === "bank" && appearance.features?.bank !== false && <BankPage deposits={deposits} userDeposits={userDeposits} saveUserDeposits={saveUserDeposits} currentUser={currentUser} users={users} saveUsers={saveUsers} notify={notify} currency={appearance.currency} appearance={appearance} />}
         {page === "bank" && appearance.features?.bank === false && <div className="empty-state"><div className="empty-state-icon">🏦</div><div className="empty-state-text">Раздел «Банк» недоступен</div></div>}
         {page === "tasks" && appearance.features?.tasks !== false && <TasksPage tasks={tasks} currentUser={currentUser} taskSubmissions={taskSubmissions} saveTaskSubmissions={saveTaskSubmissions} notify={notify} appearance={appearance} users={users} saveUsers={saveUsers} />}
         {page === "tasks" && appearance.features?.tasks === false && <div className="empty-state"><div className="empty-state-icon">🎯</div><div className="empty-state-text">Раздел «Задания» недоступен</div></div>}
@@ -2201,20 +2201,37 @@ function AuctionCard({ auction, currentUser, users, saveUsers, saveAuctions, all
   );
 }
 
-function AuctionPage({ auctions, saveAuctions, currentUser, users, saveUsers, notify, currency }) {
+function AuctionPage({ auctions, saveAuctions, currentUser, users, saveUsers, notify, currency, appearance }) {
   const active = (auctions || []).filter(a => Date.now() < a.endsAt);
   const ended = (auctions || []).filter(a => Date.now() >= a.endsAt);
+  const sectionSettings = appearance?.sectionSettings?.auction || {};
+  const title = sectionSettings.title || "Аукцион";
+  const description = sectionSettings.description || "Делайте ставки и выигрывайте эксклюзивные товары";
+  const bannerImage = sectionSettings.banner || "";
+  
   return (
     <div style={{minHeight:"60vh"}}>
+      {bannerImage && (
+        <div className="hero-banner">
+          <div className="hero-banner-bg" style={{backgroundImage:`url(${bannerImage})`}} />
+          <div className="hero-banner-overlay" />
+          <div className="hero-banner-content" style={{padding:"48px 24px"}}>
+            <h1 className="hero-banner-title" style={{fontSize:"clamp(26px,5vw,40px)",marginBottom:"12px"}}>{title}</h1>
+            <p className="hero-banner-desc">{description}</p>
+          </div>
+        </div>
+      )}
       <div style={{background:"#fff",borderBottom:"1.5px solid var(--rd-gray-border)",padding:"40px 0 32px"}}>
         <div className="container">
           <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:"12px"}}>
-            <div>
-              <h1 style={{fontSize:"clamp(26px,5vw,40px)",fontWeight:900,color:"var(--rd-dark)",letterSpacing:"-0.02em"}}>Аукцион</h1>
-              <p style={{fontSize:"15px",color:"var(--rd-gray-text)",marginTop:"6px"}}>Делайте ставки и выигрывайте эксклюзивные товары</p>
-            </div>
+            {!bannerImage && (
+              <div>
+                <h1 style={{fontSize:"clamp(26px,5vw,40px)",fontWeight:900,color:"var(--rd-dark)",letterSpacing:"-0.02em"}}>{title}</h1>
+                <p style={{fontSize:"15px",color:"var(--rd-gray-text)",marginTop:"6px"}}>{description}</p>
+              </div>
+            )}
             {auctions && auctions.length > 0 && (
-              <div style={{display:"flex",gap:"16px",flexWrap:"wrap"}}>
+              <div style={{display:"flex",gap:"16px",flexWrap:"wrap",marginLeft:bannerImage?"0":"auto"}}>
                 <div style={{textAlign:"center",background:"var(--rd-gray-bg)",borderRadius:"12px",padding:"12px 20px"}}>
                   <div style={{fontSize:"22px",fontWeight:900,color:"var(--rd-red)"}}>{active.length}</div>
                   <div style={{fontSize:"11px",color:"var(--rd-gray-text)",textTransform:"uppercase",letterSpacing:"0.08em"}}>Активных</div>
@@ -2525,7 +2542,7 @@ function FaqPage({ faq }) {
 
 // ── SHOP ──────────────────────────────────────────────────────────────────
 
-function ShopPage({ products, allProducts, categories, filterCat, setFilterCat, addToCart, setPage, currentUser, users, favorites, toggleFavorite, currency, faq, videos, tasks, auctions }) {
+function ShopPage({ products, allProducts, categories, filterCat, setFilterCat, addToCart, setPage, currentUser, users, favorites, toggleFavorite, currency, faq, videos, tasks, auctions, appearance }) {
   const cName = getCurrName(currency);
   const [modalProduct, setModalProduct] = useState(null);
   const [search, setSearch] = useState("");
@@ -2588,8 +2605,8 @@ function ShopPage({ products, allProducts, categories, filterCat, setFilterCat, 
             <div className="container">
               <div className="faq-header">
                 <div className="faq-eyebrow">Активности</div>
-                <h2 className="faq-title">Задания за монеты</h2>
-                <p className="faq-subtitle">Выполняйте задания и получайте корпоративные монеты</p>
+                <h2 className="faq-title">{appearance?.sectionSettings?.tasks?.title || "Задания за монеты"}</h2>
+                <p className="faq-subtitle">{appearance?.sectionSettings?.tasks?.description || "Выполняйте задания и получайте корпоративные монеты"}</p>
               </div>
               <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(320px,1fr))",gap:"20px"}}>
                 {activeTasks.map(task => (
@@ -2732,7 +2749,7 @@ function ShopPage({ products, allProducts, categories, filterCat, setFilterCat, 
               <p className="faq-subtitle">Полезные материалы и обзоры</p>
             </div>
             <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(320px,1fr))",gap:"24px",marginTop:"32px"}}>
-              {videos.filter(v => v.published).map((video, idx) => {
+              {videos.filter(v => v.published).slice(0, 1).map((video, idx) => {
                 // Функция для извлечения ID из URL VK Video или RuTube
                 const getVideoEmbedUrl = (url) => {
                   if (!url) return null;
@@ -5647,6 +5664,7 @@ function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbC
     { id: "lottery",    icon: "🎰", label: "Лотерея" },
     { id: "voting",     icon: "🗳️", label: "Голосование" },
     { id: "bank",       icon: "🏦", label: "Банк" },
+    { id: "sections",   icon: "📑", label: "Настройки разделов" },
     { id: "shop",       icon: "🛍️", label: "Управление магазином" },
     { id: "integrations", icon: "🔗", label: "Интеграции" },
   ] : [
@@ -7021,12 +7039,138 @@ function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbC
             </div>
           )}
 
+          {tab === "sections" && isAdmin && (
+            <div className="settings-card">
+              <div style={{fontWeight:700,fontSize:"18px",color:"var(--rd-dark)",marginBottom:"8px"}}>
+                📑 Настройки разделов
+              </div>
+              <p style={{fontSize:"13px",color:"var(--rd-gray-text)",marginBottom:"24px",lineHeight:1.6}}>
+                Настройте заголовки, описания и баннеры для каждого раздела сайта
+              </p>
+              <SectionsSettingsTab appearance={appearance} saveAppearance={saveAppearance} notify={notify} />
+            </div>
+          )}
+
         </div>
       </div>
     </div>
   );
 }
 
+
+// ── SECTIONS SETTINGS ────────────────────────────────────────────────────────
+
+function SectionsSettingsTab({ appearance, saveAppearance, notify }) {
+  const sections = [
+    { id: "auction", icon: "🔨", name: "Аукцион" },
+    { id: "lottery", icon: "🎰", name: "Лотерея" },
+    { id: "voting", icon: "🗳️", name: "Голосование" },
+    { id: "bank", icon: "🏦", name: "Банк" },
+    { id: "tasks", icon: "🎯", name: "Задания" }
+  ];
+
+  const [settings, setSettings] = useState(appearance.sectionSettings || {});
+  
+  const updateSection = (sectionId, field, value) => {
+    setSettings(prev => ({
+      ...prev,
+      [sectionId]: {
+        ...(prev[sectionId] || {}),
+        [field]: value
+      }
+    }));
+  };
+
+  const handleImageUpload = async (sectionId, e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    
+    const reader = new FileReader();
+    reader.onload = async (ev) => {
+      try {
+        const compressed = await compressImage(ev.target.result, 1920, 600, 0.85, 400);
+        updateSection(sectionId, 'banner', compressed);
+      } catch (err) {
+        notify("Ошибка сжатия изображения", "err");
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const saveSettings = () => {
+    saveAppearance({ ...appearance, sectionSettings: settings });
+    notify("Настройки разделов сохранены ✓");
+  };
+
+  return (
+    <div>
+      {sections.map(section => {
+        const sectionData = settings[section.id] || {};
+        return (
+          <div key={section.id} style={{marginBottom:"32px",paddingBottom:"32px",borderBottom:"1.5px solid var(--rd-gray-border)"}}>
+            <div style={{display:"flex",alignItems:"center",gap:"10px",marginBottom:"20px"}}>
+              <span style={{fontSize:"24px"}}>{section.icon}</span>
+              <h3 style={{fontSize:"17px",fontWeight:800,color:"var(--rd-dark)"}}>{section.name}</h3>
+            </div>
+
+            <div className="form-group">
+              <label className="form-label">Заголовок раздела</label>
+              <input
+                className="form-input"
+                value={sectionData.title || ""}
+                onChange={e => updateSection(section.id, 'title', e.target.value)}
+                placeholder={`Например: ${section.name}`}
+              />
+            </div>
+
+            <div className="form-group">
+              <label className="form-label">Описание</label>
+              <textarea
+                className="form-input"
+                rows={2}
+                value={sectionData.description || ""}
+                onChange={e => updateSection(section.id, 'description', e.target.value)}
+                placeholder="Краткое описание раздела"
+              />
+            </div>
+
+            <div className="form-group">
+              <label className="form-label">Баннер (опционально)</label>
+              <p style={{fontSize:"12px",color:"var(--rd-gray-text)",marginBottom:"10px"}}>
+                Рекомендуемый размер: 1920x600px. Если баннер не загружен, будет отображаться стандартный заголовок.
+              </p>
+              {sectionData.banner && (
+                <div style={{position:"relative",marginBottom:"12px",borderRadius:"var(--rd-radius)",overflow:"hidden",maxWidth:"600px"}}>
+                  <img src={sectionData.banner} alt="Banner preview" style={{width:"100%",height:"auto",display:"block"}} />
+                  <button
+                    onClick={() => updateSection(section.id, 'banner', '')}
+                    style={{position:"absolute",top:"10px",right:"10px",background:"rgba(0,0,0,0.7)",color:"#fff",border:"none",borderRadius:"6px",padding:"6px 10px",cursor:"pointer",fontSize:"12px",fontWeight:700}}
+                  >
+                    Удалить
+                  </button>
+                </div>
+              )}
+              <input
+                type="file"
+                accept="image/*"
+                onChange={e => handleImageUpload(section.id, e)}
+                style={{display:"block"}}
+              />
+            </div>
+          </div>
+        );
+      })}
+
+      <button
+        onClick={saveSettings}
+        className="btn btn-primary"
+        style={{marginTop:"20px"}}
+      >
+        Сохранить настройки разделов
+      </button>
+    </div>
+  );
+}
 
 // ── LOTTERY ──────────────────────────────────────────────────────────────
 
@@ -7252,22 +7396,38 @@ function LotteryAdminTab({ lotteries, saveLotteries, notify, users, saveUsers, a
   );
 }
 
-function LotteryPage({ lotteries, currentUser, currency }) {
+function LotteryPage({ lotteries, currentUser, currency, appearance }) {
   const list = lotteries || [];
   const active = list.filter(l => l.status === "active").sort((a, b) => a.endsAt - b.endsAt);
   const ended = list.filter(l => l.status === "ended").sort((a, b) => b.endsAt - a.endsAt);
+  const sectionSettings = appearance?.sectionSettings?.lottery || {};
+  const title = sectionSettings.title || "Лотерея";
+  const description = sectionSettings.description || "Участвуйте в розыгрышах и выигрывайте призы";
+  const bannerImage = sectionSettings.banner || "";
 
   return (
     <div style={{ minHeight: "60vh" }}>
+      {bannerImage && (
+        <div className="hero-banner">
+          <div className="hero-banner-bg" style={{backgroundImage:`url(${bannerImage})`}} />
+          <div className="hero-banner-overlay" />
+          <div className="hero-banner-content" style={{padding:"48px 24px"}}>
+            <h1 className="hero-banner-title" style={{fontSize:"clamp(26px,5vw,40px)",marginBottom:"12px"}}>{title}</h1>
+            <p className="hero-banner-desc">{description}</p>
+          </div>
+        </div>
+      )}
       <div style={{background:"#fff",borderBottom:"1.5px solid var(--rd-gray-border)",padding:"40px 0 32px"}}>
         <div className="container">
           <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:"12px"}}>
-            <div>
-              <h1 style={{fontSize:"clamp(26px,5vw,40px)",fontWeight:900,color:"var(--rd-dark)",letterSpacing:"-0.02em"}}>Лотерея</h1>
-              <p style={{fontSize:"15px",color:"var(--rd-gray-text)",marginTop:"6px"}}>Участвуйте в розыгрышах и выигрывайте призы</p>
-            </div>
+            {!bannerImage && (
+              <div>
+                <h1 style={{fontSize:"clamp(26px,5vw,40px)",fontWeight:900,color:"var(--rd-dark)",letterSpacing:"-0.02em"}}>{title}</h1>
+                <p style={{fontSize:"15px",color:"var(--rd-gray-text)",marginTop:"6px"}}>{description}</p>
+              </div>
+            )}
             {list.length > 0 && (
-              <div style={{display:"flex",gap:"16px",flexWrap:"wrap"}}>
+              <div style={{display:"flex",gap:"16px",flexWrap:"wrap",marginLeft:bannerImage?"0":"auto"}}>
                 <div style={{textAlign:"center",background:"var(--rd-gray-bg)",borderRadius:"12px",padding:"12px 20px"}}>
                   <div style={{fontSize:"22px",fontWeight:900,color:"var(--rd-red)"}}>{active.length}</div>
                   <div style={{fontSize:"11px",color:"var(--rd-gray-text)",textTransform:"uppercase",letterSpacing:"0.08em"}}>Активных</div>
@@ -7616,12 +7776,16 @@ function VotingAdminTab({ polls, savePolls, notify, users, saveUsers }) {
   );
 }
 
-function VotingPage({ polls, savePolls, currentUser, users, saveUsers, notify, currency }) {
+function VotingPage({ polls, savePolls, currentUser, users, saveUsers, notify, currency, appearance }) {
   const list = polls || [];
   const now = Date.now();
   const active = list.filter(p => p.status === "active").sort((a, b) => a.endsAt - b.endsAt);
   const ended = list.filter(p => p.status === "ended").sort((a, b) => b.endsAt - a.endsAt);
   const [openPollId, setOpenPollId] = useState(null);
+  const sectionSettings = appearance?.sectionSettings?.voting || {};
+  const title = sectionSettings.title || "Голосование";
+  const description = sectionSettings.description || "Участвуйте в опросах и влияйте на решения";
+  const bannerImage = sectionSettings.banner || "";
 
   const getUserVotes = (poll) => {
     if (!currentUser) return [];
@@ -7651,15 +7815,27 @@ function VotingPage({ polls, savePolls, currentUser, users, saveUsers, notify, c
 
   return (
     <div style={{ minHeight: "60vh" }}>
+      {bannerImage && (
+        <div className="hero-banner">
+          <div className="hero-banner-bg" style={{backgroundImage:`url(${bannerImage})`}} />
+          <div className="hero-banner-overlay" />
+          <div className="hero-banner-content" style={{padding:"48px 24px"}}>
+            <h1 className="hero-banner-title" style={{fontSize:"clamp(26px,5vw,40px)",marginBottom:"12px"}}>{title}</h1>
+            <p className="hero-banner-desc">{description}</p>
+          </div>
+        </div>
+      )}
       <div style={{background:"#fff",borderBottom:"1.5px solid var(--rd-gray-border)",padding:"40px 0 32px"}}>
         <div className="container">
           <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:"12px"}}>
-            <div>
-              <h1 style={{fontSize:"clamp(26px,5vw,40px)",fontWeight:900,color:"var(--rd-dark)",letterSpacing:"-0.02em"}}>Голосование</h1>
-              <p style={{fontSize:"15px",color:"var(--rd-gray-text)",marginTop:"6px"}}>Голосуй и помогай коллегам побеждать</p>
-            </div>
+            {!bannerImage && (
+              <div>
+                <h1 style={{fontSize:"clamp(26px,5vw,40px)",fontWeight:900,color:"var(--rd-dark)",letterSpacing:"-0.02em"}}>{title}</h1>
+                <p style={{fontSize:"15px",color:"var(--rd-gray-text)",marginTop:"6px"}}>{description}</p>
+              </div>
+            )}
             {list.length > 0 && (
-              <div style={{display:"flex",gap:"16px",flexWrap:"wrap"}}>
+              <div style={{display:"flex",gap:"16px",flexWrap:"wrap",marginLeft:bannerImage?"0":"auto"}}>
                 <div style={{textAlign:"center",background:"var(--rd-gray-bg)",borderRadius:"12px",padding:"12px 20px"}}>
                   <div style={{fontSize:"22px",fontWeight:900,color:"var(--rd-red)"}}>{active.length}</div>
                   <div style={{fontSize:"11px",color:"var(--rd-gray-text)",textTransform:"uppercase",letterSpacing:"0.08em"}}>Активных</div>
