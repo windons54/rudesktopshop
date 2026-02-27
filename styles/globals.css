@@ -1171,7 +1171,6 @@ input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; }
   min-height: 340px;
   display: flex;
   align-items: stretch;
-  border-radius: 0 0 var(--rd-radius) var(--rd-radius);
 }
 .hero-banner-bg {
   position: absolute;

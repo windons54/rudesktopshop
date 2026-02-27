@@ -573,10 +573,12 @@ function App() {
       if (ap) {
         if (ap.currency) _globalCurrency = { ...ap.currency };
         setAppearance(prev => ({ ...prev, ...ap,
-          socials:      { ...(prev.socials||{}),      ...(ap.socials||{}) },
-          integrations: { ...(prev.integrations||{}), ...(ap.integrations||{}) },
-          currency:     { ...(prev.currency||{}),     ...(ap.currency||{}) },
-          seo:          { ...(prev.seo||{}),           ...(ap.seo||{}) },
+          socials:         { ...(prev.socials||{}),         ...(ap.socials||{}) },
+          integrations:    { ...(prev.integrations||{}),    ...(ap.integrations||{}) },
+          currency:        { ...(prev.currency||{}),        ...(ap.currency||{}) },
+          seo:             { ...(prev.seo||{}),              ...(ap.seo||{}) },
+          sectionSettings: { ...(prev.sectionSettings||{}), ...(ap.sectionSettings||{}) },
+          features:        { ...(prev.features||{}),        ...(ap.features||{}) },
         }));
         applyTheme(ap.theme || "default", ap);
         if (ap.seo) applySeo(ap.seo);
@@ -690,10 +692,12 @@ function App() {
         const ap = data.cm_appearance;
         if (ap.currency) _globalCurrency = { ...ap.currency };
         setAppearance(prev => ({ ...prev, ...ap,
-          socials:      { ...(prev.socials||{}),      ...(ap.socials||{}) },
-          integrations: { ...(prev.integrations||{}), ...(ap.integrations||{}) },
-          currency:     { ...(prev.currency||{}),     ...(ap.currency||{}) },
-          seo:          { ...(prev.seo||{}),           ...(ap.seo||{}) },
+          socials:         { ...(prev.socials||{}),         ...(ap.socials||{}) },
+          integrations:    { ...(prev.integrations||{}),    ...(ap.integrations||{}) },
+          currency:        { ...(prev.currency||{}),        ...(ap.currency||{}) },
+          seo:             { ...(prev.seo||{}),              ...(ap.seo||{}) },
+          sectionSettings: { ...(prev.sectionSettings||{}), ...(ap.sectionSettings||{}) },
+          features:        { ...(prev.features||{}),        ...(ap.features||{}) },
         }));
         applyTheme(ap.theme || 'default', ap);
         if (ap.seo) applySeo(ap.seo);
@@ -2771,10 +2775,6 @@ function ShopPage({ products, allProducts, categories, filterCat, setFilterCat, 
       {videos && videos.length > 0 && videos.some(v => v.published) && (
         <section style={{padding:"48px 0",background:"#fff"}}>
           <div className="container">
-            <div className="faq-header">
-              <h2 className="faq-title">Видео</h2>
-              <p className="faq-subtitle">Полезные материалы и обзоры</p>
-            </div>
             <div className="video-center-container">
               {videos.filter(v => v.published).slice(0, 1).map((video, idx) => {
                 // Функция для извлечения ID из URL VK Video или RuTube
@@ -7092,6 +7092,11 @@ function SectionsSettingsTab({ appearance, saveAppearance, notify }) {
   ];
 
   const [settings, setSettings] = useState(appearance.sectionSettings || {});
+
+  // Sync local state when appearance changes externally
+  useEffect(() => {
+    setSettings(appearance.sectionSettings || {});
+  }, [appearance.sectionSettings]);
   
   const updateSection = (sectionId, field, value) => {
     setSettings(prev => ({
@@ -7106,11 +7111,12 @@ function SectionsSettingsTab({ appearance, saveAppearance, notify }) {
   const handleImageUpload = async (sectionId, e) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    e.target.value = "";
     
     const reader = new FileReader();
     reader.onload = async (ev) => {
       try {
-        const compressed = await compressImage(ev.target.result, 1920, 600, 0.85, 400);
+        const compressed = await compressImage(ev.target.result, 1600, 600, 0.75, 250);
         updateSection(sectionId, 'banner', compressed);
       } catch (err) {
         notify("Ошибка сжатия изображения", "err");
@@ -7172,12 +7178,16 @@ function SectionsSettingsTab({ appearance, saveAppearance, notify }) {
                   </button>
                 </div>
               )}
-              <input
-                type="file"
-                accept="image/*"
-                onChange={e => handleImageUpload(section.id, e)}
-                style={{display:"block"}}
-              />
+              <div style={{display:"flex",gap:"10px",alignItems:"center",flexWrap:"wrap"}}>
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={e => handleImageUpload(section.id, e)}
+                  style={{display:"none"}}
+                  id={`section-banner-input-${section.id}`}
+                />
+                <label htmlFor={`section-banner-input-${section.id}`} className="btn btn-secondary btn-sm" style={{cursor:"pointer"}}>📷 Загрузить фото</label>
+              </div>
             </div>
           </div>
         );
