@@ -447,6 +447,7 @@ function App() {
   const [customCategories, setCustomCategories] = useState(null);
   const [transfers, setTransfers] = useState([]);
   const [faq, setFaq] = useState([]);
+  const [videos, setVideos] = useState([]);
   const [tasks, setTasks] = useState([]);
   const [auctions, setAuctions] = useState([]);
   const [lotteries, setLotteries] = useState([]);
@@ -528,6 +529,7 @@ function App() {
       const tr = storage.get("cm_transfers");
       const cc = storage.get("cm_categories");
       const fq = storage.get("cm_faq");
+      const vd = storage.get("cm_videos");
       const tk = storage.get("cm_tasks");
       const ts = storage.get("cm_task_submissions");
       const au = storage.get("cm_auctions");
@@ -552,6 +554,8 @@ function App() {
       else { storage.set("cm_deposits", []); }
       if (ud) setUserDeposits(ud);
       else { storage.set("cm_user_deposits", []); }
+      if (vd) setVideos(vd);
+      else { storage.set("cm_videos", []); }
 
       if (fq && fq.length > 0) {
         setFaq(fq);
@@ -674,6 +678,7 @@ function App() {
       if ('cm_transfers'        in data) setTransfers(data.cm_transfers);
       if ('cm_categories'       in data) setCustomCategories(data.cm_categories);
       if ('cm_faq'              in data) setFaq(data.cm_faq);
+      if ('cm_videos'           in data) setVideos(data.cm_videos);
       if ('cm_tasks'            in data) setTasks(data.cm_tasks);
       if ('cm_task_submissions' in data) setTaskSubmissions(data.cm_task_submissions);
       if ('cm_auctions'         in data) setAuctions(data.cm_auctions);
@@ -845,6 +850,7 @@ ym(${integ.ymCounterId}, "init", { clickmap:true, trackLinks:true, accurateTrack
 
   const saveCategories = useCallback((cc) => { setCustomCategories(cc); storage.set("cm_categories", cc); }, []);
   const saveFaq = useCallback((fq) => { setFaq(fq); storage.set("cm_faq", fq); }, []);
+  const saveVideos = useCallback((vd) => { setVideos(vd); storage.set("cm_videos", vd); }, []);
   const saveTasks = useCallback((tk) => { setTasks(tk); storage.set("cm_tasks", tk); }, []);
   const saveAuctions = useCallback((au) => { setAuctions(au); storage.set("cm_auctions", au); }, []);
   const saveLotteries = useCallback((lt) => { const data = lt || []; setLotteries(data); storage.set("cm_lotteries", data); }, []);
@@ -1175,7 +1181,7 @@ ym(${integ.ymCounterId}, "init", { clickmap:true, trackLinks:true, accurateTrack
       })()}
 
       <main className="page-fade" style={{flex:1}}>
-        {page === "shop" && <ShopPage products={filtered} allProducts={activeProducts} categories={shopCategories} filterCat={filterCat} setFilterCat={setFilterCat} addToCart={addToCart} setPage={setPage} currentUser={currentUser} users={users} favorites={favorites} toggleFavorite={toggleFavorite} currency={appearance.currency} faq={faq} tasks={tasks} auctions={auctions} />}
+        {page === "shop" && <ShopPage products={filtered} allProducts={activeProducts} categories={shopCategories} filterCat={filterCat} setFilterCat={setFilterCat} addToCart={addToCart} setPage={setPage} currentUser={currentUser} users={users} favorites={favorites} toggleFavorite={toggleFavorite} currency={appearance.currency} faq={faq} videos={videos} tasks={tasks} auctions={auctions} />}
         {page === "faq" && <FaqPage faq={faq} />}
         {page === "auction" && appearance.features?.auction !== false && <AuctionPage auctions={auctions} saveAuctions={saveAuctions} currentUser={currentUser} users={users} saveUsers={saveUsers} notify={notify} currency={appearance.currency} />}
         {page === "auction" && appearance.features?.auction === false && <div className="empty-state"><div className="empty-state-icon">🔨</div><div className="empty-state-text">Раздел «Аукцион» недоступен</div></div>}
@@ -1195,7 +1201,7 @@ ym(${integ.ymCounterId}, "init", { clickmap:true, trackLinks:true, accurateTrack
         
         {page === "orders" && currentUser && <OrdersPage orders={orders.filter(o => o.user === currentUser)} currency={appearance.currency} />}
         {page === "transfer" && currentUser && <TransferPage currentUser={currentUser} users={users} saveUsers={saveUsers} transfers={transfers} saveTransfers={saveTransfers} notify={notify} setPage={setPage} currency={appearance.currency} />}
-        {page === "settings" && currentUser && <SettingsPage currentUser={currentUser} users={users} saveUsers={saveUsers} notify={notify} setPage={setPage} dbConfig={dbConfig} saveDbConfig={saveDbConfig} refreshDbConfig={refreshDbConfig} pgConfig={pgConfig} savePgConfig={savePgConfigState} isPgActive={isPgActive} isAdmin={isAdmin} orders={orders} saveOrders={saveOrders} products={allProducts} saveProducts={saveProducts} categories={allCategories} saveCategories={saveCategories} appearance={appearance} saveAppearance={saveAppearance} transfers={transfers} saveTransfers={saveTransfers} markOrdersSeen={markOrdersSeen} faq={faq} saveFaq={saveFaq} tasks={tasks} saveTasks={saveTasks} taskSubmissions={taskSubmissions} saveTaskSubmissions={saveTaskSubmissions} auctions={auctions} saveAuctions={saveAuctions} lotteries={lotteries} saveLotteries={saveLotteries} polls={polls} savePolls={savePolls} deposits={deposits} saveDeposits={saveDeposits} userDeposits={userDeposits} saveUserDeposits={saveUserDeposits} users={users} saveUsers={saveUsers} sqliteDisabled={sqliteDisabled} setSqliteDisabled={setSqliteDisabled} />}
+        {page === "settings" && currentUser && <SettingsPage currentUser={currentUser} users={users} saveUsers={saveUsers} notify={notify} setPage={setPage} dbConfig={dbConfig} saveDbConfig={saveDbConfig} refreshDbConfig={refreshDbConfig} pgConfig={pgConfig} savePgConfig={savePgConfigState} isPgActive={isPgActive} isAdmin={isAdmin} orders={orders} saveOrders={saveOrders} products={allProducts} saveProducts={saveProducts} categories={allCategories} saveCategories={saveCategories} appearance={appearance} saveAppearance={saveAppearance} transfers={transfers} saveTransfers={saveTransfers} markOrdersSeen={markOrdersSeen} faq={faq} saveFaq={saveFaq} videos={videos} saveVideos={saveVideos} tasks={tasks} saveTasks={saveTasks} taskSubmissions={taskSubmissions} saveTaskSubmissions={saveTaskSubmissions} auctions={auctions} saveAuctions={saveAuctions} lotteries={lotteries} saveLotteries={saveLotteries} polls={polls} savePolls={savePolls} deposits={deposits} saveDeposits={saveDeposits} userDeposits={userDeposits} saveUserDeposits={saveUserDeposits} users={users} saveUsers={saveUsers} sqliteDisabled={sqliteDisabled} setSqliteDisabled={setSqliteDisabled} />}
       </main>
 
       <footer className="rd-footer" style={appearance.footerBg ? {background: appearance.footerBg} : {}}>
@@ -2519,7 +2525,7 @@ function FaqPage({ faq }) {
 
 // ── SHOP ──────────────────────────────────────────────────────────────────
 
-function ShopPage({ products, allProducts, categories, filterCat, setFilterCat, addToCart, setPage, currentUser, users, favorites, toggleFavorite, currency, faq, tasks, auctions }) {
+function ShopPage({ products, allProducts, categories, filterCat, setFilterCat, addToCart, setPage, currentUser, users, favorites, toggleFavorite, currency, faq, videos, tasks, auctions }) {
   const cName = getCurrName(currency);
   const [modalProduct, setModalProduct] = useState(null);
   const [search, setSearch] = useState("");
@@ -2717,6 +2723,76 @@ function ShopPage({ products, allProducts, categories, filterCat, setFilterCat, 
           </section>
         );
       })()}
+
+      {videos && videos.length > 0 && videos.some(v => v.published) && (
+        <section style={{padding:"48px 0",background:"#fff"}}>
+          <div className="container">
+            <div className="faq-header">
+              <h2 className="faq-title">Видео</h2>
+              <p className="faq-subtitle">Полезные материалы и обзоры</p>
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(320px,1fr))",gap:"24px",marginTop:"32px"}}>
+              {videos.filter(v => v.published).map((video, idx) => {
+                // Функция для извлечения ID из URL VK Video или RuTube
+                const getVideoEmbedUrl = (url) => {
+                  if (!url) return null;
+                  
+                  // VK Video
+                  if (url.includes('vkvideo.ru') || url.includes('vk.com/video')) {
+                    const vkMatch = url.match(/video(-?\d+_\d+)/);
+                    if (vkMatch) {
+                      return `https://vk.com/video_ext.php?oid=${vkMatch[1].split('_')[0]}&id=${vkMatch[1].split('_')[1]}&hd=2`;
+                    }
+                  }
+                  
+                  // RuTube
+                  if (url.includes('rutube.ru')) {
+                    const rutubeMatch = url.match(/rutube\.ru\/video\/([a-zA-Z0-9]+)/);
+                    if (rutubeMatch) {
+                      return `https://rutube.ru/play/embed/${rutubeMatch[1]}`;
+                    }
+                  }
+                  
+                  return null;
+                };
+
+                const embedUrl = getVideoEmbedUrl(video.url);
+                
+                return (
+                  <div key={video.id || idx} style={{borderRadius:"var(--rd-radius)",overflow:"hidden",boxShadow:"var(--rd-shadow-md)",background:"#fff",border:"1.5px solid var(--rd-gray-border)"}}>
+                    {embedUrl ? (
+                      <div style={{position:"relative",paddingBottom:"56.25%",height:0,overflow:"hidden"}}>
+                        <iframe
+                          src={embedUrl}
+                          style={{position:"absolute",top:0,left:0,width:"100%",height:"100%",border:"none"}}
+                          allow="autoplay; encrypted-media; fullscreen; picture-in-picture; screen-wake-lock;"
+                          allowFullScreen
+                        />
+                      </div>
+                    ) : (
+                      <div style={{height:"180px",background:"linear-gradient(135deg,#f3f4f6 0%,#e5e7eb 100%)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:"48px"}}>
+                        🎬
+                      </div>
+                    )}
+                    <div style={{padding:"20px"}}>
+                      {video.title && (
+                        <h3 style={{fontSize:"18px",fontWeight:700,color:"var(--rd-dark)",marginBottom:"8px",lineHeight:1.3}}>
+                          {video.title}
+                        </h3>
+                      )}
+                      {video.description && (
+                        <p style={{fontSize:"14px",color:"var(--rd-gray-text)",lineHeight:1.6}}>
+                          {video.description}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </section>
+      )}
 
       {faq && faq.length > 0 && (
         <section className="faq-section">
@@ -3112,8 +3188,8 @@ function LoginPage({ users, setCurrentUser, setPage, notify, appearance, saveUse
           </>
         )}
         <div className="form-field">
-          <label className="form-label">Логин</label>
-          <input className="form-input" placeholder="Введите логин" value={form.username} onChange={e => setForm({...form, username: e.target.value})} />
+          <label className="form-label">Email</label>
+          <input className="form-input" type="email" placeholder="Введите email" value={form.username} onChange={e => setForm({...form, username: e.target.value})} />
         </div>
         <div className="form-field">
           <label className="form-label">Пароль</label>
@@ -3137,7 +3213,7 @@ function LoginPage({ users, setCurrentUser, setPage, notify, appearance, saveUse
 // ── REGISTER ──────────────────────────────────────────────────────────────
 
 function RegisterPage({ users, saveUsers, setCurrentUser, setPage, notify, appearance }) {
-  const [form, setForm] = useState({ username: "", firstName: "", lastName: "", email: "", password: "", confirm: "" });
+  const [form, setForm] = useState({ firstName: "", lastName: "", email: "", password: "", confirm: "" });
 
   if (appearance?.registrationEnabled === false) {
     return (
@@ -3153,16 +3229,19 @@ function RegisterPage({ users, saveUsers, setCurrentUser, setPage, notify, appea
   }
 
   const submit = () => {
-    if (!form.username || !form.firstName || !form.lastName || !form.email || !form.password) { notify("Заполните все обязательные поля", "err"); return; }
+    if (!form.firstName || !form.lastName || !form.email || !form.password) { notify("Заполните все обязательные поля", "err"); return; }
     if (form.password !== form.confirm) { notify("Пароли не совпадают", "err"); return; }
-    if (users[form.username]) { notify("Логин уже занят", "err"); return; }
+    // Проверяем email как уникальный идентификатор
+    const emailExists = Object.values(users).some(u => u.email === form.email);
+    if (emailExists) { notify("Email уже зарегистрирован", "err"); return; }
     if (form.password.length < 6) { notify("Пароль минимум 6 символов", "err"); return; }
-    // Берём текущее состояние users и добавляем нового — не теряем существующих
-    const newUser = { username: form.username, firstName: form.firstName, lastName: form.lastName, email: form.email, password: form.password, role: "user", balance: 0, createdAt: Date.now() };
-    const newUsers = { ...users, [form.username]: newUser };
+    // Используем email как username
+    const username = form.email;
+    const newUser = { username: username, firstName: form.firstName, lastName: form.lastName, email: form.email, password: form.password, role: "user", balance: 0, createdAt: Date.now() };
+    const newUsers = { ...users, [username]: newUser };
     saveUsers(newUsers);
-    setCurrentUser(form.username);
-    _lsSet("cm_session", { user: form.username, ts: Date.now() });
+    setCurrentUser(username);
+    _lsSet("cm_session", { user: username, ts: Date.now() });
     notify("Регистрация прошла успешно!");
     setPage("shop");
   };
@@ -3182,12 +3261,9 @@ function RegisterPage({ users, saveUsers, setCurrentUser, setPage, notify, appea
           </div>
         </div>
         <div className="form-field">
-          <label className="form-label">Логин <span style={{color:"var(--rd-red)"}}>*</span></label>
-          <input className="form-input" placeholder="Без пробелов" value={form.username} onChange={e => setForm({...form, username: e.target.value.replace(/\s/g,"")})} />
-        </div>
-        <div className="form-field">
           <label className="form-label">Email <span style={{color:"var(--rd-red)"}}>*</span></label>
           <input className="form-input" type="email" placeholder="example@corp.ru" value={form.email} onChange={e => setForm({...form, email: e.target.value})} />
+          <div style={{fontSize:"12px",color:"var(--rd-gray-text)",marginTop:"4px"}}>Email будет использоваться для входа в систему</div>
         </div>
         <div className="form-field">
           <label className="form-label">Пароль</label>
@@ -3750,6 +3826,154 @@ function FaqAdminTab({ faq, saveFaq, notify }) {
           <textarea className="form-input" rows="4" style={{resize:"vertical",minHeight:"100px"}} placeholder="Подробный ответ на вопрос…" value={aInput} onChange={e => setAInput(e.target.value)} />
         </div>
         <button className="btn btn-primary" style={{marginTop:"14px"}} onClick={addItem}>+ Добавить вопрос</button>
+      </div>
+    </div>
+  );
+}
+
+function VideoAdminTab({ videos, saveVideos, notify }) {
+  const videoList = videos || [];
+  const [form, setForm] = useState({ title: "", description: "", url: "", published: true });
+  const [editIdx, setEditIdx] = useState(null);
+  const [editForm, setEditForm] = useState(null);
+
+  const addVideo = () => {
+    if (!form.url.trim()) { notify("Введите URL видео", "err"); return; }
+    // Проверка что URL содержит vkvideo.ru, vk.com/video или rutube.ru
+    if (!form.url.includes('vkvideo.ru') && !form.url.includes('vk.com/video') && !form.url.includes('rutube.ru')) {
+      notify("Поддерживаются только VK Video и RuTube", "err");
+      return;
+    }
+    saveVideos([...videoList, { id: Date.now(), ...form }]);
+    setForm({ title: "", description: "", url: "", published: true });
+    notify("Видео добавлено ✓");
+  };
+
+  const deleteVideo = (idx) => {
+    if (!confirm("Удалить это видео?")) return;
+    saveVideos(videoList.filter((_, i) => i !== idx));
+    notify("Видео удалено");
+  };
+
+  const startEdit = (idx) => {
+    setEditIdx(idx);
+    setEditForm({ ...videoList[idx] });
+  };
+
+  const saveEdit = () => {
+    if (!editForm.url.trim()) { notify("Введите URL видео", "err"); return; }
+    if (!editForm.url.includes('vkvideo.ru') && !editForm.url.includes('vk.com/video') && !editForm.url.includes('rutube.ru')) {
+      notify("Поддерживаются только VK Video и RuTube", "err");
+      return;
+    }
+    saveVideos(videoList.map((item, i) => i === editIdx ? editForm : item));
+    setEditIdx(null);
+    setEditForm(null);
+    notify("Видео обновлено ✓");
+  };
+
+  const togglePublished = (idx) => {
+    saveVideos(videoList.map((item, i) => i === idx ? { ...item, published: !item.published } : item));
+    notify(videoList[idx].published ? "Видео скрыто" : "Видео опубликовано");
+  };
+
+  const moveVideo = (idx, dir) => {
+    const arr = [...videoList];
+    const t = idx + dir;
+    if (t < 0 || t >= arr.length) return;
+    [arr[idx], arr[t]] = [arr[t], arr[idx]];
+    saveVideos(arr);
+  };
+
+  return (
+    <div>
+      {videoList.length === 0
+        ? <div className="empty-state" style={{marginBottom:"24px"}}><div className="empty-state-icon">🎬</div><div className="empty-state-text">Видео пока нет — добавьте первое ниже</div></div>
+        : <div style={{display:"flex",flexDirection:"column",gap:"12px",marginBottom:"24px"}}>
+            {videoList.map((video, idx) => (
+              <div key={video.id || idx} style={{background:"#fff",border:"1.5px solid var(--rd-gray-border)",borderRadius:"var(--rd-radius)",padding:"20px 22px",boxShadow:"var(--rd-shadow)",opacity:video.published?1:0.6}}>
+                {editIdx === idx ? (
+                  <div>
+                    <div className="form-field">
+                      <label className="form-label">Заголовок</label>
+                      <input className="form-input" value={editForm.title || ""} onChange={e => setEditForm({...editForm, title: e.target.value})} />
+                    </div>
+                    <div className="form-field" style={{marginTop:"10px"}}>
+                      <label className="form-label">Описание</label>
+                      <textarea className="form-input" rows="3" style={{resize:"vertical"}} value={editForm.description || ""} onChange={e => setEditForm({...editForm, description: e.target.value})} />
+                    </div>
+                    <div className="form-field" style={{marginTop:"10px"}}>
+                      <label className="form-label">URL видео <span style={{fontSize:"12px",color:"var(--rd-gray-text)"}}>(VK Video или RuTube)</span></label>
+                      <input className="form-input" value={editForm.url} onChange={e => setEditForm({...editForm, url: e.target.value})} placeholder="https://vkvideo.ru/video..." />
+                    </div>
+                    <div style={{marginTop:"10px"}}>
+                      <label style={{display:"flex",alignItems:"center",gap:"10px",cursor:"pointer",userSelect:"none"}}>
+                        <input type="checkbox" checked={editForm.published} onChange={e => setEditForm({...editForm, published: e.target.checked})} style={{width:"16px",height:"16px",accentColor:"var(--rd-red)",cursor:"pointer"}} />
+                        <span style={{fontSize:"14px",color:"var(--rd-dark)",fontWeight:600}}>Опубликовано</span>
+                      </label>
+                    </div>
+                    <div style={{display:"flex",gap:"10px",marginTop:"12px"}}>
+                      <button className="btn btn-primary btn-sm" onClick={saveEdit}>💾 Сохранить</button>
+                      <button className="btn btn-ghost btn-sm" onClick={() => setEditIdx(null)}>Отмена</button>
+                    </div>
+                  </div>
+                ) : (
+                  <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",gap:"12px"}}>
+                    <div style={{flex:1}}>
+                      <div style={{display:"flex",alignItems:"center",gap:"10px",marginBottom:"8px"}}>
+                        <span style={{fontSize:"20px"}}>🎬</span>
+                        <div style={{fontWeight:700,fontSize:"15px",color:"var(--rd-dark)"}}>{video.title || "Без названия"}</div>
+                        {video.published ? (
+                          <span style={{fontSize:"11px",fontWeight:700,padding:"3px 8px",borderRadius:"6px",background:"rgba(34,197,94,0.1)",color:"#16a34a"}}>Опубликовано</span>
+                        ) : (
+                          <span style={{fontSize:"11px",fontWeight:700,padding:"3px 8px",borderRadius:"6px",background:"var(--rd-gray-bg)",color:"var(--rd-gray-text)"}}>Скрыто</span>
+                        )}
+                      </div>
+                      {video.description && (
+                        <div style={{fontSize:"13px",color:"var(--rd-gray-text)",lineHeight:"1.6",marginBottom:"8px"}}>{video.description}</div>
+                      )}
+                      <div style={{fontSize:"12px",color:"var(--rd-gray-text)",fontFamily:"monospace",wordBreak:"break-all"}}>{video.url}</div>
+                    </div>
+                    <div style={{display:"flex",gap:"6px",flexShrink:0}}>
+                      <button className="btn btn-ghost btn-sm" onClick={() => togglePublished(idx)} title={video.published ? "Скрыть" : "Опубликовать"}>
+                        {video.published ? "👁️" : "🙈"}
+                      </button>
+                      <button className="btn btn-ghost btn-sm" onClick={() => moveVideo(idx,-1)} disabled={idx===0} title="Вверх">↑</button>
+                      <button className="btn btn-ghost btn-sm" onClick={() => moveVideo(idx,1)} disabled={idx===videoList.length-1} title="Вниз">↓</button>
+                      <button className="btn btn-ghost btn-sm" onClick={() => startEdit(idx)} title="Редактировать">✏️</button>
+                      <button className="btn btn-ghost btn-sm" onClick={() => deleteVideo(idx)} title="Удалить" style={{color:"var(--rd-red)"}}>🗑️</button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+      }
+
+      <div className="product-form-card">
+        <div className="product-form-title">🎬 Добавить видео</div>
+        <div className="form-field">
+          <label className="form-label">Заголовок (необязательно)</label>
+          <input className="form-input" placeholder="Название видео" value={form.title} onChange={e => setForm({...form, title: e.target.value})} />
+        </div>
+        <div className="form-field" style={{marginTop:"12px"}}>
+          <label className="form-label">Описание (необязательно)</label>
+          <textarea className="form-input" rows="3" style={{resize:"vertical"}} placeholder="Краткое описание видео" value={form.description} onChange={e => setForm({...form, description: e.target.value})} />
+        </div>
+        <div className="form-field" style={{marginTop:"12px"}}>
+          <label className="form-label">URL видео <span style={{fontSize:"12px",color:"var(--rd-gray-text)"}}>(VK Video или RuTube)</span></label>
+          <input className="form-input" placeholder="https://vkvideo.ru/video... или https://rutube.ru/video/..." value={form.url} onChange={e => setForm({...form, url: e.target.value})} />
+          <div style={{fontSize:"12px",color:"var(--rd-gray-text)",marginTop:"4px"}}>
+            Примеры: https://vkvideo.ru/video-123456789_456123456 или https://rutube.ru/video/abc123def456/
+          </div>
+        </div>
+        <div style={{marginTop:"12px"}}>
+          <label style={{display:"flex",alignItems:"center",gap:"10px",cursor:"pointer",userSelect:"none"}}>
+            <input type="checkbox" checked={form.published} onChange={e => setForm({...form, published: e.target.checked})} style={{width:"16px",height:"16px",accentColor:"var(--rd-red)",cursor:"pointer"}} />
+            <span style={{fontSize:"14px",color:"var(--rd-dark)",fontWeight:600}}>Опубликовать сразу</span>
+          </label>
+        </div>
+        <button className="btn btn-primary" style={{marginTop:"14px"}} onClick={addVideo}>+ Добавить видео</button>
       </div>
     </div>
   );
@@ -5045,7 +5269,7 @@ function CurrencySettingsTab({ appearance, saveAppearance, notify }) {
   );
 }
 
-function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbConfig, refreshDbConfig, pgConfig, savePgConfig, isPgActive, isAdmin, orders, saveOrders, products, saveProducts, categories, saveCategories, appearance, saveAppearance, markOrdersSeen, transfers, saveTransfers, faq, saveFaq, tasks, saveTasks, taskSubmissions, saveTaskSubmissions, auctions, saveAuctions, lotteries, saveLotteries, polls, savePolls, deposits, saveDeposits, userDeposits, saveUserDeposits, sqliteDisabled, setSqliteDisabled }) {
+function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbConfig, refreshDbConfig, pgConfig, savePgConfig, isPgActive, isAdmin, orders, saveOrders, products, saveProducts, categories, saveCategories, appearance, saveAppearance, markOrdersSeen, transfers, saveTransfers, faq, saveFaq, videos, saveVideos, tasks, saveTasks, taskSubmissions, saveTaskSubmissions, auctions, saveAuctions, lotteries, saveLotteries, polls, savePolls, deposits, saveDeposits, userDeposits, saveUserDeposits, sqliteDisabled, setSqliteDisabled }) {
   const [tab, setTab] = useState("profile");
   const setTabSafe = (t) => { if (!isAdmin && t !== "profile") return; setTab(t); };
   const [adminTab, setAdminTab] = useState("products");
@@ -5411,6 +5635,7 @@ function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbC
     { id: "general",    icon: "⚙️", label: "Общее" },
     { id: "appearance", icon: "🎨", label: "Внешний вид" },
     { id: "banner",     icon: "🖼️", label: "Баннер" },
+    { id: "video",      icon: "🎬", label: "Видео" },
     { id: "users",      icon: "👥", label: "Пользователи" },
     { id: "currency",   icon: "🪙", label: "Валюта" },
     { id: "seo",        icon: "🔍", label: "SEO" },
@@ -6739,6 +6964,15 @@ function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbC
                 ❓ Вопросы и ответы
               </div>
               <FaqAdminTab faq={faq} saveFaq={saveFaq} notify={notify} />
+            </div>
+          )}
+
+          {tab === "video" && (
+            <div className="settings-card">
+              <div style={{fontWeight:700,fontSize:"18px",color:"var(--rd-dark)",marginBottom:"20px",paddingBottom:"14px",borderBottom:"1.5px solid var(--rd-gray-border)"}}>
+                🎬 Управление видео
+              </div>
+              <VideoAdminTab videos={videos} saveVideos={saveVideos} notify={notify} />
             </div>
           )}
 
