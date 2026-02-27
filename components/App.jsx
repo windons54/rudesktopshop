@@ -1917,37 +1917,73 @@ function AuctionCard({ auction, currentUser, users, saveUsers, saveAuctions, all
   // Auto-settle: deduct from winner when auction ends
   useEffect(() => {
     if (isEnded && lastBid && !auction.settled) {
-      const winner = lastBid.user;
-      const amt = lastBid.amount;
-      const u = users[winner];
-      if (u && (u.balance || 0) >= amt) {
-        saveUsers({ ...users, [winner]: { ...u, balance: (u.balance || 0) - amt } });
+      // Находим победителя с достаточным балансом
+      let winnerBid = null;
+      let winnerUser = null;
+      
+      // Проходим по ставкам в обратном порядке (от последней к первой)
+      for (let i = auction.bids.length - 1; i >= 0; i--) {
+        const bid = auction.bids[i];
+        const u = users[bid.user];
+        
+        // Проверяем, есть ли у пользователя достаточно средств
+        if (u && (u.balance || 0) >= bid.amount) {
+          winnerBid = bid;
+          winnerUser = bid.user;
+          break;
+        }
       }
-      const updated = allAuctions.map(a => a.id === auction.id ? { ...a, settled: true } : a);
-      saveAuctions(updated);
+      
+      // Если нашли победителя с достаточным балансом
+      if (winnerBid && winnerUser) {
+        const amt = winnerBid.amount;
+        const u = users[winnerUser];
+        
+        // Списываем средства с победителя
+        saveUsers({ ...users, [winnerUser]: { ...u, balance: (u.balance || 0) - amt } });
+        
+        // Помечаем аукцион как завершенный с информацией о победителе
+        const updated = allAuctions.map(a => a.id === auction.id ? { 
+          ...a, 
+          settled: true, 
+          finalWinner: winnerUser,
+          finalAmount: amt 
+        } : a);
+        saveAuctions(updated);
 
-      // Telegram notification about auction winner
-      try {
-        const ap = storage.get("cm_appearance") || {};
-        const integ = ap.integrations || {};
-        const winnerData = users[winner];
-        const winnerName = winnerData ? ((winnerData.firstName || "") + " " + (winnerData.lastName || "")).trim() || winner : winner;
-        const msg = `🏆 <b>Аукцион завершён!</b>\n\n🔨 Лот: <b>${auction.name}</b>\n👤 Победитель: ${winnerName} (<code>${winner}</code>)\n💰 Финальная ставка: <b>${amt}</b> монет\n📅 ${new Date().toLocaleString("ru-RU")}`;
-        if (integ.tgEnabled && integ.tgBotToken && integ.tgChatId) {
-          fetch('/api/telegram', {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ token: integ.tgBotToken.trim(), chat_id: integ.tgChatId.trim(), text: msg, parse_mode: "HTML" })
-          }).catch(() => {});
-        }
-        if (integ.maxEnabled && integ.maxBotToken && integ.maxChatId) {
-          fetch('/api/max', {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ token: integ.maxBotToken.trim(), chat_id: integ.maxChatId.trim(), text: msg })
-          }).catch(() => {});
-        }
-      } catch {}
+        // Telegram notification about auction winner
+        try {
+          const ap = storage.get("cm_appearance") || {};
+          const integ = ap.integrations || {};
+          const winnerData = users[winnerUser];
+          const winnerName = winnerData ? ((winnerData.firstName || "") + " " + (winnerData.lastName || "")).trim() || winnerUser : winnerUser;
+          const msg = `🏆 <b>Аукцион завершён!</b>\n\n🔨 Лот: <b>${auction.name}</b>\n👤 Победитель: ${winnerName} (<code>${winnerUser}</code>)\n💰 Финальная ставка: <b>${amt}</b> монет\n📅 ${new Date().toLocaleString("ru-RU")}`;
+          if (integ.tgEnabled && integ.tgBotToken && integ.tgChatId) {
+            fetch('/api/telegram', {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ token: integ.tgBotToken.trim(), chat_id: integ.tgChatId.trim(), text: msg, parse_mode: "HTML" })
+            }).catch(() => {});
+          }
+          if (integ.maxEnabled && integ.maxBotToken && integ.maxChatId) {
+            fetch('/api/max', {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ token: integ.maxBotToken.trim(), chat_id: integ.maxChatId.trim(), text: msg })
+            }).catch(() => {});
+          }
+        } catch {}
+      } else {
+        // Если ни у кого из участников нет достаточно средств
+        const updated = allAuctions.map(a => a.id === auction.id ? { 
+          ...a, 
+          settled: true, 
+          finalWinner: null,
+          finalAmount: null,
+          noWinner: true 
+        } : a);
+        saveAuctions(updated);
+      }
     }
   }, [isEnded]);
 
@@ -2017,10 +2053,20 @@ function AuctionCard({ auction, currentUser, users, saveUsers, saveAuctions, all
           <div className="auction-no-bids">Ставок пока нет — будьте первым!</div>
         )}
 
-        {isEnded && auction.settled && lastBid && (
-          <div className="auction-winner-banner">
-            🏆 Победитель: {getFullName(lastBid.user)} — {lastBid.amount} {cName}
-          </div>
+        {isEnded && auction.settled && (
+          auction.noWinner ? (
+            <div className="auction-winner-banner" style={{background:"#fff0f0",border:"1.5px solid #fecaca",color:"var(--rd-red)"}}>
+              ⚠️ Аукцион завершён без победителя (недостаточно средств у участников)
+            </div>
+          ) : auction.finalWinner ? (
+            <div className="auction-winner-banner">
+              🏆 Победитель: {getFullName(auction.finalWinner)} — {auction.finalAmount} {cName}
+            </div>
+          ) : lastBid && (
+            <div className="auction-winner-banner">
+              🏆 Победитель: {getFullName(lastBid.user)} — {lastBid.amount} {cName}
+            </div>
+          )
         )}
 
         {!isEnded && (
@@ -7428,11 +7474,17 @@ function BankAdminTab({ deposits, saveDeposits, notify }) {
 function BankPage({ deposits, userDeposits, saveUserDeposits, currentUser, users, saveUsers, notify, currency }) {
   const [selectedDeposit, setSelectedDeposit] = useState(null);
   const [amount, setAmount] = useState("");
-  const [showCalculator, setShowCalculator] = useState(false);
   const [calcDeposit, setCalcDeposit] = useState(null);
   const [calcAmount, setCalcAmount] = useState("");
   const cName = getCurrName(currency);
   const myBalance = users[currentUser]?.balance || 0;
+
+  // Инициализация калькулятора первым вкладом
+  React.useEffect(() => {
+    if (deposits.length > 0 && !calcDeposit) {
+      setCalcDeposit(deposits[0].id);
+    }
+  }, [deposits]);
 
   // Проверяем и завершаем истекшие вклады
   React.useEffect(() => {
@@ -7508,19 +7560,48 @@ function BankPage({ deposits, userDeposits, saveUserDeposits, currentUser, users
     <div style={{ minHeight: "60vh" }}>
       <div style={{ background: "#fff", borderBottom: "1.5px solid var(--rd-gray-border)", padding: "40px 0 32px" }}>
         <div className="container">
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "12px" }}>
-            <div>
-              <h1 style={{ fontSize: "clamp(26px,5vw,40px)", fontWeight: 900, color: "var(--rd-dark)", letterSpacing: "-0.02em" }}>Банк</h1>
-              <p style={{ fontSize: "15px", color: "var(--rd-gray-text)", marginTop: "6px" }}>Откройте вклад и получайте проценты</p>
-            </div>
-            <button className="btn btn-secondary" onClick={() => { setShowCalculator(true); setCalcDeposit(deposits[0]?.id || null); }}>
-              🧮 Калькулятор дохода
-            </button>
+          <div>
+            <h1 style={{ fontSize: "clamp(26px,5vw,40px)", fontWeight: 900, color: "var(--rd-dark)", letterSpacing: "-0.02em" }}>Банк</h1>
+            <p style={{ fontSize: "15px", color: "var(--rd-gray-text)", marginTop: "6px" }}>Откройте вклад и получайте проценты</p>
           </div>
         </div>
       </div>
 
       <div className="container" style={{ padding: "32px 0" }}>
+        {/* Калькулятор дохода */}
+        {deposits.length > 0 && (
+          <div style={{ marginBottom: "40px" }}>
+            <div style={{ fontSize: "18px", fontWeight: 700, marginBottom: "20px" }}>🧮 Калькулятор дохода</div>
+            <div style={{ background: "#fff", border: "1.5px solid var(--rd-gray-border)", borderRadius: "var(--rd-radius)", padding: "24px" }}>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px", marginBottom: "20px" }}>
+                <div>
+                  <label className="form-label">Вклад</label>
+                  <select className="form-input" value={calcDeposit || ""} onChange={e => setCalcDeposit(parseInt(e.target.value))}>
+                    {deposits.map(d => (
+                      <option key={d.id} value={d.id}>{d.name} ({d.duration} дней, {d.rate}%)</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="form-label">Сумма вклада</label>
+                  <input className="form-input" type="number" value={calcAmount} onChange={e => setCalcAmount(e.target.value)} placeholder={`Макс: ${myBalance} ${cName}`} />
+                </div>
+              </div>
+              {calcDeposit && calcAmount && (
+                <div style={{ padding: "20px", background: "linear-gradient(135deg, var(--rd-red-light), rgba(199,22,24,0.04))", border: "1.5px solid rgba(199,22,24,0.25)", borderRadius: "12px" }}>
+                  <div style={{ fontSize: "14px", color: "var(--rd-gray-text)", marginBottom: "8px" }}>Ваш доход</div>
+                  <div style={{ fontSize: "32px", fontWeight: 900, color: "var(--rd-red)", marginBottom: "8px" }}>
+                    +{calculateProfit(calcDeposit, parseInt(calcAmount))} {cName}
+                  </div>
+                  <div style={{ fontSize: "13px", color: "var(--rd-gray-text)" }}>
+                    Итого к получению: {parseInt(calcAmount) + calculateProfit(calcDeposit, parseInt(calcAmount))} {cName}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* Доступные вклады */}
         {deposits.length > 0 && (
           <div style={{ marginBottom: "40px" }}>
@@ -7629,41 +7710,6 @@ function BankPage({ deposits, userDeposits, saveUserDeposits, currentUser, users
           </div>
         )}
       </div>
-
-      {/* Калькулятор */}
-      {showCalculator && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center", padding: "20px" }} onClick={() => setShowCalculator(false)}>
-          <div style={{ background: "#fff", borderRadius: "var(--rd-radius)", maxWidth: "500px", width: "100%", padding: "28px", boxShadow: "0 25px 50px rgba(0,0,0,0.25)" }} onClick={e => e.stopPropagation()}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px" }}>
-              <div style={{ fontWeight: 900, fontSize: "22px" }}>🧮 Калькулятор дохода</div>
-              <button onClick={() => setShowCalculator(false)} style={{ background: "var(--rd-gray-bg)", border: "none", borderRadius: "50%", width: "36px", height: "36px", cursor: "pointer", fontSize: "18px" }}>✕</button>
-            </div>
-            <div style={{ marginBottom: "16px" }}>
-              <label className="form-label">Вклад</label>
-              <select className="form-input" value={calcDeposit || ""} onChange={e => setCalcDeposit(parseInt(e.target.value))}>
-                {deposits.map(d => (
-                  <option key={d.id} value={d.id}>{d.name} ({d.duration} дней, {d.rate}%)</option>
-                ))}
-              </select>
-            </div>
-            <div style={{ marginBottom: "20px" }}>
-              <label className="form-label">Сумма вклада</label>
-              <input className="form-input" type="number" value={calcAmount} onChange={e => setCalcAmount(e.target.value)} placeholder={`Макс: ${myBalance} ${cName}`} />
-            </div>
-            {calcDeposit && calcAmount && (
-              <div style={{ padding: "20px", background: "linear-gradient(135deg, var(--rd-red-light), rgba(199,22,24,0.04))", border: "1.5px solid rgba(199,22,24,0.25)", borderRadius: "12px" }}>
-                <div style={{ fontSize: "14px", color: "var(--rd-gray-text)", marginBottom: "8px" }}>Ваш доход</div>
-                <div style={{ fontSize: "32px", fontWeight: 900, color: "var(--rd-red)", marginBottom: "8px" }}>
-                  +{calculateProfit(calcDeposit, parseInt(calcAmount))} {cName}
-                </div>
-                <div style={{ fontSize: "13px", color: "var(--rd-gray-text)" }}>
-                  Итого к получению: {parseInt(calcAmount) + calculateProfit(calcDeposit, parseInt(calcAmount))} {cName}
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
     </div>
   );
 }
