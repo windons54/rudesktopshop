@@ -2880,7 +2880,7 @@ function ProductCard({ product, addToCart, onOpen, favorites, toggleFavorite }) 
             var clr = stockVal === 0 ? "var(--rd-red)" : stockVal <= 5 ? "#d97706" : "var(--rd-green)";
             var bg2 = stockVal === 0 ? "var(--rd-red-light)" : stockVal <= 5 ? "rgba(245,158,11,0.1)" : "var(--rd-green-light)";
             var bc = stockVal === 0 ? "rgba(199,22,24,0.2)" : stockVal <= 5 ? "rgba(245,158,11,0.2)" : "rgba(5,150,105,0.2)";
-            return React.createElement("span", {style:{fontSize:"11px",fontWeight:600,color:clr,background:bg2,padding:"2px 8px",borderRadius:"var(--rd-radius-sm)",border:"1px solid",borderColor:bc}},
+            return React.createElement("span", {style:{fontSize:"11px",fontWeight:600,color:clr,background:bg2,padding:"2px 8px",borderRadius:"10px",border:"1px solid",borderColor:bc}},
               stockVal === 0 ? "Нет в наличии" : "📦 " + stockVal + " шт."
             );
           })()}
@@ -3542,9 +3542,9 @@ function BulkAccrualTab({ users, currentUser, notify, saveUsers, transfers, save
           <div style={{background:"var(--rd-green-light)",border:"1px solid rgba(5,150,105,0.25)",borderRadius:"var(--rd-radius-sm)",padding:"14px 18px",display:"flex",alignItems:"center",justifyContent:"space-between",gap:"16px",marginTop:"4px"}}>
             <div>
               <div style={{fontSize:"13px",color:"var(--rd-green)",fontWeight:700}}>Итого будет начислено</div>
-              <div style={{fontSize:"12px",color:"var(--rd-green)",opacity:0.8}}>{bulkSelected.size} получателей × {bulkAmt} RDC</div>
+              <div style={{fontSize:"12px",color:"var(--rd-green)",opacity:0.8}}>{bulkSelected.size} получателей × {bulkAmt} {bulkCurrName}</div>
             </div>
-            <div style={{fontSize:"28px",fontWeight:800,color:"var(--rd-green)"}}>{totalCoins} RDC</div>
+            <div style={{fontSize:"28px",fontWeight:800,color:"var(--rd-green)"}}>{totalCoins} {bulkCurrName}</div>
           </div>
         )}
       </div>
@@ -3600,7 +3600,7 @@ function BulkAccrualTab({ users, currentUser, notify, saveUsers, transfers, save
       <div style={{display:"flex",gap:"12px"}}>
         <button className="btn btn-primary" style={{minWidth:"200px",fontSize:"15px"}} onClick={doAccrue}
           disabled={!bulkAmt || bulkSelected.size === 0}>
-          🪙 Начислить {bulkAmt > 0 && bulkSelected.size > 0 ? `${totalCoins} RDC` : ""}
+          🪙 Начислить {bulkAmt > 0 && bulkSelected.size > 0 ? `${totalCoins} ${bulkCurrName}` : ""}
         </button>
         <button className="btn btn-ghost" onClick={() => { setBulkSelected(new Set(allUsers.map(([u])=>u))); setBulkAmt(""); }}>
           Сбросить
@@ -4648,7 +4648,7 @@ function AdminPage({ users, saveUsers, orders, saveOrders, products, saveProduct
                 ["Скрытых", products.filter(p=>p.inactive).length, "🚫"],
                 ["Со скидкой", products.filter(p=>p.discount>0).length, "🏷️"],
                 ["Категорий", [...new Set(products.map(p=>p.category))].length, "📂"],
-                ["Ср. цена", products.length ? Math.round(products.reduce((s,p)=>s+(p.price||0),0)/products.length) + " RDC" : "—", "💰"],
+                ["Ср. цена", products.length ? Math.round(products.reduce((s,p)=>s+(p.price||0),0)/products.length) + " " + getCurrName(appearance?.currency) : "—", "💰"],
               ].map(([label,val,icon])=>(
                 <div key={label} style={{background:"var(--rd-gray-bg)",borderRadius:"var(--rd-radius-sm)",padding:"16px",textAlign:"center"}}>
                   <div style={{fontSize:"22px",marginBottom:"6px"}}>{icon}</div>
