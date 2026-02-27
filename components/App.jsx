@@ -8410,7 +8410,7 @@ function BankPage({ deposits, userDeposits, saveUserDeposits, currentUser, users
         </div>
       )}
 
-      <div className="container" style={{ padding: "32px 0" }}>
+      <div className="container auction-page" style={{ padding: "32px 0" }}>
         {/* Карточки вкладов */}
         {deposits.length > 0 && (
           <div style={{ marginBottom: "40px" }}>
