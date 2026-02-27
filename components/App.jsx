@@ -2895,14 +2895,14 @@ function ShopPage({ products, allProducts, categories, filterCat, setFilterCat, 
 
       {(() => {
         const allUsers = Object.entries(users || {});
-        const userCount = allUsers.filter(([, u]) => u.role !== "admin").length;
-        const totalIssued = (transfers || []).reduce((s, t) => {
-          const toUser = t.to && users[t.to] && users[t.to].role !== "admin";
-          const fromAdmin = !t.from || (users[t.from] && users[t.from].role === "admin");
-          return s + (toUser && fromAdmin ? (t.amount || 0) : 0);
-        }, 0);
-        const totalSpent = (orders || []).reduce((s, o) => s + (o.total || 0), 0);
-        const totalItems = (orders || []).reduce((s, o) => s + (o.items || []).reduce((ss, i) => ss + (i.qty || 1), 0), 0);
+        const nonAdminUsers = allUsers.filter(([, u]) => u.role !== "admin");
+        const userCount = nonAdminUsers.length;
+        // Выпущено = текущие балансы всех не-админов + все не отменённые заказы
+        const totalBalances = nonAdminUsers.reduce((s, [, u]) => s + (u.balance || 0), 0);
+        const totalOrdersSpent = (orders || []).filter(o => o.status !== "Отменён").reduce((s, o) => s + (o.total || 0), 0);
+        const totalIssued = totalBalances + totalOrdersSpent;
+        const totalSpent = (orders || []).filter(o => o.status !== "Отменён").reduce((s, o) => s + (o.total || 0), 0);
+        const totalItems = (orders || []).filter(o => o.status !== "Отменён").reduce((s, o) => s + (o.items || []).reduce((ss, i) => ss + (i.qty || 1), 0), 0);
         const cName = getCurrName(currency);
         const fmt = (n) => n >= 1000000 ? (n/1000000).toFixed(1).replace(/\.0$/,"") + "M" : n >= 1000 ? (n/1000).toFixed(1).replace(/\.0$/,"") + "K" : String(n);
         const stats = [

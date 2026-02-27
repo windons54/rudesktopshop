@@ -19,8 +19,9 @@ ENV NEXT_TELEMETRY_DISABLED=1
 ENV NODE_ENV=production
 RUN npm run build
 
-# Директория для данных (fallback без БД)
+# Директория для данных (fallback без БД) — объявляем volume для сохранения при деплоях
 RUN mkdir -p data
+VOLUME ["/app/data"]
 
 EXPOSE 3000
 

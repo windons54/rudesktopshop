@@ -8,6 +8,7 @@ import path from 'path';
 const DATA_DIR    = path.join(process.cwd(), 'data');
 const STORE_FILE  = path.join(DATA_DIR, 'store.json');
 const PG_CFG_FILE = path.join(DATA_DIR, 'pg-config.json');
+const PG_ENV_FILE = path.join(DATA_DIR, 'pg-env.json');   // дополнительный файл, переживает деплой
 const PG_CFG_KEY  = '__pg_config__';
 
 // ── JSON fallback ──────────────────────────────────────────────────────────
@@ -40,6 +41,17 @@ function readPgConfig() {
       if (c && (c.host || c.connectionString)) return { ...c, source: 'file' };
     }
   } catch {}
+  // Проверяем pg-env.json (резервная копия, переживает git deploy при наличии volume)
+  try {
+    if (fs.existsSync(PG_ENV_FILE)) {
+      const c = JSON.parse(fs.readFileSync(PG_ENV_FILE, 'utf8'));
+      if (c && (c.host || c.connectionString)) {
+        // Восстанавливаем pg-config.json
+        try { ensureDir(); fs.writeFileSync(PG_CFG_FILE, JSON.stringify(c), 'utf8'); } catch {}
+        return { ...c, source: 'env_file' };
+      }
+    }
+  } catch {}
   // Fallback: читаем из store.json (переживает git deploy если data/ — persistent volume)
   try {
     const store = readJSON();
@@ -63,12 +75,19 @@ async function tryBootstrapFromDb() {
   g._bootstrapDone = true;
   // Уже есть конфиг — ничего не делаем
   if (readPgConfig()) return;
-  // Нет конфига — ищем сохранённый connection string в глобальном кэше
+  // Нет конфига — ищем сохранённые данные подключения в globalThis
   const saved = g._savedConnStr;
-  if (!saved) return;
+  const savedCfg = g._savedPgCfg;
+  if (!saved && !savedCfg) return;
   try {
     const { Pool } = await import('pg');
-    const pool = new Pool({ connectionString: saved, ssl: { rejectUnauthorized: false }, max: 1, connectionTimeoutMillis: 5000 });
+    const opts = saved
+      ? { connectionString: saved, ssl: { rejectUnauthorized: false }, max: 1, connectionTimeoutMillis: 5000 }
+      : { host: savedCfg.host, port: savedCfg.port || 5432, database: savedCfg.database,
+          user: savedCfg.user, password: savedCfg.password,
+          ssl: savedCfg.ssl ? { rejectUnauthorized: false } : false,
+          max: 1, connectionTimeoutMillis: 5000 };
+    const pool = new Pool(opts);
     await pool.query('SELECT 1');
     // Читаем конфиг из kv таблицы
     const r = await pool.query(`SELECT value FROM kv WHERE key = $1`, [PG_CFG_KEY]);
@@ -77,6 +96,7 @@ async function tryBootstrapFromDb() {
       if (cfg && (cfg.host || cfg.connectionString)) {
         ensureDir();
         fs.writeFileSync(PG_CFG_FILE, JSON.stringify(cfg), 'utf8');
+        fs.writeFileSync(PG_ENV_FILE, JSON.stringify(cfg), 'utf8');
         console.log('[Store] Конфиг БД восстановлен из kv-таблицы');
       }
     }
@@ -145,8 +165,9 @@ async function getPool() {
 
       g._pgReady = true;
       g._pgInitPromise = null;
-      // Кэшируем строку подключения для bootstrap после деплоя
+      // Кэшируем данные подключения для bootstrap после деплоя
       if (poolCfg.connectionString) g._savedConnStr = poolCfg.connectionString;
+      if (poolCfg.host) g._savedPgCfg = { ...poolCfg };
       return g._pgPool;
     } catch (e) {
       console.error('[PG Pool] Ошибка:', e.message);
@@ -224,6 +245,8 @@ async function persistPgConfig(cfg) {
   ensureDir();
   if (cfg) {
     fs.writeFileSync(PG_CFG_FILE, JSON.stringify(cfg), 'utf8');
+    // Резервная копия — переживает git deploy если data/ — persistent volume
+    try { fs.writeFileSync(PG_ENV_FILE, JSON.stringify(cfg), 'utf8'); } catch {}
     // Также сохраняем в store.json чтобы пережить git deploy (если data/ — persistent volume)
     try {
       const store = readJSON();
@@ -232,8 +255,10 @@ async function persistPgConfig(cfg) {
     } catch {}
     // Также сохраняем в globalThis чтобы bootstrap мог его использовать
     g._savedConnStr = cfg.connectionString || null;
+    g._savedPgCfg = cfg.host ? { ...cfg } : null;
   } else {
     if (fs.existsSync(PG_CFG_FILE)) fs.unlinkSync(PG_CFG_FILE);
+    if (fs.existsSync(PG_ENV_FILE)) try { fs.unlinkSync(PG_ENV_FILE); } catch {}
     // Удаляем из store.json тоже
     try {
       const store = readJSON();
@@ -241,6 +266,7 @@ async function persistPgConfig(cfg) {
       writeJSON(store);
     } catch {}
     g._savedConnStr = null;
+    g._savedPgCfg = null;
   }
   // Сбрасываем пул чтобы пересоздать с новым конфигом
   g._pgPool = null; g._pgReady = false; g._pgPoolKey = null; g._pgInitPromise = null;
