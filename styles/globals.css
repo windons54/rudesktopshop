@@ -277,6 +277,8 @@ body {
   justify-content: center;
   padding: 9px 12px !important;
   font-size: 13px;
+  box-sizing: border-box;
+  white-space: nowrap;
 }
 
 /* ======= BUTTONS ======= */
