@@ -7388,30 +7388,42 @@ function VotingPage({ polls, savePolls, currentUser, users, saveUsers, notify, c
 // ── BANK ──────────────────────────────────────────────────────────────
 
 function BankAdminTab({ deposits, saveDeposits, notify }) {
-  const [form, setForm] = useState({ name: "", duration: "", rate: "" });
+  const [form, setForm] = useState({ name: "", duration: "", rate: "", image: "" });
   const [editingId, setEditingId] = useState(null);
   const [editForm, setEditForm] = useState(null);
+
+  const handleImage = async (e, setter) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const r = new FileReader();
+    r.onload = async ev => {
+      const compressed = await compressImage(ev.target.result, 1200, 800, 0.85, 250);
+      setter(compressed);
+    };
+    r.readAsDataURL(file);
+    e.target.value = "";
+  };
 
   const createDeposit = () => {
     if (!form.name.trim()) { notify("Введите название вклада", "err"); return; }
     if (!form.duration || parseInt(form.duration) <= 0) { notify("Введите срок вклада (в днях)", "err"); return; }
     if (!form.rate || parseFloat(form.rate) <= 0) { notify("Введите процентную ставку", "err"); return; }
-    
     const newDeposit = {
       id: Date.now(),
       name: form.name.trim(),
       duration: parseInt(form.duration),
       rate: parseFloat(form.rate),
+      image: form.image || "",
       createdAt: Date.now()
     };
     saveDeposits([...deposits, newDeposit]);
-    setForm({ name: "", duration: "", rate: "" });
+    setForm({ name: "", duration: "", rate: "", image: "" });
     notify("Вклад создан ✓");
   };
 
   const saveEdit = () => {
     if (!editForm || !editForm.name.trim()) { notify("Введите название", "err"); return; }
-    const updated = deposits.map(d => d.id === editingId ? { ...d, name: editForm.name, duration: parseInt(editForm.duration), rate: parseFloat(editForm.rate) } : d);
+    const updated = deposits.map(d => d.id === editingId ? { ...d, name: editForm.name, duration: parseInt(editForm.duration), rate: parseFloat(editForm.rate), image: editForm.image || "" } : d);
     saveDeposits(updated);
     setEditingId(null);
     setEditForm(null);
@@ -7427,10 +7439,23 @@ function BankAdminTab({ deposits, saveDeposits, notify }) {
   return (
     <div>
       <div style={{ fontWeight: 700, fontSize: "15px", marginBottom: "16px" }}>➕ Создать вклад</div>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "12px", marginBottom: "20px" }}>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "12px", marginBottom: "12px" }}>
         <input className="form-input" placeholder="Название вклада" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} />
         <input className="form-input" type="number" placeholder="Срок (дней)" value={form.duration} onChange={e => setForm({ ...form, duration: e.target.value })} />
         <input className="form-input" type="number" step="0.1" placeholder="Ставка (%)" value={form.rate} onChange={e => setForm({ ...form, rate: e.target.value })} />
+      </div>
+      <div style={{ marginBottom: "16px" }}>
+        {form.image ? (
+          <div style={{ position: "relative", display: "inline-block" }}>
+            <img src={form.image} alt="" style={{ maxHeight: "120px", maxWidth: "100%", borderRadius: "8px", border: "1.5px solid var(--rd-gray-border)", display: "block" }} />
+            <button onClick={() => setForm(f => ({ ...f, image: "" }))} style={{ position: "absolute", top: "4px", right: "4px", background: "rgba(0,0,0,0.6)", border: "none", borderRadius: "50%", width: "22px", height: "22px", color: "#fff", cursor: "pointer", fontSize: "13px", display: "flex", alignItems: "center", justifyContent: "center" }}>✕</button>
+          </div>
+        ) : (
+          <label style={{ display: "inline-flex", alignItems: "center", gap: "6px", padding: "8px 16px", border: "1.5px dashed var(--rd-gray-border)", borderRadius: "8px", cursor: "pointer", fontSize: "13px", fontWeight: 600, color: "var(--rd-gray-text)", background: "#fff" }}>
+            🖼️ Добавить фото
+            <input type="file" accept="image/*" style={{ display: "none" }} onChange={e => handleImage(e, img => setForm(f => ({ ...f, image: img })))} />
+          </label>
+        )}
       </div>
       <button onClick={createDeposit} style={{ marginBottom: "28px", background: "var(--rd-red)", color: "#fff", border: "none", borderRadius: "10px", padding: "12px 24px", fontWeight: 700, cursor: "pointer", fontSize: "14px" }}>
         🏦 Создать вклад
@@ -7446,6 +7471,19 @@ function BankAdminTab({ deposits, saveDeposits, notify }) {
                 <input className="form-input" type="number" placeholder="Срок (дней)" value={editForm.duration} onChange={e => setEditForm({ ...editForm, duration: e.target.value })} />
                 <input className="form-input" type="number" step="0.1" placeholder="Ставка (%)" value={editForm.rate} onChange={e => setEditForm({ ...editForm, rate: e.target.value })} />
               </div>
+              <div style={{ marginBottom: "12px" }}>
+                {editForm.image ? (
+                  <div style={{ position: "relative", display: "inline-block" }}>
+                    <img src={editForm.image} alt="" style={{ maxHeight: "100px", maxWidth: "100%", borderRadius: "8px", border: "1.5px solid var(--rd-gray-border)", display: "block" }} />
+                    <button onClick={() => setEditForm(f => ({ ...f, image: "" }))} style={{ position: "absolute", top: "4px", right: "4px", background: "rgba(0,0,0,0.6)", border: "none", borderRadius: "50%", width: "22px", height: "22px", color: "#fff", cursor: "pointer", fontSize: "13px", display: "flex", alignItems: "center", justifyContent: "center" }}>✕</button>
+                  </div>
+                ) : (
+                  <label style={{ display: "inline-flex", alignItems: "center", gap: "6px", padding: "6px 14px", border: "1.5px dashed var(--rd-gray-border)", borderRadius: "8px", cursor: "pointer", fontSize: "12px", fontWeight: 600, color: "var(--rd-gray-text)", background: "#fff" }}>
+                    🖼️ Добавить фото
+                    <input type="file" accept="image/*" style={{ display: "none" }} onChange={e => handleImage(e, img => setEditForm(f => ({ ...f, image: img })))} />
+                  </label>
+                )}
+              </div>
               <div style={{ display: "flex", gap: "8px" }}>
                 <button onClick={saveEdit} style={{ background: "var(--rd-red)", color: "#fff", border: "none", borderRadius: "8px", padding: "10px 20px", fontWeight: 700, cursor: "pointer" }}>Сохранить</button>
                 <button onClick={() => { setEditingId(null); setEditForm(null); }} style={{ background: "var(--rd-gray-bg)", border: "1.5px solid var(--rd-gray-border)", borderRadius: "8px", padding: "10px 20px", fontWeight: 700, cursor: "pointer" }}>Отмена</button>
@@ -7453,14 +7491,17 @@ function BankAdminTab({ deposits, saveDeposits, notify }) {
             </div>
           ) : (
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <div>
-                <div style={{ fontWeight: 700, fontSize: "15px" }}>{deposit.name}</div>
-                <div style={{ fontSize: "13px", color: "var(--rd-gray-text)", marginTop: "4px" }}>
-                  📅 {deposit.duration} дней · 📈 {deposit.rate}% годовых
+              <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+                {deposit.image ? <img src={deposit.image} alt="" style={{ width: "56px", height: "40px", objectFit: "cover", borderRadius: "6px", border: "1px solid var(--rd-gray-border)" }} /> : <div style={{ width: "56px", height: "40px", background: "var(--rd-gray-bg)", borderRadius: "6px", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "20px" }}>🏦</div>}
+                <div>
+                  <div style={{ fontWeight: 700, fontSize: "15px" }}>{deposit.name}</div>
+                  <div style={{ fontSize: "13px", color: "var(--rd-gray-text)", marginTop: "4px" }}>
+                    📅 {deposit.duration} дней · 📈 {deposit.rate}% годовых
+                  </div>
                 </div>
               </div>
               <div style={{ display: "flex", gap: "6px" }}>
-                <button onClick={() => { setEditingId(deposit.id); setEditForm({ name: deposit.name, duration: String(deposit.duration), rate: String(deposit.rate) }); }} style={{ background: "var(--rd-gray-bg)", border: "1.5px solid var(--rd-gray-border)", borderRadius: "8px", padding: "8px 12px", cursor: "pointer", fontSize: "13px", fontWeight: 700 }}>✏️</button>
+                <button onClick={() => { setEditingId(deposit.id); setEditForm({ name: deposit.name, duration: String(deposit.duration), rate: String(deposit.rate), image: deposit.image || "" }); }} style={{ background: "var(--rd-gray-bg)", border: "1.5px solid var(--rd-gray-border)", borderRadius: "8px", padding: "8px 12px", cursor: "pointer", fontSize: "13px", fontWeight: 700 }}>✏️</button>
                 <button onClick={() => deleteDeposit(deposit.id)} style={{ background: "#fff0f0", border: "1.5px solid #fecaca", borderRadius: "8px", padding: "8px 12px", cursor: "pointer", fontSize: "13px", color: "var(--rd-red)", fontWeight: 700 }}>🗑️</button>
               </div>
             </div>
@@ -7472,19 +7513,10 @@ function BankAdminTab({ deposits, saveDeposits, notify }) {
 }
 
 function BankPage({ deposits, userDeposits, saveUserDeposits, currentUser, users, saveUsers, notify, currency }) {
-  const [selectedDeposit, setSelectedDeposit] = useState(null);
+  const [modalDeposit, setModalDeposit] = useState(null); // deposit object shown in modal
   const [amount, setAmount] = useState("");
-  const [calcDeposit, setCalcDeposit] = useState(null);
-  const [calcAmount, setCalcAmount] = useState("");
   const cName = getCurrName(currency);
   const myBalance = users[currentUser]?.balance || 0;
-
-  // Инициализация калькулятора первым вкладом
-  React.useEffect(() => {
-    if (deposits.length > 0 && !calcDeposit) {
-      setCalcDeposit(deposits[0].id);
-    }
-  }, [deposits]);
 
   // Проверяем и завершаем истекшие вклады
   React.useEffect(() => {
@@ -7520,125 +7552,126 @@ function BankPage({ deposits, userDeposits, saveUserDeposits, currentUser, users
   const myCompletedDeposits = userDeposits.filter(ud => ud.user === currentUser && ud.status === "completed");
 
   const openDeposit = () => {
-    if (!selectedDeposit) { notify("Выберите вклад", "err"); return; }
+    if (!modalDeposit) return;
     const amt = parseInt(amount);
     if (!amt || amt <= 0) { notify("Введите сумму", "err"); return; }
     if (amt > myBalance) { notify("Недостаточно средств", "err"); return; }
 
-    const deposit = deposits.find(d => d.id === selectedDeposit);
-    if (!deposit) { notify("Вклад не найден", "err"); return; }
-
-    const newDeposit = {
+    const newDep = {
       id: Date.now(),
       user: currentUser,
-      depositId: deposit.id,
-      depositName: deposit.name,
+      depositId: modalDeposit.id,
+      depositName: modalDeposit.name,
       amount: amt,
-      rate: deposit.rate,
-      duration: deposit.duration,
+      rate: modalDeposit.rate,
+      duration: modalDeposit.duration,
       createdAt: Date.now(),
-      endsAt: Date.now() + (deposit.duration * 86400000),
+      endsAt: Date.now() + (modalDeposit.duration * 86400000),
       status: "active"
     };
 
     const newUsers = { ...users };
     newUsers[currentUser].balance -= amt;
     saveUsers(newUsers);
-    saveUserDeposits([...userDeposits, newDeposit]);
-    setSelectedDeposit(null);
+    saveUserDeposits([...userDeposits, newDep]);
+    setModalDeposit(null);
     setAmount("");
     notify("Вклад открыт ✓");
   };
 
-  const calculateProfit = (depositId, amt) => {
-    const deposit = deposits.find(d => d.id === depositId);
-    if (!deposit || !amt) return 0;
-    return Math.round(amt * deposit.rate / 100);
-  };
+  const modalEndsAt = amount && parseInt(amount) > 0 && modalDeposit
+    ? new Date(Date.now() + modalDeposit.duration * 86400000).toLocaleDateString("ru-RU")
+    : null;
+  const modalProfit = amount && parseInt(amount) > 0 && modalDeposit
+    ? Math.round(parseInt(amount) * modalDeposit.rate / 100)
+    : 0;
 
   return (
     <div style={{ minHeight: "60vh" }}>
+      {/* Модальное окно открытия вклада */}
+      {modalDeposit && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: "20px" }} onClick={() => { setModalDeposit(null); setAmount(""); }}>
+          <div style={{ background: "#fff", borderRadius: "var(--rd-radius)", padding: "28px", maxWidth: "420px", width: "100%", boxShadow: "var(--rd-shadow-lg)" }} onClick={e => e.stopPropagation()}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "20px" }}>
+              <div>
+                <div style={{ fontWeight: 800, fontSize: "20px", color: "var(--rd-dark)", marginBottom: "4px" }}>{modalDeposit.name}</div>
+                <div style={{ fontSize: "13px", color: "var(--rd-gray-text)" }}>📅 {modalDeposit.duration} дней · 📈 {modalDeposit.rate}% годовых</div>
+              </div>
+              <button onClick={() => { setModalDeposit(null); setAmount(""); }} style={{ background: "var(--rd-gray-bg)", border: "1.5px solid var(--rd-gray-border)", borderRadius: "8px", width: "34px", height: "34px", cursor: "pointer", fontSize: "16px", display: "flex", alignItems: "center", justifyContent: "center" }}>✕</button>
+            </div>
+            <div style={{ marginBottom: "16px" }}>
+              <label className="form-label">Сумма вклада</label>
+              <input
+                className="form-input"
+                type="number"
+                placeholder={`Ваш баланс: ${myBalance} ${cName}`}
+                value={amount}
+                onChange={e => setAmount(e.target.value)}
+                autoFocus
+              />
+            </div>
+            {amount && parseInt(amount) > 0 && (
+              <div style={{ padding: "16px", background: "linear-gradient(135deg, var(--rd-red-light), rgba(199,22,24,0.04))", border: "1.5px solid rgba(199,22,24,0.2)", borderRadius: "12px", marginBottom: "16px" }}>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+                  <div>
+                    <div style={{ fontSize: "11px", color: "var(--rd-gray-text)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "4px" }}>Дата окончания</div>
+                    <div style={{ fontWeight: 700, fontSize: "15px", color: "var(--rd-dark)" }}>{modalEndsAt}</div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: "11px", color: "var(--rd-gray-text)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "4px" }}>Доход</div>
+                    <div style={{ fontWeight: 800, fontSize: "20px", color: "var(--rd-red)" }}>+{modalProfit} {cName}</div>
+                  </div>
+                </div>
+                <div style={{ marginTop: "10px", paddingTop: "10px", borderTop: "1px solid rgba(199,22,24,0.15)", fontSize: "13px", color: "var(--rd-gray-text)" }}>
+                  Итого к получению: <strong style={{ color: "var(--rd-dark)" }}>{parseInt(amount) + modalProfit} {cName}</strong>
+                </div>
+              </div>
+            )}
+            <button className="btn btn-primary" style={{ width: "100%" }} onClick={openDeposit}>Открыть вклад</button>
+          </div>
+        </div>
+      )}
+
       <div style={{ background: "#fff", borderBottom: "1.5px solid var(--rd-gray-border)", padding: "40px 0 32px" }}>
         <div className="container">
-          <div>
-            <h1 style={{ fontSize: "clamp(26px,5vw,40px)", fontWeight: 900, color: "var(--rd-dark)", letterSpacing: "-0.02em" }}>Банк</h1>
-            <p style={{ fontSize: "15px", color: "var(--rd-gray-text)", marginTop: "6px" }}>Откройте вклад и получайте проценты</p>
-          </div>
+          <h1 style={{ fontSize: "clamp(26px,5vw,40px)", fontWeight: 900, color: "var(--rd-dark)", letterSpacing: "-0.02em" }}>Банк</h1>
+          <p style={{ fontSize: "15px", color: "var(--rd-gray-text)", marginTop: "6px" }}>Откройте вклад и получайте проценты</p>
         </div>
       </div>
 
       <div className="container" style={{ padding: "32px 0" }}>
-        {/* Калькулятор дохода */}
+        {/* Карточки вкладов */}
         {deposits.length > 0 && (
           <div style={{ marginBottom: "40px" }}>
-            <div style={{ fontSize: "18px", fontWeight: 700, marginBottom: "20px" }}>🧮 Калькулятор дохода</div>
-            <div style={{ background: "#fff", border: "1.5px solid var(--rd-gray-border)", borderRadius: "var(--rd-radius)", padding: "24px" }}>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px", marginBottom: "20px" }}>
-                <div>
-                  <label className="form-label">Вклад</label>
-                  <select className="form-input" value={calcDeposit || ""} onChange={e => setCalcDeposit(parseInt(e.target.value))}>
-                    {deposits.map(d => (
-                      <option key={d.id} value={d.id}>{d.name} ({d.duration} дней, {d.rate}%)</option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="form-label">Сумма вклада</label>
-                  <input className="form-input" type="number" value={calcAmount} onChange={e => setCalcAmount(e.target.value)} placeholder={`Макс: ${myBalance} ${cName}`} />
-                </div>
-              </div>
-              {calcDeposit && calcAmount && (
-                <div style={{ padding: "20px", background: "linear-gradient(135deg, var(--rd-red-light), rgba(199,22,24,0.04))", border: "1.5px solid rgba(199,22,24,0.25)", borderRadius: "12px" }}>
-                  <div style={{ fontSize: "14px", color: "var(--rd-gray-text)", marginBottom: "8px" }}>Ваш доход</div>
-                  <div style={{ fontSize: "32px", fontWeight: 900, color: "var(--rd-red)", marginBottom: "8px" }}>
-                    +{calculateProfit(calcDeposit, parseInt(calcAmount))} {cName}
+            <div style={{ fontSize: "18px", fontWeight: 700, marginBottom: "20px" }}>Доступные вклады</div>
+            <div className="auction-grid">
+              {deposits.map(deposit => (
+                <div key={deposit.id} className="auction-card">
+                  <div className="auction-img">
+                    {deposit.image ? <img src={deposit.image} alt={deposit.name} /> : <span>🏦</span>}
                   </div>
-                  <div style={{ fontSize: "13px", color: "var(--rd-gray-text)" }}>
-                    Итого к получению: {parseInt(calcAmount) + calculateProfit(calcDeposit, parseInt(calcAmount))} {cName}
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* Доступные вклады */}
-        {deposits.length > 0 && (
-          <div style={{ marginBottom: "40px" }}>
-            <div style={{ fontSize: "18px", fontWeight: 700, marginBottom: "20px" }}>Открыть вклад</div>
-            <div style={{ background: "#fff", border: "1.5px solid var(--rd-gray-border)", borderRadius: "var(--rd-radius)", padding: "24px" }}>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px", marginBottom: "20px" }}>
-                <div>
-                  <label className="form-label">Выберите вклад</label>
-                  <select className="form-input" value={selectedDeposit || ""} onChange={e => setSelectedDeposit(parseInt(e.target.value))}>
-                    <option value="">-- Выберите --</option>
-                    {deposits.map(d => (
-                      <option key={d.id} value={d.id}>
-                        {d.name} ({d.duration} дней, {d.rate}%)
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="form-label">Сумма</label>
-                  <input
-                    className="form-input"
-                    type="number"
-                    placeholder={`Ваш баланс: ${myBalance} ${cName}`}
-                    value={amount}
-                    onChange={e => setAmount(e.target.value)}
-                  />
-                </div>
-              </div>
-              {selectedDeposit && amount && (
-                <div style={{ padding: "12px", background: "var(--rd-gray-bg)", borderRadius: "8px", marginBottom: "16px", fontSize: "14px" }}>
-                  <div style={{ fontWeight: 700, marginBottom: "4px" }}>Доход: +{calculateProfit(selectedDeposit, parseInt(amount))} {cName}</div>
-                  <div style={{ color: "var(--rd-gray-text)", fontSize: "13px" }}>
-                    Итого к получению: {parseInt(amount) + calculateProfit(selectedDeposit, parseInt(amount))} {cName}
+                  <div className="auction-body">
+                    <div className="auction-name">{deposit.name}</div>
+                    <div style={{ display: "flex", gap: "10px" }}>
+                      <div style={{ flex: 1, background: "var(--rd-gray-bg)", borderRadius: "10px", padding: "12px 14px" }}>
+                        <div style={{ fontSize: "11px", color: "var(--rd-gray-text)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "4px" }}>Срок</div>
+                        <div style={{ fontWeight: 800, fontSize: "20px", color: "var(--rd-dark)" }}>{deposit.duration} <span style={{ fontSize: "13px", fontWeight: 600 }}>дней</span></div>
+                      </div>
+                      <div style={{ flex: 1, background: "var(--rd-red-light)", borderRadius: "10px", padding: "12px 14px", border: "1.5px solid rgba(199,22,24,0.15)" }}>
+                        <div style={{ fontSize: "11px", color: "var(--rd-gray-text)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: "4px" }}>Ставка</div>
+                        <div style={{ fontWeight: 800, fontSize: "20px", color: "var(--rd-red)" }}>{deposit.rate}<span style={{ fontSize: "13px", fontWeight: 600 }}>%</span></div>
+                      </div>
+                    </div>
+                    <button
+                      className="btn btn-primary"
+                      style={{ width: "100%", marginTop: "auto" }}
+                      onClick={() => { setModalDeposit(deposit); setAmount(""); }}
+                    >
+                      Открыть вклад
+                    </button>
                   </div>
                 </div>
-              )}
-              <button className="btn btn-primary" onClick={openDeposit}>Открыть вклад</button>
+              ))}
             </div>
           </div>
         )}
