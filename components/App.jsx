@@ -1536,6 +1536,8 @@ function TasksAdminTab({ tasks, saveTasks, taskSubmissions, saveTaskSubmissions,
   const [form, setForm] = useState({ title:"", bannerText:"", shortDesc:"", description:"", reward:100, image:"", active:true, deadline:"", taskType:"regular", quizPassPct:80, quizMaxFailedAttempts:0, quizQuestions:[] });
   const [imgPreview, setImgPreview] = useState("");
   const [commentInputs, setCommentInputs] = useState({});
+  const [taskSearch, setTaskSearch] = useState("");
+  const [taskSort, setTaskSort] = useState("newest");
 
   const taskList = tasks || [];
 
@@ -1754,11 +1756,20 @@ function TasksAdminTab({ tasks, saveTasks, taskSubmissions, saveTaskSubmissions,
       )}
 
       {editId !== "new" && (<>
+        {taskList.length > 0 && (
+          <div style={{display:"flex",gap:"10px",marginBottom:"16px",flexWrap:"wrap",alignItems:"center"}}>
+            <input className="form-input" placeholder="🔍 Поиск по названию..." value={taskSearch} onChange={e => setTaskSearch(e.target.value)} style={{flex:"1 1 200px",minWidth:"160px",padding:"8px 14px",fontSize:"13px"}} />
+            <select className="form-input" value={taskSort} onChange={e => setTaskSort(e.target.value)} style={{flex:"0 0 auto",padding:"8px 14px",fontSize:"13px",minWidth:"160px"}}>
+              <option value="newest">Сначала новые</option>
+              <option value="oldest">Сначала старые</option>
+            </select>
+          </div>
+        )}
         {taskList.length === 0 && (
           <div className="empty-state" style={{marginBottom:"24px"}}><div className="empty-state-icon">🎯</div><div className="empty-state-text">Заданий нет — добавьте первое</div></div>
         )}
         <div style={{display:"flex",flexDirection:"column",gap:"12px",marginBottom:"36px"}}>
-        {taskList.map(task => (
+        {taskList.filter(t => !taskSearch || t.title.toLowerCase().includes(taskSearch.toLowerCase())).sort((a, b) => taskSort === "newest" ? b.id - a.id : a.id - b.id).map(task => (
           <div key={task.id} style={{background:"#fff",border:"1.5px solid var(--rd-gray-border)",borderRadius:"var(--rd-radius)",padding:"18px 22px",boxShadow:"var(--rd-shadow)",display:"flex",alignItems:"center",gap:"16px"}}>
             {task.image && <img src={task.image} style={{width:"64px",height:"48px",objectFit:"cover",borderRadius:"8px",flexShrink:0}} alt="" />}
             <div style={{flex:1}}>
@@ -2080,6 +2091,8 @@ function AuctionAdminTab({ auctions, saveAuctions, notify, users }) {
   const [editingId, setEditingId] = useState(null);
   const [editForm, setEditForm] = useState(null);
   const [editImgPreview, setEditImgPreview] = useState("");
+  const [adminSearch, setAdminSearch] = useState("");
+  const [adminSort, setAdminSort] = useState("newest");
 
   const handleImage = (e) => {
     const file = e.target.files[0];
@@ -2167,11 +2180,55 @@ function AuctionAdminTab({ auctions, saveAuctions, notify, users }) {
 
   return (
     <div>
+      {/* Create form */}
+      <div className="product-form-card" style={{position:"relative",top:"auto",marginBottom:"24px"}}>
+        <div className="product-form-title">🔨 Создать аукцион</div>
+        <div className="form-field">
+          <label className="form-label">Название товара</label>
+          <input className="form-input" placeholder="Эксклюзивная худи с вышивкой" value={form.name} onChange={e => setForm(f => ({...f, name: e.target.value}))} />
+        </div>
+        <div className="form-field" style={{marginTop:"12px"}}>
+          <label className="form-label">Фотография товара</label>
+          <input type="file" accept="image/*" style={{display:"none"}} id="auction-img-input" onChange={handleImage} />
+          <div style={{display:"flex",gap:"10px",alignItems:"center",flexWrap:"wrap"}}>
+            <label htmlFor="auction-img-input" className="btn btn-secondary btn-sm" style={{cursor:"pointer"}}>📷 Загрузить фото</label>
+            {imgPreview && <button className="btn btn-ghost btn-sm" style={{color:"var(--rd-red)"}} onClick={() => {setImgPreview(""); setForm(f => ({...f, image:""}));}}>✕ Удалить</button>}
+          </div>
+          {imgPreview && <img src={imgPreview} alt="" style={{marginTop:"10px",width:"120px",height:"80px",objectFit:"cover",borderRadius:"8px",border:"1.5px solid var(--rd-gray-border)"}} />}
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"12px",marginTop:"12px"}}>
+          <div className="form-field">
+            <label className="form-label">Стартовая цена</label>
+            <input className="form-input" type="number" min="1" placeholder="500" value={form.startPrice} onChange={e => setForm(f => ({...f, startPrice: e.target.value}))} />
+          </div>
+          <div className="form-field">
+            <label className="form-label">Шаг аукциона</label>
+            <input className="form-input" type="number" min="1" placeholder="50" value={form.step} onChange={e => setForm(f => ({...f, step: e.target.value}))} />
+          </div>
+        </div>
+        <div className="form-field" style={{marginTop:"12px"}}>
+          <label className="form-label">Дата и время завершения</label>
+          <input className="form-input" type="datetime-local" min={minDate} value={form.endsAt} onChange={e => setForm(f => ({...f, endsAt: e.target.value}))} />
+        </div>
+        <button className="btn btn-primary" style={{marginTop:"16px",width:"100%"}} onClick={create}>🔨 Создать аукцион</button>
+      </div>
+
+      {/* Search & Sort */}
+      {list.length > 0 && (
+        <div style={{display:"flex",gap:"10px",marginBottom:"16px",flexWrap:"wrap",alignItems:"center"}}>
+          <input className="form-input" placeholder="🔍 Поиск по названию..." value={adminSearch} onChange={e => setAdminSearch(e.target.value)} style={{flex:"1 1 200px",minWidth:"160px",padding:"8px 14px",fontSize:"13px"}} />
+          <select className="form-input" value={adminSort} onChange={e => setAdminSort(e.target.value)} style={{flex:"0 0 auto",padding:"8px 14px",fontSize:"13px",minWidth:"160px"}}>
+            <option value="newest">Сначала новые</option>
+            <option value="oldest">Сначала старые</option>
+          </select>
+        </div>
+      )}
+
       {/* List */}
       {list.length === 0
-        ? <div className="empty-state" style={{marginBottom:"24px"}}><div className="empty-state-icon">🔨</div><div className="empty-state-text">Аукционов пока нет — создайте первый ниже</div></div>
+        ? <div className="empty-state" style={{marginBottom:"24px"}}><div className="empty-state-icon">🔨</div><div className="empty-state-text">Аукционов пока нет</div></div>
         : <div style={{display:"flex",flexDirection:"column",gap:"12px",marginBottom:"24px"}}>
-            {list.map(a => {
+            {list.filter(a => !adminSearch || a.name.toLowerCase().includes(adminSearch.toLowerCase())).sort((a, b) => adminSort === "newest" ? (b.createdAt || b.id) - (a.createdAt || a.id) : (a.createdAt || a.id) - (b.createdAt || b.id)).map(a => {
               const isEnded = Date.now() >= a.endsAt;
               const lastBid = a.bids && a.bids.length > 0 ? a.bids[a.bids.length - 1] : null;
               const currentPrice = lastBid ? lastBid.amount : a.startPrice;
@@ -2256,38 +2313,6 @@ function AuctionAdminTab({ auctions, saveAuctions, notify, users }) {
           </div>
       }
 
-      {/* Create form */}
-      <div className="product-form-card" style={{position:"relative",top:"auto"}}>
-        <div className="product-form-title">🔨 Создать аукцион</div>
-        <div className="form-field">
-          <label className="form-label">Название товара</label>
-          <input className="form-input" placeholder="Эксклюзивная худи с вышивкой" value={form.name} onChange={e => setForm(f => ({...f, name: e.target.value}))} />
-        </div>
-        <div className="form-field" style={{marginTop:"12px"}}>
-          <label className="form-label">Фотография товара</label>
-          <input type="file" accept="image/*" style={{display:"none"}} id="auction-img-input" onChange={handleImage} />
-          <div style={{display:"flex",gap:"10px",alignItems:"center",flexWrap:"wrap"}}>
-            <label htmlFor="auction-img-input" className="btn btn-secondary btn-sm" style={{cursor:"pointer"}}>📷 Загрузить фото</label>
-            {imgPreview && <button className="btn btn-ghost btn-sm" style={{color:"var(--rd-red)"}} onClick={() => {setImgPreview(""); setForm(f => ({...f, image:""}));}}>✕ Удалить</button>}
-          </div>
-          {imgPreview && <img src={imgPreview} alt="" style={{marginTop:"10px",width:"120px",height:"80px",objectFit:"cover",borderRadius:"8px",border:"1.5px solid var(--rd-gray-border)"}} />}
-        </div>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"12px",marginTop:"12px"}}>
-          <div className="form-field">
-            <label className="form-label">Стартовая цена</label>
-            <input className="form-input" type="number" min="1" placeholder="500" value={form.startPrice} onChange={e => setForm(f => ({...f, startPrice: e.target.value}))} />
-          </div>
-          <div className="form-field">
-            <label className="form-label">Шаг аукциона</label>
-            <input className="form-input" type="number" min="1" placeholder="50" value={form.step} onChange={e => setForm(f => ({...f, step: e.target.value}))} />
-          </div>
-        </div>
-        <div className="form-field" style={{marginTop:"12px"}}>
-          <label className="form-label">Дата и время завершения</label>
-          <input className="form-input" type="datetime-local" min={minDate} value={form.endsAt} onChange={e => setForm(f => ({...f, endsAt: e.target.value}))} />
-        </div>
-        <button className="btn btn-primary" style={{marginTop:"16px",width:"100%"}} onClick={create}>🔨 Создать аукцион</button>
-      </div>
     </div>
   );
 }
@@ -6532,6 +6557,13 @@ function LotteryAdminTab({ lotteries, saveLotteries, notify, users, saveUsers, a
   const [editForm, setEditForm] = useState(null);
   const [historyView, setHistoryView] = useState(false);
   const drawnRef = React.useRef(new Set());
+  const [adminSearch, setAdminSearch] = useState("");
+  const [adminSort, setAdminSort] = useState("newest");
+  const now = Date.now();
+  const active = list.filter(l => l.status === "active").sort((a, b) => a.endsAt - b.endsAt);
+  const ended = list.filter(l => l.status === "ended").sort((a, b) => b.endsAt - a.endsAt);
+  const filteredActive = active.filter(l => !adminSearch || l.name.toLowerCase().includes(adminSearch.toLowerCase()));
+  const filteredEnded = ended.filter(l => !adminSearch || l.name.toLowerCase().includes(adminSearch.toLowerCase()));
 
   const sendTg = (text) => {
     const integ = appearance?.integrations || {};
@@ -6604,9 +6636,6 @@ function LotteryAdminTab({ lotteries, saveLotteries, notify, users, saveUsers, a
   };
   const deleteLottery = (id) => { saveLotteries(list.filter(l => l.id !== id)); notify("Лотерея удалена"); };
 
-  const now = Date.now();
-  const active = list.filter(l => l.status === "active");
-  const ended = list.filter(l => l.status === "ended");
   const inputStyle = { width: "100%", padding: "10px 14px", border: "1.5px solid var(--rd-gray-border)", borderRadius: "10px", fontSize: "14px", boxSizing: "border-box", background: "#fff" };
   const labelStyle = { fontSize: "12px", fontWeight: 700, color: "var(--rd-gray-text)", marginBottom: "6px", display: "block" };
 
@@ -6616,6 +6645,17 @@ function LotteryAdminTab({ lotteries, saveLotteries, notify, users, saveUsers, a
         <button onClick={() => setHistoryView(false)} style={{ padding: "8px 18px", borderRadius: "10px", border: "1.5px solid var(--rd-gray-border)", background: !historyView ? "var(--rd-red)" : "#fff", color: !historyView ? "#fff" : "var(--rd-dark)", fontWeight: 700, cursor: "pointer" }}>Управление</button>
         <button onClick={() => setHistoryView(true)} style={{ padding: "8px 18px", borderRadius: "10px", border: "1.5px solid var(--rd-gray-border)", background: historyView ? "var(--rd-red)" : "#fff", color: historyView ? "#fff" : "var(--rd-dark)", fontWeight: 700, cursor: "pointer" }}>История победителей</button>
       </div>
+
+      {/* Search & Sort */}
+      {list.length > 0 && (
+        <div style={{display:"flex",gap:"10px",marginBottom:"16px",flexWrap:"wrap",alignItems:"center"}}>
+          <input className="form-input" placeholder="🔍 Поиск по названию..." value={adminSearch} onChange={e => setAdminSearch(e.target.value)} style={{flex:"1 1 200px",minWidth:"160px",padding:"8px 14px",fontSize:"13px"}} />
+          <select className="form-input" value={adminSort} onChange={e => setAdminSort(e.target.value)} style={{flex:"0 0 auto",padding:"8px 14px",fontSize:"13px",minWidth:"160px"}}>
+            <option value="newest">Сначала новые</option>
+            <option value="oldest">Сначала старые</option>
+          </select>
+        </div>
+      )}
 
       {!historyView && (
         <>
@@ -6643,8 +6683,8 @@ function LotteryAdminTab({ lotteries, saveLotteries, notify, users, saveUsers, a
             <button onClick={addLottery} style={{ marginTop: "16px", background: "var(--rd-red)", color: "#fff", border: "none", borderRadius: "10px", padding: "12px 24px", fontWeight: 700, cursor: "pointer", fontSize: "14px" }}>🎰 Создать лотерею</button>
           </div>
 
-          {active.length > 0 && <div style={{ fontWeight: 700, fontSize: "14px", marginBottom: "12px", color: "var(--rd-dark)" }}>Активные лотереи</div>}
-          {active.map(l => (
+          {filteredActive.length > 0 && <div style={{ fontWeight: 700, fontSize: "14px", marginBottom: "12px", color: "var(--rd-dark)" }}>Активные лотереи</div>}
+          {filteredActive.map(l => (
             <div key={l.id} style={{ border: "1.5px solid var(--rd-gray-border)", borderRadius: "var(--rd-radius-sm)", padding: "16px", marginBottom: "12px", background: "#fff" }}>
               {editingId === l.id ? (
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
@@ -6680,14 +6720,14 @@ function LotteryAdminTab({ lotteries, saveLotteries, notify, users, saveUsers, a
               )}
             </div>
           ))}
-          {active.length === 0 && <div style={{ color: "var(--rd-gray-text)", textAlign: "center", padding: "20px", fontSize: "14px" }}>Нет активных лотерей</div>}
+          {filteredActive.length === 0 && <div style={{ color: "var(--rd-gray-text)", textAlign: "center", padding: "20px", fontSize: "14px" }}>Нет активных лотерей</div>}
         </>
       )}
 
       {historyView && (
         <div>
-          {ended.length === 0 && <div style={{ color: "var(--rd-gray-text)", textAlign: "center", padding: "40px", fontSize: "14px" }}>История пуста</div>}
-          {ended.map(l => (
+          {filteredEnded.length === 0 && <div style={{ color: "var(--rd-gray-text)", textAlign: "center", padding: "40px", fontSize: "14px" }}>История пуста</div>}
+          {filteredEnded.map(l => (
             <div key={l.id} style={{ border: "1.5px solid var(--rd-gray-border)", borderRadius: "var(--rd-radius-sm)", padding: "16px", marginBottom: "12px", background: "#fff" }}>
               <div style={{ display: "flex", gap: "14px", alignItems: "flex-start" }}>
                 {l.image && <img src={l.image} alt="" style={{ width: "60px", height: "60px", objectFit: "cover", borderRadius: "10px", flexShrink: 0 }} />}
@@ -6829,7 +6869,7 @@ function VoteCountdown({ endsAt }) {
 }
 
 // PollFields is defined OUTSIDE VotingAdminTab to prevent cursor loss on re-render
-function PollFields({ f, onUpdate, onAddOption, onRemoveOption, onImgChange }) {
+function PollFields({ f, onUpdate, onAddOption, onRemoveOption, onImgChange, onMainImgChange }) {
   const iS = { width: "100%", padding: "10px 14px", border: "1.5px solid var(--rd-gray-border)", borderRadius: "10px", fontSize: "14px", boxSizing: "border-box", background: "#fff" };
   const lS = { fontSize: "12px", fontWeight: 700, color: "var(--rd-gray-text)", marginBottom: "6px", display: "block" };
   return (
@@ -6842,6 +6882,19 @@ function PollFields({ f, onUpdate, onAddOption, onRemoveOption, onImgChange }) {
         <div style={{ gridColumn: "1/-1" }}>
           <label style={lS}>Описание голосования</label>
           <textarea style={{ ...iS, minHeight: "80px", resize: "vertical" }} value={f.description || ""} onChange={e => onUpdate("description", e.target.value)} placeholder="Подробное описание голосования..." />
+        </div>
+        <div style={{ gridColumn: "1/-1" }}>
+          <label style={lS}>Обложка голосования</label>
+          {f.image ? (
+            <div style={{ position: "relative", display: "inline-block" }}>
+              <img src={f.image} alt="" style={{ maxHeight: "120px", maxWidth: "100%", borderRadius: "10px", border: "1.5px solid var(--rd-gray-border)" }} />
+              <button onClick={() => onUpdate("image", "")} style={{ position: "absolute", top: "4px", right: "4px", background: "rgba(0,0,0,0.6)", border: "none", borderRadius: "50%", width: "22px", height: "22px", color: "#fff", cursor: "pointer", fontSize: "13px" }}>✕</button>
+            </div>
+          ) : (
+            <label style={{ display: "inline-flex", alignItems: "center", gap: "6px", padding: "8px 16px", border: "1.5px dashed var(--rd-gray-border)", borderRadius: "10px", cursor: "pointer", fontSize: "13px", fontWeight: 600, color: "var(--rd-gray-text)" }}>
+              🖼️ Добавить обложку<input type="file" accept="image/*" style={{ display: "none" }} onChange={e => { if (onMainImgChange) onMainImgChange(e.target.files[0]); e.target.value = ""; }} />
+            </label>
+          )}
         </div>
         <div>
           <label style={lS}>Голосов у пользователя</label>
@@ -6891,10 +6944,12 @@ function PollFields({ f, onUpdate, onAddOption, onRemoveOption, onImgChange }) {
 
 function VotingAdminTab({ polls, savePolls, notify, users, saveUsers }) {
   const list = polls || [];
-  const emptyForm = { title: "", description: "", options: [{ text: "", image: "" }, { text: "", image: "" }], maxVotes: 1, winners: 1, prize: 100, endsAt: "" };
+  const emptyForm = { title: "", description: "", image: "", options: [{ text: "", image: "" }, { text: "", image: "" }], maxVotes: 1, winners: 1, prize: 100, endsAt: "" };
   const [form, setForm] = useState(emptyForm);
   const [editingId, setEditingId] = useState(null);
   const [editForm, setEditForm] = useState(null);
+  const [adminSearch, setAdminSearch] = useState("");
+  const [adminSort, setAdminSort] = useState("newest");
 
   const handleImgChange = async (setter, idx, file) => {
     if (!file) return;
@@ -6903,22 +6958,31 @@ function VotingAdminTab({ polls, savePolls, notify, users, saveUsers }) {
     r.readAsDataURL(file);
   };
 
+  const handleMainImg = async (setter, file) => {
+    if (!file) return;
+    const r = new FileReader();
+    r.onload = async ev => { const c = await compressImage(ev.target.result, 1200, 800, 0.85, 300); setter(f => ({ ...f, image: c })); };
+    r.readAsDataURL(file);
+  };
+
   // Stable callbacks via useCallback to prevent focus loss on re-render
   const formUpdate = React.useCallback((key, val) => setForm(f => ({ ...f, [key]: val })), []);
   const formAddOpt = React.useCallback(() => setForm(f => ({ ...f, options: [...f.options, { text: "", image: "" }] })), []);
   const formRemOpt = React.useCallback((idx) => setForm(f => ({ ...f, options: f.options.filter((_, i) => i !== idx) })), []);
   const formImgChg = React.useCallback((idx, file) => handleImgChange(setForm, idx, file), []);
+  const formMainImgChg = React.useCallback((file) => handleMainImg(setForm, file), []);
 
   const editUpdate = React.useCallback((key, val) => setEditForm(f => f ? ({ ...f, [key]: val }) : f), []);
   const editAddOpt = React.useCallback(() => setEditForm(f => f ? ({ ...f, options: [...f.options, { text: "", image: "" }] }) : f), []);
   const editRemOpt = React.useCallback((idx) => setEditForm(f => f ? ({ ...f, options: f.options.filter((_, i) => i !== idx) }) : f), []);
   const editImgChg = React.useCallback((idx, file) => handleImgChange(setEditForm, idx, file), []);
+  const editMainImgChg = React.useCallback((file) => handleMainImg(setEditForm, file), []);
 
   const createPoll = () => {
     if (!form.title.trim()) { notify("Введите заголовок", "err"); return; }
     if (form.options.some(o => !o.text.trim())) { notify("Заполните все варианты", "err"); return; }
     if (!form.endsAt) { notify("Укажите дату завершения", "err"); return; }
-    const newPoll = { id: Date.now(), title: form.title.trim(), description: form.description || "", options: form.options.map((o, i) => ({ ...o, id: i, votes: [] })), maxVotes: parseInt(form.maxVotes) || 1, winners: parseInt(form.winners) || 1, prize: parseInt(form.prize) || 0, endsAt: new Date(form.endsAt).getTime(), status: "active", winnersAwarded: false, createdAt: Date.now() };
+    const newPoll = { id: Date.now(), title: form.title.trim(), description: form.description || "", image: form.image || "", options: form.options.map((o, i) => ({ ...o, id: i, votes: [] })), maxVotes: parseInt(form.maxVotes) || 1, winners: parseInt(form.winners) || 1, prize: parseInt(form.prize) || 0, endsAt: new Date(form.endsAt).getTime(), status: "active", winnersAwarded: false, createdAt: Date.now() };
     savePolls([...list, newPoll]);
     setForm(emptyForm);
     notify("Голосование создано ✓");
@@ -6926,7 +6990,7 @@ function VotingAdminTab({ polls, savePolls, notify, users, saveUsers }) {
 
   const saveEdit = () => {
     if (!editForm || !editForm.title.trim()) { notify("Введите заголовок", "err"); return; }
-    const updated = list.map(p => p.id === editingId ? { ...p, title: editForm.title, description: editForm.description || "", options: editForm.options.map((o, i) => ({ ...o, id: i, votes: p.options[i]?.votes || [] })), maxVotes: parseInt(editForm.maxVotes), winners: parseInt(editForm.winners), prize: parseInt(editForm.prize), endsAt: new Date(editForm.endsAt).getTime() } : p);
+    const updated = list.map(p => p.id === editingId ? { ...p, title: editForm.title, description: editForm.description || "", image: editForm.image || "", options: editForm.options.map((o, i) => ({ ...o, id: i, votes: p.options[i]?.votes || [] })), maxVotes: parseInt(editForm.maxVotes), winners: parseInt(editForm.winners), prize: parseInt(editForm.prize), endsAt: new Date(editForm.endsAt).getTime() } : p);
     savePolls(updated); setEditingId(null); setEditForm(null); notify("Голосование обновлено ✓");
   };
 
@@ -6962,6 +7026,9 @@ function VotingAdminTab({ polls, savePolls, notify, users, saveUsers }) {
 
   const now = Date.now();
 
+  const filteredList = list.filter(p => !adminSearch || p.title.toLowerCase().includes(adminSearch.toLowerCase()))
+    .sort((a, b) => adminSort === "newest" ? (b.createdAt || b.id) - (a.createdAt || a.id) : (a.createdAt || a.id) - (b.createdAt || b.id));
+
   return (
     <div>
       <div style={{ fontWeight: 700, fontSize: "15px", marginBottom: "16px" }}>➕ Создать голосование</div>
@@ -6971,11 +7038,23 @@ function VotingAdminTab({ polls, savePolls, notify, users, saveUsers }) {
         onAddOption={formAddOpt}
         onRemoveOption={formRemOpt}
         onImgChange={formImgChg}
+        onMainImgChange={formMainImgChg}
       />
       <button onClick={createPoll} style={{ marginBottom: "28px", background: "var(--rd-red)", color: "#fff", border: "none", borderRadius: "10px", padding: "12px 24px", fontWeight: 700, cursor: "pointer", fontSize: "14px" }}>🗳️ Создать голосование</button>
 
+      {list.length > 0 && (
+        <div style={{display:"flex",gap:"10px",marginBottom:"16px",flexWrap:"wrap",alignItems:"center"}}>
+          <input className="form-input" placeholder="🔍 Поиск по названию..." value={adminSearch} onChange={e => setAdminSearch(e.target.value)} style={{flex:"1 1 200px",minWidth:"160px",padding:"8px 14px",fontSize:"13px"}} />
+          <select className="form-input" value={adminSort} onChange={e => setAdminSort(e.target.value)} style={{flex:"0 0 auto",padding:"8px 14px",fontSize:"13px",minWidth:"160px"}}>
+            <option value="newest">Сначала новые</option>
+            <option value="oldest">Сначала старые</option>
+          </select>
+        </div>
+      )}
+
+      {filteredList.length === 0 && list.length > 0 && <div style={{ color: "var(--rd-gray-text)", textAlign: "center", padding: "20px", fontSize: "14px" }}>Ничего не найдено</div>}
       {list.length === 0 && <div style={{ color: "var(--rd-gray-text)", textAlign: "center", padding: "20px", fontSize: "14px" }}>Голосований пока нет</div>}
-      {list.map(poll => (
+      {filteredList.map(poll => (
         <div key={poll.id} style={{ border: "1.5px solid var(--rd-gray-border)", borderRadius: "var(--rd-radius-sm)", padding: "16px", marginBottom: "12px", background: "#fff" }}>
           {editingId === poll.id && editForm ? (
             <div>
@@ -6985,6 +7064,7 @@ function VotingAdminTab({ polls, savePolls, notify, users, saveUsers }) {
                 onAddOption={editAddOpt}
                 onRemoveOption={editRemOpt}
                 onImgChange={editImgChg}
+                onMainImgChange={editMainImgChg}
               />
               <div style={{ display: "flex", gap: "8px" }}>
                 <button onClick={saveEdit} style={{ background: "var(--rd-red)", color: "#fff", border: "none", borderRadius: "8px", padding: "10px 20px", fontWeight: 700, cursor: "pointer" }}>Сохранить</button>
@@ -7005,7 +7085,7 @@ function VotingAdminTab({ polls, savePolls, notify, users, saveUsers }) {
                     <button onClick={() => awardWinners(poll)} style={{ background: "var(--rd-red)", color: "#fff", border: "none", borderRadius: "8px", padding: "8px 14px", fontWeight: 700, cursor: "pointer", fontSize: "13px" }}>🏆 Наградить</button>
                   )}
                   {poll.status === "active" && (
-                    <button onClick={() => { const endsAtLocal = new Date(poll.endsAt - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16); setEditingId(poll.id); setEditForm({ title: poll.title, description: poll.description || "", options: poll.options.map(o => ({ text: o.text, image: o.image || "" })), maxVotes: String(poll.maxVotes), winners: String(poll.winners), prize: String(poll.prize), endsAt: endsAtLocal }); }} style={{ background: "var(--rd-gray-bg)", border: "1.5px solid var(--rd-gray-border)", borderRadius: "8px", padding: "8px 12px", cursor: "pointer", fontSize: "13px", fontWeight: 700 }}>✏️</button>
+                    <button onClick={() => { const endsAtLocal = new Date(poll.endsAt - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16); setEditingId(poll.id); setEditForm({ title: poll.title, description: poll.description || "", image: poll.image || "", options: poll.options.map(o => ({ text: o.text, image: o.image || "" })), maxVotes: String(poll.maxVotes), winners: String(poll.winners), prize: String(poll.prize), endsAt: endsAtLocal }); }} style={{ background: "var(--rd-gray-bg)", border: "1.5px solid var(--rd-gray-border)", borderRadius: "8px", padding: "8px 12px", cursor: "pointer", fontSize: "13px", fontWeight: 700 }}>✏️</button>
                   )}
                   <button onClick={() => deletePoll(poll.id)} style={{ background: "#fff0f0", border: "1.5px solid #fecaca", borderRadius: "8px", padding: "8px 12px", cursor: "pointer", fontSize: "13px", color: "var(--rd-red)", fontWeight: 700 }}>🗑️</button>
                 </div>
@@ -7042,6 +7122,7 @@ function VotingPage({ polls, savePolls, currentUser, users, saveUsers, notify, c
   const now = Date.now();
   const active = list.filter(p => p.status === "active").sort((a, b) => a.endsAt - b.endsAt);
   const ended = list.filter(p => p.status === "ended").sort((a, b) => b.endsAt - a.endsAt);
+  const [openPollId, setOpenPollId] = useState(null);
 
   const getUserVotes = (poll) => {
     if (!currentUser) return [];
@@ -7066,6 +7147,8 @@ function VotingPage({ polls, savePolls, currentUser, users, saveUsers, notify, c
     savePolls(updated);
     if (!isVoted) notify("Голос принят ✓");
   };
+
+  const openPoll = openPollId ? list.find(p => p.id === openPollId) : null;
 
   return (
     <div style={{ minHeight: "60vh" }}>
@@ -7101,73 +7184,23 @@ function VotingPage({ polls, savePolls, currentUser, users, saveUsers, notify, c
             <div style={{fontSize:"13px",fontWeight:700,textTransform:"uppercase",letterSpacing:"0.1em",color:"var(--rd-gray-text)",marginBottom:"16px"}}>Активные голосования</div>
             <div className="auction-grid" style={{marginBottom:"40px"}}>
               {active.map(poll => {
-                const myVotes = getUserVotes(poll);
                 const total = poll.options.reduce((s, o) => s + (o.votes || []).length, 0);
-                const votesLeft = poll.maxVotes - myVotes.length;
                 return (
-                  <div key={poll.id} className="auction-card">
+                  <div key={poll.id} className="auction-card" style={{cursor:"pointer"}} onClick={() => setOpenPollId(poll.id)}>
+                    {poll.image ? <div className="auction-img"><img src={poll.image} alt={poll.title} /></div> : <div className="auction-img"><span>🗳️</span></div>}
                     <div className="auction-body">
                       <div className="auction-name">{poll.title}</div>
-                      {poll.description && <div style={{fontSize:"14px",color:"var(--rd-gray-text)",lineHeight:1.5}}>{poll.description}</div>}
-                      <div style={{display:"flex",flexWrap:"wrap",gap:"8px",alignItems:"stretch"}}>
-                        {/* Prize badge */}
-                        <div style={{display:"inline-flex",alignItems:"center",gap:"6px",background:"linear-gradient(135deg, var(--rd-red-light), rgba(199,22,24,0.04))",border:"1.5px solid rgba(199,22,24,0.25)",borderRadius:"8px",padding:"8px 14px"}}>
-                          <span style={{fontSize:"16px"}}>🪙</span>
-                          <div>
-                            <div style={{fontWeight:900,fontSize:"18px",color:"var(--rd-red)",lineHeight:1}}>{poll.prize}</div>
-                            <div style={{fontSize:"11px",color:"var(--rd-red)",fontWeight:600,marginTop:"2px"}}>монет победителям</div>
-                          </div>
-                        </div>
-                        {/* Votes badge */}
-                        <div style={{display:"inline-flex",alignItems:"center",gap:"6px",background:votesLeft>0?"rgba(34,197,94,0.08)":"var(--rd-gray-bg)",border:`1.5px solid ${votesLeft>0?"rgba(34,197,94,0.3)":"var(--rd-gray-border)"}`,borderRadius:"8px",padding:"8px 14px"}}>
-                          <span style={{fontSize:"16px"}}>🗳️</span>
-                          <div>
-                            <div style={{fontWeight:900,fontSize:"18px",color:votesLeft>0?"#16a34a":"var(--rd-gray-text)",lineHeight:1}}>{votesLeft} <span style={{fontSize:"13px",fontWeight:600}}>/ {poll.maxVotes}</span></div>
-                            <div style={{fontSize:"11px",color:"var(--rd-gray-text)",fontWeight:600,marginTop:"2px"}}>голосов доступно</div>
-                          </div>
-                        </div>
+                      {poll.description && <div style={{fontSize:"13px",color:"var(--rd-gray-text)",lineHeight:1.5,display:"-webkit-box",WebkitLineClamp:2,WebkitBoxOrient:"vertical",overflow:"hidden"}}>{poll.description}</div>}
+                      <div style={{display:"flex",gap:"12px",fontSize:"12px",color:"var(--rd-gray-text)"}}>
+                        <span>🪙 {poll.prize} монет</span>
+                        <span>🗳️ {total} голосов</span>
+                        <span>📊 {poll.options.length} вариантов</span>
                       </div>
-                      {/* Timer */}
                       <div className="auction-timer-block">
                         <div className="auction-timer-label">⏱ До завершения</div>
                         <VoteCountdown endsAt={poll.endsAt} />
                       </div>
-                      {/* Options */}
-                      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill, minmax(140px, 1fr))",gap:"10px"}}>
-                        {poll.options.map(opt => {
-                          const isVoted = myVotes.includes(opt.id);
-                          const voteCnt = (opt.votes || []).length;
-                          const pct = total > 0 ? Math.round((voteCnt / total) * 100) : 0;
-                          const canVote = !isVoted && votesLeft > 0;
-                          return (
-                            <div key={opt.id} style={{border:`2px solid ${isVoted?"var(--rd-red)":"var(--rd-gray-border)"}`,borderRadius:"14px",overflow:"hidden",background:isVoted?"var(--rd-red-light)":"#fff",transition:"all 0.2s",boxShadow:isVoted?"0 0 0 3px rgba(199,22,24,0.1)":"none"}}>
-                              {opt.image && <img src={opt.image} alt="" style={{width:"100%",height:"90px",objectFit:"cover",display:"block"}} />}
-                              <div style={{padding:"10px"}}>
-                                <div style={{fontWeight:700,fontSize:"13px",marginBottom:"6px"}}>{opt.text}</div>
-                                <div style={{marginBottom:"8px"}}>
-                                  <div style={{display:"flex",justifyContent:"space-between",fontSize:"11px",color:"var(--rd-gray-text)",marginBottom:"3px"}}>
-                                    <span>{voteCnt} голосов</span><span>{pct}%</span>
-                                  </div>
-                                  <div style={{height:"5px",background:"#e5e7eb",borderRadius:"3px"}}>
-                                    <div style={{height:"100%",width:`${pct}%`,background:isVoted?"var(--rd-red)":"#94a3b8",borderRadius:"3px",transition:"width 0.4s"}} />
-                                  </div>
-                                </div>
-                                {isVoted ? (
-                                  <button onClick={() => vote(poll, opt.id)} style={{width:"100%",padding:"7px",background:"var(--rd-red)",color:"#fff",border:"none",borderRadius:"8px",fontWeight:700,fontSize:"12px",cursor:"pointer"}}>
-                                    ✓ Отменить
-                                  </button>
-                                ) : (
-                                  <button onClick={() => vote(poll, opt.id)} disabled={!canVote} style={{width:"100%",padding:"7px",background:canVote?"var(--rd-dark)":"#e5e7eb",color:canVote?"#fff":"#9ca3af",border:"none",borderRadius:"8px",fontWeight:700,fontSize:"12px",cursor:canVote?"pointer":"not-allowed",transition:"all 0.2s"}}
-                                    onMouseEnter={e=>{if(canVote)e.currentTarget.style.background="var(--rd-red)"}}
-                                    onMouseLeave={e=>{if(canVote)e.currentTarget.style.background="var(--rd-dark)"}}>
-                                    🗳️ Голосовать
-                                  </button>
-                                )}
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
+                      <button className="btn btn-primary" style={{width:"100%"}} onClick={e => { e.stopPropagation(); setOpenPollId(poll.id); }}>Подробнее</button>
                     </div>
                   </div>
                 );
@@ -7180,35 +7213,20 @@ function VotingPage({ polls, savePolls, currentUser, users, saveUsers, notify, c
             <div style={{fontSize:"13px",fontWeight:700,textTransform:"uppercase",letterSpacing:"0.1em",color:"var(--rd-gray-text)",marginBottom:"16px"}}>Завершённые голосования</div>
             <div className="auction-grid">
               {ended.map(poll => {
-                const sorted = [...poll.options].sort((a, b) => (b.votes || []).length - (a.votes || []).length);
                 const total = poll.options.reduce((s, o) => s + (o.votes || []).length, 0);
+                const sorted = [...poll.options].sort((a, b) => (b.votes || []).length - (a.votes || []).length);
                 return (
-                  <div key={poll.id} className="auction-card ended">
+                  <div key={poll.id} className="auction-card ended" style={{cursor:"pointer"}} onClick={() => setOpenPollId(poll.id)}>
+                    {poll.image ? <div className="auction-img"><img src={poll.image} alt={poll.title} /></div> : <div className="auction-img"><span>🗳️</span></div>}
                     <div className="auction-body">
                       <div className="auction-name">{poll.title}</div>
-                      {poll.description && <div style={{fontSize:"13px",color:"var(--rd-gray-text)"}}>{poll.description}</div>}
                       <div style={{fontSize:"12px",color:"var(--rd-gray-text)"}}>📅 Завершено {new Date(poll.endsAt).toLocaleString("ru-RU")}</div>
                       {poll.winnersAwarded && (
-                        <div style={{padding:"10px 14px",background:"rgba(34,197,94,0.06)",border:"1px solid rgba(34,197,94,0.2)",borderRadius:"8px",fontSize:"13px"}}>
-                          🏆 Награда выдана: {(poll.awardedUsers || []).join(", ")} (+{poll.prizePerUser} 🪙)
+                        <div style={{padding:"8px 12px",background:"rgba(34,197,94,0.06)",border:"1px solid rgba(34,197,94,0.2)",borderRadius:"8px",fontSize:"12px"}}>
+                          🏆 {(poll.awardedUsers || []).join(", ")} (+{poll.prizePerUser} 🪙)
                         </div>
                       )}
-                      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill, minmax(140px, 1fr))",gap:"8px"}}>
-                        {sorted.map((opt, idx) => {
-                          const pct = total > 0 ? Math.round(((opt.votes || []).length / total) * 100) : 0;
-                          const isWinner = idx < poll.winners;
-                          return (
-                            <div key={opt.id} style={{border:`2px solid ${isWinner?"gold":"var(--rd-gray-border)"}`,borderRadius:"12px",overflow:"hidden",background:isWinner?"rgba(250,204,21,0.05)":"#fff"}}>
-                              {opt.image && <img src={opt.image} alt="" style={{width:"100%",height:"70px",objectFit:"cover",display:"block"}} />}
-                              <div style={{padding:"8px 10px"}}>
-                                <div style={{fontWeight:700,fontSize:"13px"}}>{isWinner ? "🥇 " : ""}{opt.text}</div>
-                                <div style={{fontSize:"11px",color:"var(--rd-gray-text)",marginTop:"3px"}}>{(opt.votes || []).length} голосов ({pct}%)</div>
-                                <div style={{height:"4px",background:"#e5e7eb",borderRadius:"2px",marginTop:"5px"}}><div style={{height:"100%",width:`${pct}%`,background:isWinner?"#eab308":"#94a3b8",borderRadius:"2px"}} /></div>
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
+                      <button className="btn btn-secondary" style={{width:"100%"}} onClick={e => { e.stopPropagation(); setOpenPollId(poll.id); }}>Подробнее</button>
                     </div>
                   </div>
                 );
@@ -7217,6 +7235,82 @@ function VotingPage({ polls, savePolls, currentUser, users, saveUsers, notify, c
           </>
         )}
       </div>
+
+      {/* Modal for voting */}
+      {openPoll && (
+        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",zIndex:9999,display:"flex",alignItems:"center",justifyContent:"center",padding:"20px"}} onClick={() => setOpenPollId(null)}>
+          <div style={{background:"#fff",borderRadius:"var(--rd-radius)",maxWidth:"680px",width:"100%",maxHeight:"90vh",overflow:"auto",boxShadow:"0 25px 50px rgba(0,0,0,0.25)"}} onClick={e => e.stopPropagation()}>
+            {openPoll.image && <img src={openPoll.image} alt="" style={{width:"100%",height:"220px",objectFit:"cover",display:"block",borderRadius:"var(--rd-radius) var(--rd-radius) 0 0"}} />}
+            <div style={{padding:"28px"}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:"16px"}}>
+                <div>
+                  <div style={{fontWeight:900,fontSize:"22px",color:"var(--rd-dark)"}}>{openPoll.title}</div>
+                  {openPoll.description && <div style={{fontSize:"14px",color:"var(--rd-gray-text)",marginTop:"6px",lineHeight:1.6}}>{openPoll.description}</div>}
+                </div>
+                <button onClick={() => setOpenPollId(null)} style={{background:"var(--rd-gray-bg)",border:"none",borderRadius:"50%",width:"36px",height:"36px",cursor:"pointer",fontSize:"18px",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>✕</button>
+              </div>
+              {(() => {
+                const myVotes = getUserVotes(openPoll);
+                const total = openPoll.options.reduce((s, o) => s + (o.votes || []).length, 0);
+                const votesLeft = openPoll.maxVotes - myVotes.length;
+                const isEnded = openPoll.status !== "active";
+                const optionsToShow = isEnded ? [...openPoll.options].sort((a, b) => (b.votes || []).length - (a.votes || []).length) : openPoll.options;
+                return (
+                  <>
+                    {!isEnded && (
+                      <div style={{display:"flex",gap:"10px",marginBottom:"20px",flexWrap:"wrap"}}>
+                        <div style={{padding:"8px 14px",background:"linear-gradient(135deg, var(--rd-red-light), rgba(199,22,24,0.04))",border:"1.5px solid rgba(199,22,24,0.25)",borderRadius:"8px",fontSize:"13px",fontWeight:700}}>🪙 {openPoll.prize} монет</div>
+                        <div style={{padding:"8px 14px",background:votesLeft>0?"rgba(34,197,94,0.08)":"var(--rd-gray-bg)",border:`1.5px solid ${votesLeft>0?"rgba(34,197,94,0.3)":"var(--rd-gray-border)"}`,borderRadius:"8px",fontSize:"13px",fontWeight:700}}>🗳️ {votesLeft} / {openPoll.maxVotes} голосов</div>
+                      </div>
+                    )}
+                    {openPoll.winnersAwarded && (
+                      <div style={{padding:"12px 16px",background:"rgba(34,197,94,0.06)",border:"1px solid rgba(34,197,94,0.2)",borderRadius:"10px",fontSize:"14px",marginBottom:"20px"}}>
+                        🏆 Награда выдана: {(openPoll.awardedUsers || []).join(", ")} (+{openPoll.prizePerUser} 🪙)
+                      </div>
+                    )}
+                    <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill, minmax(180px, 1fr))",gap:"12px"}}>
+                      {optionsToShow.map((opt, idx) => {
+                        const isVoted = myVotes.includes(opt.id);
+                        const voteCnt = (opt.votes || []).length;
+                        const pct = total > 0 ? Math.round((voteCnt / total) * 100) : 0;
+                        const canVote = !isVoted && votesLeft > 0 && !isEnded;
+                        const isWinner = isEnded && idx < openPoll.winners;
+                        return (
+                          <div key={opt.id} style={{border:`2px solid ${isWinner?"gold":isVoted?"var(--rd-red)":"var(--rd-gray-border)"}`,borderRadius:"14px",overflow:"hidden",background:isWinner?"rgba(250,204,21,0.05)":isVoted?"var(--rd-red-light)":"#fff",transition:"all 0.2s"}}>
+                            {opt.image && <img src={opt.image} alt="" style={{width:"100%",height:"100px",objectFit:"cover",display:"block"}} />}
+                            <div style={{padding:"12px"}}>
+                              <div style={{fontWeight:700,fontSize:"14px",marginBottom:"8px"}}>{isWinner?"🥇 ":""}{opt.text}</div>
+                              <div style={{marginBottom:"10px"}}>
+                                <div style={{display:"flex",justifyContent:"space-between",fontSize:"12px",color:"var(--rd-gray-text)",marginBottom:"4px"}}>
+                                  <span>{voteCnt} голосов</span><span>{pct}%</span>
+                                </div>
+                                <div style={{height:"6px",background:"#e5e7eb",borderRadius:"3px"}}>
+                                  <div style={{height:"100%",width:`${pct}%`,background:isWinner?"#eab308":isVoted?"var(--rd-red)":"#94a3b8",borderRadius:"3px",transition:"width 0.4s"}} />
+                                </div>
+                              </div>
+                              {!isEnded && (isVoted ? (
+                                <button onClick={() => vote(openPoll, opt.id)} style={{width:"100%",padding:"8px",background:"var(--rd-red)",color:"#fff",border:"none",borderRadius:"8px",fontWeight:700,fontSize:"13px",cursor:"pointer"}}>
+                                  ✓ Отменить
+                                </button>
+                              ) : (
+                                <button onClick={() => vote(openPoll, opt.id)} disabled={!canVote} style={{width:"100%",padding:"8px",background:canVote?"var(--rd-dark)":"#e5e7eb",color:canVote?"#fff":"#9ca3af",border:"none",borderRadius:"8px",fontWeight:700,fontSize:"13px",cursor:canVote?"pointer":"not-allowed",transition:"all 0.2s"}}
+                                  onMouseEnter={e=>{if(canVote)e.currentTarget.style.background="var(--rd-red)"}}
+                                  onMouseLeave={e=>{if(canVote)e.currentTarget.style.background="var(--rd-dark)"}}>
+                                  🗳️ Голосовать
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </>
+                );
+              })()}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
