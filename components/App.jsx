@@ -1186,7 +1186,7 @@ ym(${integ.ymCounterId}, "init", { clickmap:true, trackLinks:true, accurateTrack
       })()}
 
       <main className="page-fade" style={{flex:1}}>
-        {page === "shop" && <ShopPage products={filtered} allProducts={activeProducts} categories={shopCategories} filterCat={filterCat} setFilterCat={setFilterCat} addToCart={addToCart} setPage={setPage} currentUser={currentUser} users={users} favorites={favorites} toggleFavorite={toggleFavorite} currency={appearance.currency} faq={faq} videos={videos} tasks={tasks} auctions={auctions} appearance={appearance} />}
+        {page === "shop" && <ShopPage products={filtered} allProducts={activeProducts} categories={shopCategories} filterCat={filterCat} setFilterCat={setFilterCat} addToCart={addToCart} setPage={setPage} currentUser={currentUser} users={users} favorites={favorites} toggleFavorite={toggleFavorite} currency={appearance.currency} faq={faq} videos={videos} tasks={tasks} auctions={auctions} appearance={appearance} orders={orders} transfers={transfers} />}
         {page === "faq" && <FaqPage faq={faq} />}
         {page === "auction" && appearance.features?.auction !== false && <AuctionPage auctions={auctions} saveAuctions={saveAuctions} currentUser={currentUser} users={users} saveUsers={saveUsers} notify={notify} currency={appearance.currency} appearance={appearance} />}
         {page === "auction" && appearance.features?.auction === false && <div className="empty-state"><div className="empty-state-icon">🔨</div><div className="empty-state-text">Раздел «Аукцион» недоступен</div></div>}
@@ -2603,7 +2603,7 @@ function FaqPage({ faq }) {
 
 // ── SHOP ──────────────────────────────────────────────────────────────────
 
-function ShopPage({ products, allProducts, categories, filterCat, setFilterCat, addToCart, setPage, currentUser, users, favorites, toggleFavorite, currency, faq, videos, tasks, auctions, appearance }) {
+function ShopPage({ products, allProducts, categories, filterCat, setFilterCat, addToCart, setPage, currentUser, users, favorites, toggleFavorite, currency, faq, videos, tasks, auctions, appearance, orders, transfers }) {
   const cName = getCurrName(currency);
   const [modalProduct, setModalProduct] = useState(null);
   const [search, setSearch] = useState("");
@@ -2892,6 +2892,40 @@ function ShopPage({ products, allProducts, categories, filterCat, setFilterCat, 
           </div>
         </section>
       )}
+
+      {(() => {
+        const allUsers = Object.entries(users || {});
+        const userCount = allUsers.filter(([, u]) => u.role !== "admin").length;
+        const totalIssued = (transfers || []).reduce((s, t) => {
+          const toUser = t.to && users[t.to] && users[t.to].role !== "admin";
+          const fromAdmin = !t.from || (users[t.from] && users[t.from].role === "admin");
+          return s + (toUser && fromAdmin ? (t.amount || 0) : 0);
+        }, 0);
+        const totalSpent = (orders || []).reduce((s, o) => s + (o.total || 0), 0);
+        const totalItems = (orders || []).reduce((s, o) => s + (o.items || []).reduce((ss, i) => ss + (i.qty || 1), 0), 0);
+        const cName = getCurrName(currency);
+        const fmt = (n) => n >= 1000000 ? (n/1000000).toFixed(1).replace(/\.0$/,"") + "M" : n >= 1000 ? (n/1000).toFixed(1).replace(/\.0$/,"") + "K" : String(n);
+        const stats = [
+          { num: fmt(totalIssued), label: `Выпущено ${cName}` },
+          { num: fmt(totalSpent), label: `Потрачено ${cName}` },
+          { num: fmt(totalItems), label: "Куплено товаров" },
+          { num: fmt(userCount), label: "Пользователей" },
+        ];
+        return (
+          <section className="stats-counter-section">
+            <div className="container">
+              <div className="stats-counter-grid">
+                {stats.map((s, i) => (
+                  <div key={i} className="stats-counter-card">
+                    <div className="stats-counter-num">{s.num}</div>
+                    <div className="stats-counter-label">{s.label}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </section>
+        );
+      })()}
     </>
   );
 }
