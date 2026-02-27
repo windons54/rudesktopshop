@@ -273,6 +273,7 @@ body {
 .pc-action-btn {
   flex: 1 1 0;
   min-width: 0;
+  min-height: 36px;
   text-align: center;
   justify-content: center;
   padding: 9px 12px !important;

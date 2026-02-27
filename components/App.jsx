@@ -414,6 +414,8 @@ function App() {
   const [auctions, setAuctions] = useState([]);
   const [lotteries, setLotteries] = useState([]);
   const [polls, setPolls] = useState([]);
+  const [deposits, setDeposits] = useState([]); // Типы вкладов (создаются админом)
+  const [userDeposits, setUserDeposits] = useState([]); // Депозиты пользователей
   const [taskSubmissions, setTaskSubmissions] = useState([]);
   const [dbConfig, setDbConfig] = useState({ connected: false, dbSize: 0, rowCounts: {} });
   // pgConfig живёт на сервере, здесь только для отображения статуса в UI
@@ -494,6 +496,8 @@ function App() {
       const au = storage.get("cm_auctions");
       const lt = storage.get("cm_lotteries");
       const pl = storage.get("cm_polls");
+      const dp = storage.get("cm_deposits");
+      const ud = storage.get("cm_user_deposits");
       const ap = storage.get("cm_appearance");
 
       if (o)  setOrders(o);
@@ -507,6 +511,10 @@ function App() {
       else { storage.set("cm_lotteries", []); }
       if (pl) setPolls(pl);
       else { storage.set("cm_polls", []); }
+      if (dp) setDeposits(dp);
+      else { storage.set("cm_deposits", []); }
+      if (ud) setUserDeposits(ud);
+      else { storage.set("cm_user_deposits", []); }
 
       if (fq && fq.length > 0) {
         setFaq(fq);
@@ -634,6 +642,8 @@ function App() {
       if ('cm_auctions'         in data) setAuctions(data.cm_auctions);
       if ('cm_lotteries'        in data) setLotteries(data.cm_lotteries);
       if ('cm_polls'            in data) setPolls(data.cm_polls);
+      if ('cm_deposits'         in data) setDeposits(data.cm_deposits);
+      if ('cm_user_deposits'    in data) setUserDeposits(data.cm_user_deposits);
       if (data.cm_appearance) {
         const ap = data.cm_appearance;
         if (ap.currency) _globalCurrency = { ...ap.currency };
@@ -768,6 +778,8 @@ function App() {
   const saveAuctions = (au) => { setAuctions(au); storage.set("cm_auctions", au); };
   const saveLotteries = (lt) => { const data = lt || []; setLotteries(data); storage.set("cm_lotteries", data); };
   const savePolls = (pl) => { const data = pl || []; setPolls(data); storage.set("cm_polls", data); };
+  const saveDeposits = (dp) => { const data = dp || []; setDeposits(data); storage.set("cm_deposits", data); };
+  const saveUserDeposits = (ud) => { const data = ud || []; setUserDeposits(data); storage.set("cm_user_deposits", data); };
   const saveTaskSubmissions = (ts) => { setTaskSubmissions(ts); storage.set("cm_task_submissions", ts); };
 
   const [cartAnimating, setCartAnimating] = useState(false);
@@ -898,6 +910,7 @@ function App() {
               <button className={`rd-nav-btn ${page === "auction" ? "active" : ""}`} onClick={() => setPage("auction")}>Аукцион</button>
               <button className={`rd-nav-btn ${page === "lottery" ? "active" : ""}`} onClick={() => setPage("lottery")}>Лотерея</button>
               <button className={`rd-nav-btn ${page === "voting" ? "active" : ""}`} onClick={() => setPage("voting")}>Голосования</button>
+              <button className={`rd-nav-btn ${page === "bank" ? "active" : ""}`} onClick={() => setPage("bank")}>Банк</button>
               <button className={`rd-nav-btn ${page === "tasks" ? "active" : ""}`} onClick={() => setPage("tasks")}>Задания</button>
             </nav>
             {/* Mobile hamburger button */}
@@ -1096,6 +1109,7 @@ function App() {
         {page === "auction" && <AuctionPage auctions={auctions} saveAuctions={saveAuctions} currentUser={currentUser} users={users} saveUsers={saveUsers} notify={notify} currency={appearance.currency} />}
         {page === "lottery" && <LotteryPage lotteries={lotteries} currentUser={currentUser} currency={appearance.currency} />}
         {page === "voting" && <VotingPage polls={polls} savePolls={savePolls} currentUser={currentUser} users={users} saveUsers={saveUsers} notify={notify} currency={appearance.currency} />}
+        {page === "bank" && <BankPage currentUser={currentUser} users={users} saveUsers={saveUsers} notify={notify} currency={appearance.currency} />}
         {page === "tasks" && <TasksPage tasks={tasks} currentUser={currentUser} taskSubmissions={taskSubmissions} saveTaskSubmissions={saveTaskSubmissions} notify={notify} appearance={appearance} users={users} saveUsers={saveUsers} />}
         {page === "favorites" && currentUser && <FavoritesPage products={activeProducts.filter(p => favorites.includes(p.id))} favorites={favorites} toggleFavorite={toggleFavorite} addToCart={addToCart} setPage={setPage} />}
         {page === "history" && currentUser && <HistoryPage currentUser={currentUser} transfers={transfers} orders={orders} taskSubmissions={taskSubmissions} />}
@@ -1105,7 +1119,7 @@ function App() {
         
         {page === "orders" && currentUser && <OrdersPage orders={orders.filter(o => o.user === currentUser)} currency={appearance.currency} />}
         {page === "transfer" && currentUser && <TransferPage currentUser={currentUser} users={users} saveUsers={saveUsers} transfers={transfers} saveTransfers={saveTransfers} notify={notify} setPage={setPage} currency={appearance.currency} />}
-        {page === "settings" && currentUser && <SettingsPage currentUser={currentUser} users={users} saveUsers={saveUsers} notify={notify} setPage={setPage} dbConfig={dbConfig} saveDbConfig={saveDbConfig} refreshDbConfig={refreshDbConfig} pgConfig={pgConfig} savePgConfig={savePgConfigState} isPgActive={isPgActive} isAdmin={isAdmin} orders={orders} saveOrders={saveOrders} products={allProducts} saveProducts={saveProducts} categories={allCategories} saveCategories={saveCategories} appearance={appearance} saveAppearance={saveAppearance} transfers={transfers} saveTransfers={saveTransfers} markOrdersSeen={markOrdersSeen} faq={faq} saveFaq={saveFaq} tasks={tasks} saveTasks={saveTasks} taskSubmissions={taskSubmissions} saveTaskSubmissions={saveTaskSubmissions} auctions={auctions} saveAuctions={saveAuctions} lotteries={lotteries} saveLotteries={saveLotteries} polls={polls} savePolls={savePolls} users={users} saveUsers={saveUsers} sqliteDisabled={sqliteDisabled} setSqliteDisabled={setSqliteDisabled} />}
+        {page === "settings" && currentUser && <SettingsPage currentUser={currentUser} users={users} saveUsers={saveUsers} notify={notify} setPage={setPage} dbConfig={dbConfig} saveDbConfig={saveDbConfig} refreshDbConfig={refreshDbConfig} pgConfig={pgConfig} savePgConfig={savePgConfigState} isPgActive={isPgActive} isAdmin={isAdmin} orders={orders} saveOrders={saveOrders} products={allProducts} saveProducts={saveProducts} categories={allCategories} saveCategories={saveCategories} appearance={appearance} saveAppearance={saveAppearance} transfers={transfers} saveTransfers={saveTransfers} markOrdersSeen={markOrdersSeen} faq={faq} saveFaq={saveFaq} tasks={tasks} saveTasks={saveTasks} taskSubmissions={taskSubmissions} saveTaskSubmissions={saveTaskSubmissions} auctions={auctions} saveAuctions={saveAuctions} lotteries={lotteries} saveLotteries={saveLotteries} polls={polls} savePolls={savePolls} deposits={deposits} saveDeposits={saveDeposits} userDeposits={userDeposits} saveUserDeposits={saveUserDeposits} users={users} saveUsers={saveUsers} sqliteDisabled={sqliteDisabled} setSqliteDisabled={setSqliteDisabled} />}
       </main>
 
       <footer className="rd-footer" style={appearance.footerBg ? {background: appearance.footerBg} : {}}>
@@ -4881,7 +4895,7 @@ function CurrencySettingsTab({ appearance, saveAppearance, notify }) {
   );
 }
 
-function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbConfig, refreshDbConfig, pgConfig, savePgConfig, isPgActive, isAdmin, orders, saveOrders, products, saveProducts, categories, saveCategories, appearance, saveAppearance, markOrdersSeen, transfers, saveTransfers, faq, saveFaq, tasks, saveTasks, taskSubmissions, saveTaskSubmissions, auctions, saveAuctions, lotteries, saveLotteries, polls, savePolls, sqliteDisabled, setSqliteDisabled }) {
+function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbConfig, refreshDbConfig, pgConfig, savePgConfig, isPgActive, isAdmin, orders, saveOrders, products, saveProducts, categories, saveCategories, appearance, saveAppearance, markOrdersSeen, transfers, saveTransfers, faq, saveFaq, tasks, saveTasks, taskSubmissions, saveTaskSubmissions, auctions, saveAuctions, lotteries, saveLotteries, polls, savePolls, deposits, saveDeposits, userDeposits, saveUserDeposits, sqliteDisabled, setSqliteDisabled }) {
   const [tab, setTab] = useState("profile");
   const setTabSafe = (t) => { if (!isAdmin && t !== "profile") return; setTab(t); };
   const [adminTab, setAdminTab] = useState("products");
@@ -5253,6 +5267,7 @@ function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbC
     { id: "auction",    icon: "🔨", label: "Аукцион" },
     { id: "lottery",    icon: "🎰", label: "Лотерея" },
     { id: "voting",     icon: "🗳️", label: "Голосование" },
+    { id: "bank",       icon: "🏦", label: "Банк" },
     { id: "shop",       icon: "🛍️", label: "Управление магазином" },
     { id: "integrations", icon: "🔗", label: "Интеграции" },
   ] : [
@@ -6522,6 +6537,15 @@ function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbC
             </div>
           )}
 
+          {tab === "bank" && (
+            <div className="settings-card">
+              <div style={{fontWeight:700,fontSize:"18px",color:"var(--rd-dark)",marginBottom:"20px",paddingBottom:"14px",borderBottom:"1.5px solid var(--rd-gray-border)"}}>
+                🏦 Управление вкладами
+              </div>
+              <BankAdminTab notify={notify} />
+            </div>
+          )}
+
         </div>
       </div>
     </div>
@@ -7192,7 +7216,7 @@ function VotingPage({ polls, savePolls, currentUser, users, saveUsers, notify, c
                       <div className="auction-name">{poll.title}</div>
                       {poll.description && <div style={{fontSize:"13px",color:"var(--rd-gray-text)",lineHeight:1.5,display:"-webkit-box",WebkitLineClamp:2,WebkitBoxOrient:"vertical",overflow:"hidden"}}>{poll.description}</div>}
                       <div style={{display:"flex",gap:"12px",fontSize:"12px",color:"var(--rd-gray-text)"}}>
-                        <span>🪙 {poll.prize} монет</span>
+                        <span><CurrencyIcon currency={currency} size={14} /> {poll.prize} {getCurrName(currency)}</span>
                         <span>🗳️ {total} голосов</span>
                         <span>📊 {poll.options.length} вариантов</span>
                       </div>
@@ -7223,7 +7247,7 @@ function VotingPage({ polls, savePolls, currentUser, users, saveUsers, notify, c
                       <div style={{fontSize:"12px",color:"var(--rd-gray-text)"}}>📅 Завершено {new Date(poll.endsAt).toLocaleString("ru-RU")}</div>
                       {poll.winnersAwarded && (
                         <div style={{padding:"8px 12px",background:"rgba(34,197,94,0.06)",border:"1px solid rgba(34,197,94,0.2)",borderRadius:"8px",fontSize:"12px"}}>
-                          🏆 {(poll.awardedUsers || []).join(", ")} (+{poll.prizePerUser} 🪙)
+                          🏆 {(poll.awardedUsers || []).join(", ")} (+{poll.prizePerUser} {getCurrName(currency)})
                         </div>
                       )}
                       <button className="btn btn-secondary" style={{width:"100%"}} onClick={e => { e.stopPropagation(); setOpenPollId(poll.id); }}>Подробнее</button>
@@ -7259,13 +7283,13 @@ function VotingPage({ polls, savePolls, currentUser, users, saveUsers, notify, c
                   <>
                     {!isEnded && (
                       <div style={{display:"flex",gap:"10px",marginBottom:"20px",flexWrap:"wrap"}}>
-                        <div style={{padding:"8px 14px",background:"linear-gradient(135deg, var(--rd-red-light), rgba(199,22,24,0.04))",border:"1.5px solid rgba(199,22,24,0.25)",borderRadius:"8px",fontSize:"13px",fontWeight:700}}>🪙 {openPoll.prize} монет</div>
+                        <div style={{padding:"8px 14px",background:"linear-gradient(135deg, var(--rd-red-light), rgba(199,22,24,0.04))",border:"1.5px solid rgba(199,22,24,0.25)",borderRadius:"8px",fontSize:"13px",fontWeight:700}}><CurrencyIcon currency={currency} size={14} /> {openPoll.prize} {getCurrName(currency)}</div>
                         <div style={{padding:"8px 14px",background:votesLeft>0?"rgba(34,197,94,0.08)":"var(--rd-gray-bg)",border:`1.5px solid ${votesLeft>0?"rgba(34,197,94,0.3)":"var(--rd-gray-border)"}`,borderRadius:"8px",fontSize:"13px",fontWeight:700}}>🗳️ {votesLeft} / {openPoll.maxVotes} голосов</div>
                       </div>
                     )}
                     {openPoll.winnersAwarded && (
                       <div style={{padding:"12px 16px",background:"rgba(34,197,94,0.06)",border:"1px solid rgba(34,197,94,0.2)",borderRadius:"10px",fontSize:"14px",marginBottom:"20px"}}>
-                        🏆 Награда выдана: {(openPoll.awardedUsers || []).join(", ")} (+{openPoll.prizePerUser} 🪙)
+                        🏆 Награда выдана: {(openPoll.awardedUsers || []).join(", ")} (+{openPoll.prizePerUser} {getCurrName(currency)})
                       </div>
                     )}
                     <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill, minmax(180px, 1fr))",gap:"12px"}}>
@@ -7308,6 +7332,348 @@ function VotingPage({ polls, savePolls, currentUser, users, saveUsers, notify, c
                 );
               })()}
             </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── BANK ──────────────────────────────────────────────────────────────
+
+function BankAdminTab({ notify }) {
+  const [deposits, setDepositsState] = useState(() => storage.get("cm_deposits") || []);
+  const [form, setForm] = useState({ name: "", duration: "", rate: "" });
+  const [editingId, setEditingId] = useState(null);
+  const [editForm, setEditForm] = useState(null);
+
+  const saveDeposits = (dp) => {
+    setDepositsState(dp);
+    storage.set("cm_deposits", dp);
+  };
+
+  const createDeposit = () => {
+    if (!form.name.trim()) { notify("Введите название вклада", "err"); return; }
+    if (!form.duration || parseInt(form.duration) <= 0) { notify("Введите срок вклада (в днях)", "err"); return; }
+    if (!form.rate || parseFloat(form.rate) <= 0) { notify("Введите процентную ставку", "err"); return; }
+    
+    const newDeposit = {
+      id: Date.now(),
+      name: form.name.trim(),
+      duration: parseInt(form.duration),
+      rate: parseFloat(form.rate),
+      createdAt: Date.now()
+    };
+    saveDeposits([...deposits, newDeposit]);
+    setForm({ name: "", duration: "", rate: "" });
+    notify("Вклад создан ✓");
+  };
+
+  const saveEdit = () => {
+    if (!editForm || !editForm.name.trim()) { notify("Введите название", "err"); return; }
+    const updated = deposits.map(d => d.id === editingId ? { ...d, name: editForm.name, duration: parseInt(editForm.duration), rate: parseFloat(editForm.rate) } : d);
+    saveDeposits(updated);
+    setEditingId(null);
+    setEditForm(null);
+    notify("Вклад обновлён ✓");
+  };
+
+  const deleteDeposit = (id) => {
+    if (!confirm("Удалить этот вклад?")) return;
+    saveDeposits(deposits.filter(d => d.id !== id));
+    notify("Вклад удалён");
+  };
+
+  return (
+    <div>
+      <div style={{ fontWeight: 700, fontSize: "15px", marginBottom: "16px" }}>➕ Создать вклад</div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "12px", marginBottom: "20px" }}>
+        <input className="form-input" placeholder="Название вклада" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} />
+        <input className="form-input" type="number" placeholder="Срок (дней)" value={form.duration} onChange={e => setForm({ ...form, duration: e.target.value })} />
+        <input className="form-input" type="number" step="0.1" placeholder="Ставка (%)" value={form.rate} onChange={e => setForm({ ...form, rate: e.target.value })} />
+      </div>
+      <button onClick={createDeposit} style={{ marginBottom: "28px", background: "var(--rd-red)", color: "#fff", border: "none", borderRadius: "10px", padding: "12px 24px", fontWeight: 700, cursor: "pointer", fontSize: "14px" }}>
+        🏦 Создать вклад
+      </button>
+
+      {deposits.length === 0 && <div style={{ color: "var(--rd-gray-text)", textAlign: "center", padding: "20px", fontSize: "14px" }}>Вкладов пока нет</div>}
+      {deposits.map(deposit => (
+        <div key={deposit.id} style={{ border: "1.5px solid var(--rd-gray-border)", borderRadius: "var(--rd-radius-sm)", padding: "16px", marginBottom: "12px", background: "#fff" }}>
+          {editingId === deposit.id && editForm ? (
+            <div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "12px", marginBottom: "12px" }}>
+                <input className="form-input" placeholder="Название" value={editForm.name} onChange={e => setEditForm({ ...editForm, name: e.target.value })} />
+                <input className="form-input" type="number" placeholder="Срок (дней)" value={editForm.duration} onChange={e => setEditForm({ ...editForm, duration: e.target.value })} />
+                <input className="form-input" type="number" step="0.1" placeholder="Ставка (%)" value={editForm.rate} onChange={e => setEditForm({ ...editForm, rate: e.target.value })} />
+              </div>
+              <div style={{ display: "flex", gap: "8px" }}>
+                <button onClick={saveEdit} style={{ background: "var(--rd-red)", color: "#fff", border: "none", borderRadius: "8px", padding: "10px 20px", fontWeight: 700, cursor: "pointer" }}>Сохранить</button>
+                <button onClick={() => { setEditingId(null); setEditForm(null); }} style={{ background: "var(--rd-gray-bg)", border: "1.5px solid var(--rd-gray-border)", borderRadius: "8px", padding: "10px 20px", fontWeight: 700, cursor: "pointer" }}>Отмена</button>
+              </div>
+            </div>
+          ) : (
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div>
+                <div style={{ fontWeight: 700, fontSize: "15px" }}>{deposit.name}</div>
+                <div style={{ fontSize: "13px", color: "var(--rd-gray-text)", marginTop: "4px" }}>
+                  📅 {deposit.duration} дней · 📈 {deposit.rate}% годовых
+                </div>
+              </div>
+              <div style={{ display: "flex", gap: "6px" }}>
+                <button onClick={() => { setEditingId(deposit.id); setEditForm({ name: deposit.name, duration: String(deposit.duration), rate: String(deposit.rate) }); }} style={{ background: "var(--rd-gray-bg)", border: "1.5px solid var(--rd-gray-border)", borderRadius: "8px", padding: "8px 12px", cursor: "pointer", fontSize: "13px", fontWeight: 700 }}>✏️</button>
+                <button onClick={() => deleteDeposit(deposit.id)} style={{ background: "#fff0f0", border: "1.5px solid #fecaca", borderRadius: "8px", padding: "8px 12px", cursor: "pointer", fontSize: "13px", color: "var(--rd-red)", fontWeight: 700 }}>🗑️</button>
+              </div>
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function BankPage({ currentUser, users, saveUsers, notify, currency }) {
+  const [deposits, setDepositsState] = useState(() => storage.get("cm_deposits") || []);
+  const [userDeposits, setUserDepositsState] = useState(() => storage.get("cm_user_deposits") || []);
+  const [selectedDeposit, setSelectedDeposit] = useState(null);
+  const [amount, setAmount] = useState("");
+  const [showCalculator, setShowCalculator] = useState(false);
+  const [calcDeposit, setCalcDeposit] = useState(null);
+  const [calcAmount, setCalcAmount] = useState("");
+  const cName = getCurrName(currency);
+  const myBalance = users[currentUser]?.balance || 0;
+
+  const saveUserDeposits = (ud) => {
+    setUserDepositsState(ud);
+    storage.set("cm_user_deposits", ud);
+  };
+
+  // Проверяем и завершаем истекшие вклады
+  React.useEffect(() => {
+    const interval = setInterval(() => {
+      const now = Date.now();
+      const toComplete = userDeposits.filter(ud => ud.status === "active" && now >= ud.endsAt);
+      if (toComplete.length > 0) {
+        const newUsers = { ...users };
+        const completed = [];
+        toComplete.forEach(ud => {
+          if (newUsers[ud.user]) {
+            const profit = Math.round(ud.amount * ud.rate / 100);
+            const total = ud.amount + profit;
+            newUsers[ud.user].balance = (newUsers[ud.user].balance || 0) + total;
+            completed.push({ ...ud, status: "completed", completedAt: now });
+          }
+        });
+        if (completed.length > 0) {
+          saveUsers(newUsers);
+          const updated = userDeposits.map(ud => {
+            const comp = completed.find(c => c.id === ud.id);
+            return comp || ud;
+          });
+          saveUserDeposits(updated);
+          notify(`Вклад завершён! Начислено ${completed.reduce((s, c) => s + Math.round(c.amount * c.rate / 100) + c.amount, 0)} ${cName}`, "success");
+        }
+      }
+    }, 5000);
+    return () => clearInterval(interval);
+  }, [userDeposits, users]);
+
+  const myActiveDeposits = userDeposits.filter(ud => ud.user === currentUser && ud.status === "active");
+  const myCompletedDeposits = userDeposits.filter(ud => ud.user === currentUser && ud.status === "completed");
+
+  const openDeposit = () => {
+    if (!selectedDeposit) { notify("Выберите вклад", "err"); return; }
+    const amt = parseInt(amount);
+    if (!amt || amt <= 0) { notify("Введите сумму", "err"); return; }
+    if (amt > myBalance) { notify("Недостаточно средств", "err"); return; }
+
+    const deposit = deposits.find(d => d.id === selectedDeposit);
+    if (!deposit) { notify("Вклад не найден", "err"); return; }
+
+    const newDeposit = {
+      id: Date.now(),
+      user: currentUser,
+      depositId: deposit.id,
+      depositName: deposit.name,
+      amount: amt,
+      rate: deposit.rate,
+      duration: deposit.duration,
+      createdAt: Date.now(),
+      endsAt: Date.now() + (deposit.duration * 86400000),
+      status: "active"
+    };
+
+    const newUsers = { ...users };
+    newUsers[currentUser].balance -= amt;
+    saveUsers(newUsers);
+    saveUserDeposits([...userDeposits, newDeposit]);
+    setSelectedDeposit(null);
+    setAmount("");
+    notify("Вклад открыт ✓");
+  };
+
+  const calculateProfit = (depositId, amt) => {
+    const deposit = deposits.find(d => d.id === depositId);
+    if (!deposit || !amt) return 0;
+    return Math.round(amt * deposit.rate / 100);
+  };
+
+  return (
+    <div style={{ minHeight: "60vh" }}>
+      <div style={{ background: "#fff", borderBottom: "1.5px solid var(--rd-gray-border)", padding: "40px 0 32px" }}>
+        <div className="container">
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "12px" }}>
+            <div>
+              <h1 style={{ fontSize: "clamp(26px,5vw,40px)", fontWeight: 900, color: "var(--rd-dark)", letterSpacing: "-0.02em" }}>Банк</h1>
+              <p style={{ fontSize: "15px", color: "var(--rd-gray-text)", marginTop: "6px" }}>Откройте вклад и получайте проценты</p>
+            </div>
+            <button className="btn btn-secondary" onClick={() => { setShowCalculator(true); setCalcDeposit(deposits[0]?.id || null); }}>
+              🧮 Калькулятор дохода
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div className="container" style={{ padding: "32px 0" }}>
+        {/* Доступные вклады */}
+        {deposits.length > 0 && (
+          <div style={{ marginBottom: "40px" }}>
+            <div style={{ fontSize: "18px", fontWeight: 700, marginBottom: "20px" }}>Открыть вклад</div>
+            <div style={{ background: "#fff", border: "1.5px solid var(--rd-gray-border)", borderRadius: "var(--rd-radius)", padding: "24px" }}>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px", marginBottom: "20px" }}>
+                <div>
+                  <label className="form-label">Выберите вклад</label>
+                  <select className="form-input" value={selectedDeposit || ""} onChange={e => setSelectedDeposit(parseInt(e.target.value))}>
+                    <option value="">-- Выберите --</option>
+                    {deposits.map(d => (
+                      <option key={d.id} value={d.id}>
+                        {d.name} ({d.duration} дней, {d.rate}%)
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="form-label">Сумма</label>
+                  <input
+                    className="form-input"
+                    type="number"
+                    placeholder={`Ваш баланс: ${myBalance} ${cName}`}
+                    value={amount}
+                    onChange={e => setAmount(e.target.value)}
+                  />
+                </div>
+              </div>
+              {selectedDeposit && amount && (
+                <div style={{ padding: "12px", background: "var(--rd-gray-bg)", borderRadius: "8px", marginBottom: "16px", fontSize: "14px" }}>
+                  <div style={{ fontWeight: 700, marginBottom: "4px" }}>Доход: +{calculateProfit(selectedDeposit, parseInt(amount))} {cName}</div>
+                  <div style={{ color: "var(--rd-gray-text)", fontSize: "13px" }}>
+                    Итого к получению: {parseInt(amount) + calculateProfit(selectedDeposit, parseInt(amount))} {cName}
+                  </div>
+                </div>
+              )}
+              <button className="btn btn-primary" onClick={openDeposit}>Открыть вклад</button>
+            </div>
+          </div>
+        )}
+
+        {/* Активные вклады */}
+        {myActiveDeposits.length > 0 && (
+          <div style={{ marginBottom: "40px" }}>
+            <div style={{ fontSize: "18px", fontWeight: 700, marginBottom: "20px" }}>Активные вклады</div>
+            <div style={{ display: "grid", gap: "12px" }}>
+              {myActiveDeposits.map(ud => {
+                const timeLeft = ud.endsAt - Date.now();
+                const daysLeft = Math.ceil(timeLeft / 86400000);
+                const profit = Math.round(ud.amount * ud.rate / 100);
+                return (
+                  <div key={ud.id} style={{ background: "#fff", border: "1.5px solid var(--rd-gray-border)", borderRadius: "var(--rd-radius)", padding: "20px" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                      <div>
+                        <div style={{ fontWeight: 700, fontSize: "16px", marginBottom: "8px" }}>{ud.depositName}</div>
+                        <div style={{ fontSize: "13px", color: "var(--rd-gray-text)", display: "flex", flexDirection: "column", gap: "4px" }}>
+                          <div>💰 Сумма: {ud.amount} {cName}</div>
+                          <div>📈 Ставка: {ud.rate}%</div>
+                          <div>⏳ Осталось: {daysLeft} {daysLeft === 1 ? "день" : daysLeft < 5 ? "дня" : "дней"}</div>
+                          <div>📅 Завершение: {new Date(ud.endsAt).toLocaleDateString("ru-RU")}</div>
+                        </div>
+                      </div>
+                      <div style={{ textAlign: "right" }}>
+                        <div style={{ fontSize: "13px", color: "var(--rd-gray-text)", marginBottom: "4px" }}>Доход</div>
+                        <div style={{ fontSize: "20px", fontWeight: 800, color: "var(--rd-green)" }}>+{profit} {cName}</div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* Архив */}
+        {myCompletedDeposits.length > 0 && (
+          <div>
+            <div style={{ fontSize: "18px", fontWeight: 700, marginBottom: "20px" }}>Архив</div>
+            <div style={{ display: "grid", gap: "12px" }}>
+              {myCompletedDeposits.map(ud => {
+                const profit = Math.round(ud.amount * ud.rate / 100);
+                return (
+                  <div key={ud.id} style={{ background: "var(--rd-gray-bg)", border: "1.5px solid var(--rd-gray-border)", borderRadius: "var(--rd-radius)", padding: "20px", opacity: 0.7 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                      <div>
+                        <div style={{ fontWeight: 700, fontSize: "16px", marginBottom: "4px" }}>{ud.depositName}</div>
+                        <div style={{ fontSize: "13px", color: "var(--rd-gray-text)" }}>
+                          {ud.amount} {cName} · {ud.rate}% · Завершён {new Date(ud.completedAt).toLocaleDateString("ru-RU")}
+                        </div>
+                      </div>
+                      <div style={{ fontSize: "16px", fontWeight: 700, color: "var(--rd-green)" }}>
+                        ✓ +{profit} {cName}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {deposits.length === 0 && (
+          <div className="empty-state">
+            <div className="empty-state-icon">🏦</div>
+            <div className="empty-state-text">Вклады пока недоступны</div>
+          </div>
+        )}
+      </div>
+
+      {/* Калькулятор */}
+      {showCalculator && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center", padding: "20px" }} onClick={() => setShowCalculator(false)}>
+          <div style={{ background: "#fff", borderRadius: "var(--rd-radius)", maxWidth: "500px", width: "100%", padding: "28px", boxShadow: "0 25px 50px rgba(0,0,0,0.25)" }} onClick={e => e.stopPropagation()}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px" }}>
+              <div style={{ fontWeight: 900, fontSize: "22px" }}>🧮 Калькулятор дохода</div>
+              <button onClick={() => setShowCalculator(false)} style={{ background: "var(--rd-gray-bg)", border: "none", borderRadius: "50%", width: "36px", height: "36px", cursor: "pointer", fontSize: "18px" }}>✕</button>
+            </div>
+            <div style={{ marginBottom: "16px" }}>
+              <label className="form-label">Вклад</label>
+              <select className="form-input" value={calcDeposit || ""} onChange={e => setCalcDeposit(parseInt(e.target.value))}>
+                {deposits.map(d => (
+                  <option key={d.id} value={d.id}>{d.name} ({d.duration} дней, {d.rate}%)</option>
+                ))}
+              </select>
+            </div>
+            <div style={{ marginBottom: "20px" }}>
+              <label className="form-label">Сумма вклада</label>
+              <input className="form-input" type="number" value={calcAmount} onChange={e => setCalcAmount(e.target.value)} placeholder={`Макс: ${myBalance} ${cName}`} />
+            </div>
+            {calcDeposit && calcAmount && (
+              <div style={{ padding: "20px", background: "linear-gradient(135deg, var(--rd-red-light), rgba(199,22,24,0.04))", border: "1.5px solid rgba(199,22,24,0.25)", borderRadius: "12px" }}>
+                <div style={{ fontSize: "14px", color: "var(--rd-gray-text)", marginBottom: "8px" }}>Ваш доход</div>
+                <div style={{ fontSize: "32px", fontWeight: 900, color: "var(--rd-red)", marginBottom: "8px" }}>
+                  +{calculateProfit(calcDeposit, parseInt(calcAmount))} {cName}
+                </div>
+                <div style={{ fontSize: "13px", color: "var(--rd-gray-text)" }}>
+                  Итого к получению: {parseInt(calcAmount) + calculateProfit(calcDeposit, parseInt(calcAmount))} {cName}
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}
