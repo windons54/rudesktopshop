@@ -1469,33 +1469,62 @@ function TasksPage({ tasks, currentUser, taskSubmissions, saveTaskSubmissions, n
 
   const mySubmissions = (taskSubmissions || []).filter(s => s.user === currentUser);
 
+  const sectionSettings = appearance?.sectionSettings?.tasks || {};
+  const tasksTitle = sectionSettings.title || "Задания";
+  const tasksDescription = sectionSettings.description || "Выполняйте задания и получайте монеты";
+  const tasksBannerImage = sectionSettings.banner || "";
+
   return (
     <div style={{minHeight:"60vh"}}>
-      {/* Hero header */}
-      <div style={{background:"#fff",borderBottom:"1.5px solid var(--rd-gray-border)",padding:"40px 0 32px"}}>
-        <div className="container">
-          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:"12px"}}>
-            <div>
-              <h1 style={{fontSize:"clamp(26px,5vw,40px)",fontWeight:900,color:"var(--rd-dark)",letterSpacing:"-0.02em"}}>Задания</h1>
-              <p style={{fontSize:"15px",color:"var(--rd-gray-text)",marginTop:"6px"}}>Выполняйте задания и получайте монеты</p>
+      {tasksBannerImage ? (
+        <div className="section-banner-wrap">
+          <div className="hero-banner">
+            <div className="hero-banner-bg" style={{backgroundImage:`url(${tasksBannerImage})`}} />
+            <div className="hero-banner-overlay" />
+            <div className="hero-banner-content" style={{padding:"48px 24px"}}>
+              <h1 className="hero-banner-title" style={{fontSize:"clamp(26px,5vw,40px)",marginBottom:"12px"}}>{tasksTitle}</h1>
+              <p className="hero-banner-desc">{tasksDescription}</p>
             </div>
-            {activeTasks.length > 0 && (
-              <div style={{display:"flex",gap:"16px",flexWrap:"wrap"}}>
-                <div style={{textAlign:"center",background:"var(--rd-gray-bg)",borderRadius:"12px",padding:"12px 20px"}}>
-                  <div style={{fontSize:"22px",fontWeight:900,color:"var(--rd-red)"}}>{activeTasks.length}</div>
-                  <div style={{fontSize:"11px",color:"var(--rd-gray-text)",textTransform:"uppercase",letterSpacing:"0.08em"}}>Активных</div>
-                </div>
-                {mySubmissions.length > 0 && (
-                  <div style={{textAlign:"center",background:"var(--rd-gray-bg)",borderRadius:"12px",padding:"12px 20px"}}>
-                    <div style={{fontSize:"22px",fontWeight:900,color:"var(--rd-dark)"}}>{mySubmissions.filter(s=>s.status==="approved").length}</div>
-                    <div style={{fontSize:"11px",color:"var(--rd-gray-text)",textTransform:"uppercase",letterSpacing:"0.08em"}}>Выполнено</div>
-                  </div>
-                )}
+          </div>
+          {activeTasks.length > 0 && (
+            <div className="section-banner-stats-overlay">
+              <div className="section-banner-stat">
+                <div className="section-banner-stat-num" style={{color:"#ff6b6b"}}>{activeTasks.length}</div>
+                <div className="section-banner-stat-label">Активных</div>
               </div>
-            )}
+              <div className="section-banner-stat">
+                <div className="section-banner-stat-num" style={{color:"#fff"}}>{mySubmissions.filter(s=>s.status==="approved").length}</div>
+                <div className="section-banner-stat-label">Выполнено</div>
+              </div>
+            </div>
+          )}
+        </div>
+      ) : (
+        <div style={{background:"#fff",borderBottom:"1.5px solid var(--rd-gray-border)",padding:"40px 0 32px"}}>
+          <div className="container">
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:"12px"}}>
+              <div>
+                <h1 style={{fontSize:"clamp(26px,5vw,40px)",fontWeight:900,color:"var(--rd-dark)",letterSpacing:"-0.02em"}}>{tasksTitle}</h1>
+                <p style={{fontSize:"15px",color:"var(--rd-gray-text)",marginTop:"6px"}}>{tasksDescription}</p>
+              </div>
+              {activeTasks.length > 0 && (
+                <div style={{display:"flex",gap:"16px",flexWrap:"wrap"}}>
+                  <div style={{textAlign:"center",background:"var(--rd-gray-bg)",borderRadius:"12px",padding:"12px 20px"}}>
+                    <div style={{fontSize:"22px",fontWeight:900,color:"var(--rd-red)"}}>{activeTasks.length}</div>
+                    <div style={{fontSize:"11px",color:"var(--rd-gray-text)",textTransform:"uppercase",letterSpacing:"0.08em"}}>Активных</div>
+                  </div>
+                  {mySubmissions.length > 0 && (
+                    <div style={{textAlign:"center",background:"var(--rd-gray-bg)",borderRadius:"12px",padding:"12px 20px"}}>
+                      <div style={{fontSize:"22px",fontWeight:900,color:"var(--rd-dark)"}}>{mySubmissions.filter(s=>s.status==="approved").length}</div>
+                      <div style={{fontSize:"11px",color:"var(--rd-gray-text)",textTransform:"uppercase",letterSpacing:"0.08em"}}>Выполнено</div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
         </div>
-      </div>
+      )}
 
       <div className="container auction-page">
       {activeTasks.length === 0 ? (
@@ -8225,11 +8254,15 @@ function BankAdminTab({ deposits, saveDeposits, notify }) {
   );
 }
 
-function BankPage({ deposits, userDeposits, saveUserDeposits, currentUser, users, saveUsers, notify, currency }) {
+function BankPage({ deposits, userDeposits, saveUserDeposits, currentUser, users, saveUsers, notify, currency, appearance }) {
   const [modalDeposit, setModalDeposit] = useState(null); // deposit object shown in modal
   const [amount, setAmount] = useState("");
   const cName = getCurrName(currency);
   const myBalance = users[currentUser]?.balance || 0;
+  const sectionSettings = appearance?.sectionSettings?.bank || {};
+  const bankTitle = sectionSettings.title || "Банк";
+  const bankDescription = sectionSettings.description || "Откройте вклад и получайте проценты";
+  const bankBannerImage = sectionSettings.banner || "";
 
   // Проверяем и завершаем истекшие вклады
   React.useEffect(() => {
@@ -8345,12 +8378,37 @@ function BankPage({ deposits, userDeposits, saveUserDeposits, currentUser, users
         </div>
       )}
 
-      <div style={{ background: "#fff", borderBottom: "1.5px solid var(--rd-gray-border)", padding: "40px 0 32px" }}>
-        <div className="container">
-          <h1 style={{ fontSize: "clamp(26px,5vw,40px)", fontWeight: 900, color: "var(--rd-dark)", letterSpacing: "-0.02em" }}>Банк</h1>
-          <p style={{ fontSize: "15px", color: "var(--rd-gray-text)", marginTop: "6px" }}>Откройте вклад и получайте проценты</p>
+      {bankBannerImage ? (
+        <div className="section-banner-wrap">
+          <div className="hero-banner">
+            <div className="hero-banner-bg" style={{backgroundImage:`url(${bankBannerImage})`}} />
+            <div className="hero-banner-overlay" />
+            <div className="hero-banner-content" style={{padding:"48px 24px"}}>
+              <h1 className="hero-banner-title" style={{fontSize:"clamp(26px,5vw,40px)",marginBottom:"12px"}}>{bankTitle}</h1>
+              <p className="hero-banner-desc">{bankDescription}</p>
+            </div>
+          </div>
+          {deposits.length > 0 && (
+            <div className="section-banner-stats-overlay">
+              <div className="section-banner-stat">
+                <div className="section-banner-stat-num" style={{color:"#fff"}}>{deposits.length}</div>
+                <div className="section-banner-stat-label">Вкладов</div>
+              </div>
+              <div className="section-banner-stat">
+                <div className="section-banner-stat-num" style={{color:"#7ee8a2"}}>{myActiveDeposits.length}</div>
+                <div className="section-banner-stat-label">Активных</div>
+              </div>
+            </div>
+          )}
         </div>
-      </div>
+      ) : (
+        <div style={{ background: "#fff", borderBottom: "1.5px solid var(--rd-gray-border)", padding: "40px 0 32px" }}>
+          <div className="container">
+            <h1 style={{ fontSize: "clamp(26px,5vw,40px)", fontWeight: 900, color: "var(--rd-dark)", letterSpacing: "-0.02em" }}>{bankTitle}</h1>
+            <p style={{ fontSize: "15px", color: "var(--rd-gray-text)", marginTop: "6px" }}>{bankDescription}</p>
+          </div>
+        </div>
+      )}
 
       <div className="container" style={{ padding: "32px 0" }}>
         {/* Карточки вкладов */}
