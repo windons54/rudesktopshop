@@ -439,6 +439,7 @@ function applyTheme(themeKey, customColors = {}) {
   r.setProperty("--rd-red-light", t.light);
   r.setProperty("--rd-dark", t.dark);
   r.setProperty("--rd-gray-bg", customColors.pageBg || t.bg);
+  if (customColors.shopTextColor) { r.setProperty("--rd-shop-text", customColors.shopTextColor); } else { r.removeProperty("--rd-shop-text"); }
 }
 
 function App() {
@@ -484,7 +485,7 @@ function App() {
     if (appearance.currency && appearance.currency.logo) return <img src={appearance.currency.logo} alt="" style={{width:"16px",height:"16px",objectFit:"contain",verticalAlign:"middle"}} />;
     return <span>{(appearance.currency && appearance.currency.icon) ? appearance.currency.icon : "🪙"}</span>;
   };
-  const [appearance, setAppearance] = useState({ logo: null, theme: "default", headerBg: "", footerBg: "", pageBg: "", accentColor: "", socials: { telegram: "", max: "", vk: "", rutube: "", vkvideo: "" }, birthdayBonus: 100, birthdayEnabled: true, integrations: { tgEnabled: false, tgBotToken: "", tgChatId: "", maxEnabled: false, maxBotToken: "", maxChatId: "" }, currency: { name: "RuDeCoin", icon: "🪙", logo: "" }, seo: { title: "", description: "", favicon: "" }, registrationEnabled: true, bitrix24: { enabled: false, clientId: "", clientSecret: "", portalUrl: "" }, features: { auction: true, lottery: true, voting: true, bank: true, tasks: true }, sectionSettings: { auction: { title: "Аукцион", description: "Делайте ставки и выигрывайте эксклюзивные товары", banner: "" }, lottery: { title: "Лотерея", description: "Участвуйте в розыгрышах и выигрывайте призы", banner: "" }, voting: { title: "Голосования", description: "Участвуйте в опросах и влияйте на решения", banner: "" }, bank: { title: "Банк", description: "Управляйте своими депозитами и получайте проценты", banner: "" }, tasks: { title: "Задания за монеты", description: "Выполняйте задания и получайте корпоративные монеты", banner: "" } } });
+  const [appearance, setAppearance] = useState({ logo: null, theme: "default", headerBg: "", footerBg: "", pageBg: "", accentColor: "", shopTextColor: "", socials: { telegram: "", max: "", vk: "", rutube: "", vkvideo: "" }, birthdayBonus: 100, birthdayEnabled: true, integrations: { tgEnabled: false, tgBotToken: "", tgChatId: "", maxEnabled: false, maxBotToken: "", maxChatId: "" }, currency: { name: "RuDeCoin", icon: "🪙", logo: "" }, seo: { title: "", description: "", favicon: "" }, registrationEnabled: true, bitrix24: { enabled: false, clientId: "", clientSecret: "", portalUrl: "" }, features: { auction: true, lottery: true, voting: true, bank: true, tasks: true }, sectionSettings: { auction: { title: "Аукцион", description: "Делайте ставки и выигрывайте эксклюзивные товары", banner: "" }, lottery: { title: "Лотерея", description: "Участвуйте в розыгрышах и выигрывайте призы", banner: "" }, voting: { title: "Голосования", description: "Участвуйте в опросах и влияйте на решения", banner: "" }, bank: { title: "Банк", description: "Управляйте своими депозитами и получайте проценты", banner: "" }, tasks: { title: "Задания за монеты", description: "Выполняйте задания и получайте корпоративные монеты", banner: "" } } });
   const [currentUser, setCurrentUser] = useState(null);
   const [cart, setCart] = useState([]);
   const [orderSuccess, setOrderSuccess] = useState(false);
@@ -6020,6 +6021,7 @@ function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbC
                   { key:"pageBg",   label:"Фон страницы", icon:"🖼️", desc:"Цвет основного фона", default:"#f7f8fa" },
                   { key:"footerBg", label:"Футер", icon:"🔻", desc:"Фон нижней части сайта", default:"#1a1a1a" },
                   { key:"accentColor", label:"Акцентный цвет", icon:"🎨", desc:"Кнопки, ссылки, выделения", default:"#c71618" },
+                  { key:"shopTextColor", label:"Цвет текста в магазине", icon:"🛒", desc:"Названия и описания товаров", default:"#1a1a1a" },
                 ].map(({ key, label, icon, desc, default: def }) => (
                   <div key={key} style={{display:"flex",alignItems:"center",gap:"16px",padding:"14px 0",borderBottom:"1px solid var(--rd-gray-border)"}}>
                     <div style={{width:"40px",height:"40px",borderRadius:"10px",background:ap[key]||def,border:"1.5px solid var(--rd-gray-border)",flexShrink:0,boxShadow:"inset 0 0 0 1px rgba(0,0,0,0.08)"}}></div>
@@ -6046,7 +6048,7 @@ function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbC
                             if (/^#[0-9a-fA-F]{6}$/.test(val) || val === "") saveAppearance(newAp);
                           }
                         }}
-                        style={{width:"90px",padding:"8px 10px",border:"1.5px solid var(--rd-gray-border)",borderRadius:"8px",fontSize:"13px",fontFamily:"monospace",color:"var(--rd-dark)"}} />
+                        style={{width:"90px",padding:"8px 10px",border:"1.5px solid var(--rd-gray-border)",borderRadius:"8px",fontSize:"13px",fontFamily:"'Stolzl', monospace",color:"var(--rd-dark)"}} />
                       {ap[key] && (
                         <button onClick={() => { const newAp = {...ap, [key]:""}; setAp(newAp); saveAppearance(newAp); }}
                           style={{background:"none",border:"none",cursor:"pointer",color:"var(--rd-gray-text)",fontSize:"16px",lineHeight:1,padding:"4px"}} title="Сбросить">✕</button>
@@ -6057,7 +6059,7 @@ function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbC
 
                 <div style={{marginTop:"16px",display:"flex",gap:"10px"}}>
                   <button className="btn btn-ghost btn-sm" onClick={() => {
-                    const newAp = {...ap, headerBg:"", footerBg:"", pageBg:"", accentColor:""};
+                    const newAp = {...ap, headerBg:"", footerBg:"", pageBg:"", accentColor:"", shopTextColor:""};
                     setAp(newAp); saveAppearance(newAp);
                   }}>Сбросить все цвета</button>
                 </div>

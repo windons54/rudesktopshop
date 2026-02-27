@@ -344,6 +344,7 @@ body {
   border-radius: var(--rd-radius-sm);
   font-size: 15px;
   font-weight: 600;
+  font-family: 'Stolzl', -apple-system, BlinkMacSystemFont, sans-serif;
   cursor: pointer;
   transition: all var(--rd-transition);
   border: 2px solid transparent;
@@ -439,6 +440,7 @@ body {
   border: 1.5px solid var(--rd-gray-border);
   border-radius: var(--rd-radius-sm);
   font-size: 15px;
+  font-family: 'Stolzl', -apple-system, BlinkMacSystemFont, sans-serif;
   outline: none;
   transition: border-color 0.2s, box-shadow 0.2s, transform 0.15s;
   color: var(--rd-dark);
@@ -653,13 +655,13 @@ body {
 .product-card .pc-name {
   font-size: 17px;
   font-weight: 700;
-  color: var(--rd-dark);
+  color: var(--rd-shop-text, var(--rd-dark));
   margin-bottom: 8px;
   line-height: 1.3;
 }
 .product-card .pc-desc {
   font-size: 13px;
-  color: var(--rd-gray-text);
+  color: var(--rd-shop-text, var(--rd-gray-text));
   line-height: 1.6;
   flex: 1;
   margin-bottom: 20px;
@@ -805,6 +807,10 @@ body {
 .auth-link a:hover { text-decoration-color: var(--rd-red); }
 
 /* ======= ADMIN PAGE ======= */
+.admin-wrap,
+.settings-wrap {
+  font-family: 'Stolzl', -apple-system, BlinkMacSystemFont, sans-serif;
+}
 .admin-wrap {
   max-width: 1200px;
   margin: 0 auto;
@@ -1409,6 +1415,7 @@ input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; }
   border: 1.5px solid var(--rd-gray-border);
   border-radius: var(--rd-radius-sm);
   font-size: 15px;
+  font-family: 'Stolzl', -apple-system, BlinkMacSystemFont, sans-serif;
   outline: none;
   transition: border-color var(--rd-transition);
   color: var(--rd-dark);
