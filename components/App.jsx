@@ -259,7 +259,8 @@ function whenSQLReady() {
 
 // ── HISTORY ────────────────────────────────────────────────────────────────
 
-function HistoryPage({ currentUser, transfers, orders, taskSubmissions }) {
+function HistoryPage({ currentUser, transfers, orders, taskSubmissions, currency }) {
+  const hCurrName = getCurrName(currency);
   const [filter, setFilter] = useState("all");
 
   const transferEvents = transfers
@@ -341,7 +342,7 @@ function HistoryPage({ currentUser, transfers, orders, taskSubmissions }) {
                     <div style={{fontSize:"11px",color:"#9ca3af",marginTop:"2px"}}>{ev.date}</div>
                   </div>
                   <div style={{fontWeight:800,fontSize:"20px",color:amountColor[ev.type],flexShrink:0}}>
-                    {amountPrefix[ev.type]}{ev.amount} <span style={{fontSize:"12px",fontWeight:600,color:"var(--rd-gray-text)"}}>RDC</span>
+                    {amountPrefix[ev.type]}{ev.amount} <span style={{fontSize:"12px",fontWeight:600,color:"var(--rd-gray-text)"}}>{hCurrName}</span>
                   </div>
                 </div>
               );
@@ -372,7 +373,7 @@ function HistoryPage({ currentUser, transfers, orders, taskSubmissions }) {
                     </div>
                     <div style={{display:"flex",flexDirection:"column",alignItems:"flex-end",gap:"6px",flexShrink:0}}>
                       <div style={{background:sc.bg,color:sc.color,borderRadius:"8px",padding:"4px 10px",fontSize:"12px",fontWeight:700}}>{sc.label}</div>
-                      {s.status === "approved" && <div style={{fontSize:"14px",fontWeight:800,color:"var(--rd-green)"}}>+{s.reward} монет</div>}
+                      {s.status === "approved" && <div style={{fontSize:"14px",fontWeight:800,color:"var(--rd-green)"}}>+{s.reward} {hCurrName}</div>}
                     </div>
                   </div>
                 );
@@ -1030,7 +1031,7 @@ ym(${integ.ymCounterId}, "init", { clickmap:true, trackLinks:true, accurateTrack
                       onMouseLeave={() => { window._menuCloseTimer = setTimeout(() => setMenuOpen(false), 200); }}>
                       <button className="user-menu-trigger">
                         {users[currentUser]?.avatar
-                          ? <img src={users[currentUser].avatar} alt="avatar" style={{width:"30px",height:"30px",borderRadius:"50%",objectFit:"cover",border:"1.5px solid rgba(199,22,24,0.25)"}} />
+                          ? <img src={users[currentUser].avatar} alt="avatar" style={{width:"30px",height:"30px",borderRadius:"8px",objectFit:"cover",border:"1.5px solid rgba(199,22,24,0.25)"}} />
                           : <div style={{width:"30px",height:"30px",borderRadius:"50%",background:"var(--rd-red-light)",border:"1.5px solid rgba(199,22,24,0.2)",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:800,fontSize:"13px",color:"var(--rd-red)",flexShrink:0}}>{currentUser[0].toUpperCase()}</div>
                         }
                         <span className="user-name">{displayName}</span>
@@ -1146,7 +1147,7 @@ ym(${integ.ymCounterId}, "init", { clickmap:true, trackLinks:true, accurateTrack
         {page === "tasks" && appearance.features?.tasks !== false && <TasksPage tasks={tasks} currentUser={currentUser} taskSubmissions={taskSubmissions} saveTaskSubmissions={saveTaskSubmissions} notify={notify} appearance={appearance} users={users} saveUsers={saveUsers} />}
         {page === "tasks" && appearance.features?.tasks === false && <div className="empty-state"><div className="empty-state-icon">🎯</div><div className="empty-state-text">Раздел «Задания» недоступен</div></div>}
         {page === "favorites" && currentUser && <FavoritesPage products={activeProducts.filter(p => favorites.includes(p.id))} favorites={favorites} toggleFavorite={toggleFavorite} addToCart={addToCart} setPage={setPage} />}
-        {page === "history" && currentUser && <HistoryPage currentUser={currentUser} transfers={transfers} orders={orders} taskSubmissions={taskSubmissions} />}
+        {page === "history" && currentUser && <HistoryPage currentUser={currentUser} transfers={transfers} orders={orders} taskSubmissions={taskSubmissions} currency={appearance.currency} />}
         {page === "cart" && <CartPage cart={cart} removeFromCart={removeFromCart} cartTotal={cartTotal} checkout={checkout} currentUser={currentUser} setPage={setPage} users={users} currency={appearance.currency} />}
         {page === "login" && <LoginPage users={users} setCurrentUser={setCurrentUser} setPage={setPage} notify={notify} appearance={appearance} saveUsers={saveUsers} />}
         {page === "register" && <RegisterPage users={users} saveUsers={saveUsers} setCurrentUser={setCurrentUser} setPage={setPage} notify={notify} appearance={appearance} />}
@@ -2738,10 +2739,10 @@ function ProductModal({ product, onClose, addToCart, currency }) {
             <div className="modal-gallery-main">
               {product.badge && (
                 <div className="pc-badge-wrap" style={{top:"14px",right:"14px",left:"auto"}}>
-                  {product.badge === "hit" && <span className="pc-badge pc-badge-hit">🔥 Хит</span>}
-                  {product.badge === "new" && <span className="pc-badge pc-badge-new">✨ Новинка</span>}
-                  {product.badge === "sale" && <span className="pc-badge pc-badge-sale">🏷️ Акция</span>}
-                  {product.badge === "excl" && <span className="pc-badge pc-badge-excl">⭐ Эксклюзив</span>}
+                  {product.badge === "hit" && <span className="pc-badge pc-badge-hit">Хит</span>}
+                  {product.badge === "new" && <span className="pc-badge pc-badge-new">Новинка</span>}
+                  {product.badge === "sale" && <span className="pc-badge pc-badge-sale">Акция</span>}
+                  {product.badge === "excl" && <span className="pc-badge pc-badge-excl">Эксклюзив</span>}
                 </div>
               )}
               {imgs.length > 0 ? (
@@ -2829,10 +2830,10 @@ function ProductCard({ product, addToCart, onOpen, favorites, toggleFavorite }) 
       <div className="pc-gallery-wrap">
         {product.badge && (
           <div className="pc-badge-wrap">
-            {product.badge === "hit" && <span className="pc-badge pc-badge-hit">🔥 Хит</span>}
-            {product.badge === "new" && <span className="pc-badge pc-badge-new">✨ Новинка</span>}
-            {product.badge === "sale" && <span className="pc-badge pc-badge-sale">🏷️ Акция</span>}
-            {product.badge === "excl" && <span className="pc-badge pc-badge-excl">⭐ Эксклюзив</span>}
+            {product.badge === "hit" && <span className="pc-badge pc-badge-hit">Хит</span>}
+            {product.badge === "new" && <span className="pc-badge pc-badge-new">Новинка</span>}
+            {product.badge === "sale" && <span className="pc-badge pc-badge-sale">Акция</span>}
+            {product.badge === "excl" && <span className="pc-badge pc-badge-excl">Эксклюзив</span>}
           </div>
         )}
         {imgs.length > 0 ? (
@@ -2879,7 +2880,7 @@ function ProductCard({ product, addToCart, onOpen, favorites, toggleFavorite }) 
             var clr = stockVal === 0 ? "var(--rd-red)" : stockVal <= 5 ? "#d97706" : "var(--rd-green)";
             var bg2 = stockVal === 0 ? "var(--rd-red-light)" : stockVal <= 5 ? "rgba(245,158,11,0.1)" : "var(--rd-green-light)";
             var bc = stockVal === 0 ? "rgba(199,22,24,0.2)" : stockVal <= 5 ? "rgba(245,158,11,0.2)" : "rgba(5,150,105,0.2)";
-            return React.createElement("span", {style:{fontSize:"11px",fontWeight:600,color:clr,background:bg2,padding:"2px 8px",borderRadius:"20px",border:"1px solid",borderColor:bc}},
+            return React.createElement("span", {style:{fontSize:"11px",fontWeight:600,color:clr,background:bg2,padding:"2px 8px",borderRadius:"var(--rd-radius-sm)",border:"1px solid",borderColor:bc}},
               stockVal === 0 ? "Нет в наличии" : "📦 " + stockVal + " шт."
             );
           })()}
@@ -3271,6 +3272,7 @@ const EMOJIS = ["🛍️","👕","🧥","🧢","👟","🎒","☕","🍵","📓"
 // ── WORKDAYS TAB ─────────────────────────────────────────────────────────────
 function WorkdaysTab({ users, currentUser, notify, saveUsers, transfers, saveTransfers, appearance, saveAppearance }) {
   const workdaysCfg = (appearance.workdays) || {};
+  const wdCurrName = getCurrName(appearance.currency);
   const [coinsPerDay, setCoinsPerDay] = useState(String(workdaysCfg.coinsPerDay || 10));
   const [globalMode, setGlobalMode] = useState(workdaysCfg.globalMode || "employment");
   const [globalCustomDate, setGlobalCustomDate] = useState(workdaysCfg.globalCustomDate || "");
@@ -3283,7 +3285,7 @@ function WorkdaysTab({ users, currentUser, notify, saveUsers, transfers, saveTra
 
   const saveSettings = () => {
     const coins = Number(coinsPerDay);
-    if (isNaN(coins) || coins < 0) { notify("Некорректное количество монет", "err"); return; }
+    if (isNaN(coins) || coins < 0) { notify("Некорректное количество " + wdCurrName, "err"); return; }
     const cfg = { coinsPerDay: coins, globalMode, globalCustomDate, userOverrides };
     saveAppearance({ ...appearance, workdays: cfg });
     notify("Настройки трудодней сохранены ✓");
@@ -3320,7 +3322,7 @@ function WorkdaysTab({ users, currentUser, notify, saveUsers, transfers, saveTra
 
   const runAccrual = () => {
     const coins = Number(coinsPerDay);
-    if (isNaN(coins) || coins <= 0) { notify("Укажите количество монет за день", "err"); return; }
+    if (isNaN(coins) || coins <= 0) { notify("Укажите количество " + wdCurrName + " за день", "err"); return; }
     const updated = { ...users };
     const now = new Date().toLocaleString("ru-RU");
     const newTransfers = [...(transfers || [])];
@@ -3330,7 +3332,7 @@ function WorkdaysTab({ users, currentUser, notify, saveUsers, transfers, saveTra
       if (days === null || days <= 0) return;
       const amount = coins * days;
       updated[u] = { ...updated[u], balance: (updated[u].balance || 0) + amount };
-      newTransfers.push({ id: Date.now() + Math.random(), from: currentUser, to: u, amount, comment: "Трудодни: " + days + " дн. × " + coins + " монет", date: now });
+      newTransfers.push({ id: Date.now() + Math.random(), from: currentUser, to: u, amount, comment: "Трудодни: " + days + " дн. × " + coins + " " + wdCurrName, date: now });
       count++;
     });
     if (count === 0) { notify("Нет пользователей для начисления (не указаны даты)", "err"); return; }
@@ -3347,12 +3349,12 @@ function WorkdaysTab({ users, currentUser, notify, saveUsers, transfers, saveTra
         <div style={{fontSize:"11px",fontWeight:700,textTransform:"uppercase",letterSpacing:"0.07em",color:"var(--rd-gray-text)",marginBottom:"20px",paddingBottom:"10px",borderBottom:"1px solid var(--rd-gray-border)"}}>⚙️ Параметры начисления</div>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"20px",marginBottom:"20px"}}>
           <div>
-            <div style={{fontSize:"12px",fontWeight:700,textTransform:"uppercase",letterSpacing:"0.05em",color:"var(--rd-gray-text)",marginBottom:"6px"}}>Монет за 1 день работы</div>
+            <div style={{fontSize:"12px",fontWeight:700,textTransform:"uppercase",letterSpacing:"0.05em",color:"var(--rd-gray-text)",marginBottom:"6px"}}>{wdCurrName} за 1 день работы</div>
             <div style={{position:"relative"}}>
               <input className="form-input" type="number" min="0" step="0.5" placeholder="10" value={coinsPerDay}
                 onChange={e => setCoinsPerDay(e.target.value)}
                 style={{paddingRight:"96px",fontSize:"20px",fontWeight:700}} />
-              <span style={{position:"absolute",right:"14px",top:"50%",transform:"translateY(-50%)",fontSize:"12px",fontWeight:700,color:"var(--rd-gray-text)"}}>мон./день</span>
+              <span style={{position:"absolute",right:"14px",top:"50%",transform:"translateY(-50%)",fontSize:"12px",fontWeight:700,color:"var(--rd-gray-text)"}}>{wdCurrName}/день</span>
             </div>
             <div style={{display:"flex",gap:"6px",marginTop:"8px",flexWrap:"wrap"}}>
               {[1,5,10,25,50].map(v => (
@@ -3475,7 +3477,8 @@ function WorkdaysTab({ users, currentUser, notify, saveUsers, transfers, saveTra
   );
 }
 
-function BulkAccrualTab({ users, currentUser, notify, saveUsers, transfers, saveTransfers }) {
+function BulkAccrualTab({ users, currentUser, notify, saveUsers, transfers, saveTransfers, appearance }) {
+  const bulkCurrName = getCurrName(appearance?.currency);
   
   const allUsers = Object.entries(users).filter(([u]) => u !== currentUser);
   const [bulkAmt, setBulkAmt] = useState("");
@@ -3519,7 +3522,7 @@ function BulkAccrualTab({ users, currentUser, notify, saveUsers, transfers, save
               <input className="form-input" type="number" min="1" placeholder="0" value={bulkAmt}
                 onChange={e => setBulkAmt(e.target.value)}
                 style={{paddingRight:"64px",fontSize:"20px",fontWeight:700}} />
-              <span style={{position:"absolute",right:"14px",top:"50%",transform:"translateY(-50%)",fontSize:"12px",fontWeight:700,color:"var(--rd-gray-text)"}}>RDC</span>
+              <span style={{position:"absolute",right:"14px",top:"50%",transform:"translateY(-50%)",fontSize:"12px",fontWeight:700,color:"var(--rd-gray-text)"}}>{bulkCurrName}</span>
             </div>
             <div style={{display:"flex",gap:"6px",marginTop:"8px",flexWrap:"wrap"}}>
               {[50,100,250,500,1000].map(v => (
@@ -4344,7 +4347,7 @@ function AdminPage({ users, saveUsers, orders, saveOrders, products, saveProduct
               ⬆ Импорт
               <input type="file" accept=".csv,.xlsx,.xls" style={{position:"absolute",inset:0,opacity:0,cursor:"pointer",width:"100%",height:"100%"}} onChange={handleUsersImport} />
             </label>
-            <div style={{display:"flex",gap:"6px",marginLeft:"auto"}}>
+            <div style={{display:"flex",gap:"6px"}}>
               {[["all","Все"],["user","Пользователи"],["admin","Администраторы"]].map(([v,l]) => (
                 <button key={v} onClick={() => setUserRoleFilter(v)}
                   style={{padding:"6px 14px",borderRadius:"var(--rd-radius-sm)",fontSize:"13px",fontWeight:700,cursor:"pointer",border:"1.5px solid",transition:"all 0.15s",
@@ -6005,7 +6008,7 @@ function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbC
           })()}
 
           {tab === "currency" && currencySubTab === "currency_bulk" && isAdmin && (
-            <BulkAccrualTab users={users} currentUser={currentUser} notify={notify} saveUsers={saveUsers} transfers={transfers} saveTransfers={saveTransfers} />
+            <BulkAccrualTab users={users} currentUser={currentUser} notify={notify} saveUsers={saveUsers} transfers={transfers} saveTransfers={saveTransfers} appearance={appearance} />
           )}
 
           {tab === "currency" && currencySubTab === "currency_workdays" && isAdmin && (
@@ -6901,7 +6904,7 @@ function LotteryAdminTab({ lotteries, saveLotteries, notify, users, saveUsers, a
                 )}
               </div>
             </div>
-            <button onClick={addLottery} style={{ marginTop: "16px", background: "var(--rd-red)", color: "#fff", border: "none", borderRadius: "10px", padding: "12px 24px", fontWeight: 700, cursor: "pointer", fontSize: "14px", width: "100%" }}>🎰 Создать лотерею</button>
+            <button onClick={addLottery} className="admin-red-btn" style={{ marginTop: "16px", background: "var(--rd-red)", color: "#fff", border: "none", borderRadius: "10px", padding: "12px 24px", fontWeight: 700, cursor: "pointer", fontSize: "14px", width: "100%" }}>🎰 Создать лотерею</button>
           </div>
 
           {filteredActive.length > 0 && <div style={{ fontWeight: 700, fontSize: "14px", marginBottom: "12px", color: "var(--rd-dark)" }}>Активные лотереи</div>}
@@ -6914,7 +6917,7 @@ function LotteryAdminTab({ lotteries, saveLotteries, notify, users, saveUsers, a
                   <div><label style={labelStyle}>Победителей</label><input type="number" style={inputStyle} value={editForm.participants} onChange={e => setEditForm(f => ({ ...f, participants: e.target.value }))} /></div>
                   <div style={{ gridColumn: "1/-1" }}><label style={labelStyle}>Дата и время</label><input type="datetime-local" style={inputStyle} value={editForm.endsAt} onChange={e => setEditForm(f => ({ ...f, endsAt: e.target.value }))} /></div>
                   <div style={{ gridColumn: "1/-1", display: "flex", gap: "8px" }}>
-                    <button onClick={saveEdit} style={{ background: "var(--rd-red)", color: "#fff", border: "none", borderRadius: "8px", padding: "8px 18px", fontWeight: 700, cursor: "pointer" }}>Сохранить</button>
+                    <button onClick={saveEdit} className="admin-red-btn" style={{ background: "var(--rd-red)", color: "#fff", border: "none", borderRadius: "8px", padding: "8px 18px", fontWeight: 700, cursor: "pointer" }}>Сохранить</button>
                     <button onClick={cancelEdit} style={{ background: "var(--rd-gray-bg)", border: "1.5px solid var(--rd-gray-border)", borderRadius: "8px", padding: "8px 18px", fontWeight: 700, cursor: "pointer" }}>Отмена</button>
                   </div>
                 </div>
@@ -7261,7 +7264,7 @@ function VotingAdminTab({ polls, savePolls, notify, users, saveUsers }) {
         onImgChange={formImgChg}
         onMainImgChange={formMainImgChg}
       />
-      <button onClick={createPoll} style={{ marginBottom: "28px", background: "var(--rd-red)", color: "#fff", border: "none", borderRadius: "10px", padding: "12px 24px", fontWeight: 700, cursor: "pointer", fontSize: "14px", width: "100%" }}>🗳️ Создать голосование</button>
+      <button onClick={createPoll} className="admin-red-btn" style={{ marginBottom: "28px", background: "var(--rd-red)", color: "#fff", border: "none", borderRadius: "10px", padding: "12px 24px", fontWeight: 700, cursor: "pointer", fontSize: "14px", width: "100%" }}>🗳️ Создать голосование</button>
 
       {list.length > 0 && (
         <div style={{display:"flex",gap:"10px",marginBottom:"16px",flexWrap:"wrap",alignItems:"center"}}>
@@ -7288,7 +7291,7 @@ function VotingAdminTab({ polls, savePolls, notify, users, saveUsers }) {
                 onMainImgChange={editMainImgChg}
               />
               <div style={{ display: "flex", gap: "8px" }}>
-                <button onClick={saveEdit} style={{ background: "var(--rd-red)", color: "#fff", border: "none", borderRadius: "8px", padding: "10px 20px", fontWeight: 700, cursor: "pointer" }}>Сохранить</button>
+                <button onClick={saveEdit} className="admin-red-btn" style={{ background: "var(--rd-red)", color: "#fff", border: "none", borderRadius: "8px", padding: "10px 20px", fontWeight: 700, cursor: "pointer" }}>Сохранить</button>
                 <button onClick={() => { setEditingId(null); setEditForm(null); }} style={{ background: "var(--rd-gray-bg)", border: "1.5px solid var(--rd-gray-border)", borderRadius: "8px", padding: "10px 20px", fontWeight: 700, cursor: "pointer" }}>Отмена</button>
               </div>
             </div>
@@ -7303,7 +7306,7 @@ function VotingAdminTab({ polls, savePolls, notify, users, saveUsers }) {
                 </div>
                 <div style={{ display: "flex", gap: "6px", flexShrink: 0 }}>
                   {poll.status === "active" && now > poll.endsAt && !poll.winnersAwarded && (
-                    <button onClick={() => awardWinners(poll)} style={{ background: "var(--rd-red)", color: "#fff", border: "none", borderRadius: "8px", padding: "8px 14px", fontWeight: 700, cursor: "pointer", fontSize: "13px" }}>🏆 Наградить</button>
+                    <button onClick={() => awardWinners(poll)} className="admin-red-btn" style={{ background: "var(--rd-red)", color: "#fff", border: "none", borderRadius: "8px", padding: "8px 14px", fontWeight: 700, cursor: "pointer", fontSize: "13px" }}>🏆 Наградить</button>
                   )}
                   {poll.status === "active" && (
                     <button onClick={() => { const endsAtLocal = new Date(poll.endsAt - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16); setEditingId(poll.id); setEditForm({ title: poll.title, description: poll.description || "", image: poll.image || "", options: poll.options.map(o => ({ text: o.text, image: o.image || "" })), maxVotes: String(poll.maxVotes), winners: String(poll.winners), prize: String(poll.prize), endsAt: endsAtLocal }); }} style={{ background: "var(--rd-gray-bg)", border: "1.5px solid var(--rd-gray-border)", borderRadius: "8px", padding: "8px 12px", cursor: "pointer", fontSize: "13px", fontWeight: 700 }}>✏️</button>
@@ -7542,6 +7545,9 @@ function BankAdminTab({ deposits, saveDeposits, notify }) {
   const [form, setForm] = useState({ name: "", duration: "", rate: "", image: "" });
   const [editingId, setEditingId] = useState(null);
   const [editForm, setEditForm] = useState(null);
+  const [historyView, setHistoryView] = useState(false);
+  const [adminSearch, setAdminSearch] = useState("");
+  const [adminSort, setAdminSort] = useState("newest");
 
   const handleImage = async (e, setter) => {
     const file = e.target.files[0];
@@ -7587,78 +7593,121 @@ function BankAdminTab({ deposits, saveDeposits, notify }) {
     notify("Вклад удалён");
   };
 
+  const sorted = [...deposits].sort((a, b) => adminSort === "newest" ? b.createdAt - a.createdAt : a.createdAt - b.createdAt);
+  const filtered = sorted.filter(d => !adminSearch || d.name.toLowerCase().includes(adminSearch.toLowerCase()));
+
+  const inputStyle = { width: "100%", padding: "10px 14px", border: "1.5px solid var(--rd-gray-border)", borderRadius: "10px", fontSize: "14px", boxSizing: "border-box", background: "#fff" };
+  const labelStyle = { fontSize: "12px", fontWeight: 700, color: "var(--rd-gray-text)", marginBottom: "6px", display: "block" };
+
   return (
     <div>
-      <div style={{ fontWeight: 700, fontSize: "15px", marginBottom: "16px" }}>➕ Создать вклад</div>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "12px", marginBottom: "12px" }}>
-        <input className="form-input" placeholder="Название вклада" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} />
-        <input className="form-input" type="number" placeholder="Срок (дней)" value={form.duration} onChange={e => setForm({ ...form, duration: e.target.value })} />
-        <input className="form-input" type="number" step="0.1" placeholder="Ставка (%)" value={form.rate} onChange={e => setForm({ ...form, rate: e.target.value })} />
+      <div style={{ display: "flex", gap: "10px", marginBottom: "20px" }}>
+        <button onClick={() => setHistoryView(false)} style={{ padding: "8px 18px", borderRadius: "10px", border: "1.5px solid var(--rd-gray-border)", background: !historyView ? "var(--rd-red)" : "#fff", color: !historyView ? "#fff" : "var(--rd-dark)", fontWeight: 700, cursor: "pointer" }}>Управление</button>
+        <button onClick={() => setHistoryView(true)} style={{ padding: "8px 18px", borderRadius: "10px", border: "1.5px solid var(--rd-gray-border)", background: historyView ? "var(--rd-red)" : "#fff", color: historyView ? "#fff" : "var(--rd-dark)", fontWeight: 700, cursor: "pointer" }}>Все вклады</button>
       </div>
-      <div style={{ marginBottom: "16px" }}>
-        {form.image ? (
-          <div style={{ position: "relative", display: "inline-block" }}>
-            <img src={form.image} alt="" style={{ maxHeight: "120px", maxWidth: "100%", borderRadius: "8px", border: "1.5px solid var(--rd-gray-border)", display: "block" }} />
-            <button onClick={() => setForm(f => ({ ...f, image: "" }))} style={{ position: "absolute", top: "4px", right: "4px", background: "rgba(0,0,0,0.6)", border: "none", borderRadius: "50%", width: "22px", height: "22px", color: "#fff", cursor: "pointer", fontSize: "13px", display: "flex", alignItems: "center", justifyContent: "center" }}>✕</button>
-          </div>
-        ) : (
-          <label style={{ display: "inline-flex", alignItems: "center", gap: "6px", padding: "8px 16px", border: "1.5px dashed var(--rd-gray-border)", borderRadius: "8px", cursor: "pointer", fontSize: "13px", fontWeight: 600, color: "var(--rd-gray-text)", background: "#fff" }}>
-            🖼️ Добавить фото
-            <input type="file" accept="image/*" style={{ display: "none" }} onChange={e => handleImage(e, img => setForm(f => ({ ...f, image: img })))} />
-          </label>
-        )}
-      </div>
-      <button onClick={createDeposit} style={{ marginBottom: "28px", background: "var(--rd-red)", color: "#fff", border: "none", borderRadius: "10px", padding: "12px 24px", fontWeight: 700, cursor: "pointer", fontSize: "14px", width: "100%" }}>
-        🏦 Создать вклад
-      </button>
 
-      {deposits.length === 0 && <div style={{ color: "var(--rd-gray-text)", textAlign: "center", padding: "20px", fontSize: "14px" }}>Вкладов пока нет</div>}
-      {deposits.map(deposit => (
-        <div key={deposit.id} style={{ border: "1.5px solid var(--rd-gray-border)", borderRadius: "var(--rd-radius-sm)", padding: "16px", marginBottom: "12px", background: "#fff" }}>
-          {editingId === deposit.id && editForm ? (
-            <div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "12px", marginBottom: "12px" }}>
-                <input className="form-input" placeholder="Название" value={editForm.name} onChange={e => setEditForm({ ...editForm, name: e.target.value })} />
-                <input className="form-input" type="number" placeholder="Срок (дней)" value={editForm.duration} onChange={e => setEditForm({ ...editForm, duration: e.target.value })} />
-                <input className="form-input" type="number" step="0.1" placeholder="Ставка (%)" value={editForm.rate} onChange={e => setEditForm({ ...editForm, rate: e.target.value })} />
-              </div>
-              <div style={{ marginBottom: "12px" }}>
-                {editForm.image ? (
+      {deposits.length > 0 && (
+        <div style={{display:"flex",gap:"10px",marginBottom:"16px",flexWrap:"wrap",alignItems:"center"}}>
+          <input className="form-input" placeholder="🔍 Поиск по названию..." value={adminSearch} onChange={e => setAdminSearch(e.target.value)} style={{flex:"1 1 200px",minWidth:"160px",padding:"8px 14px",fontSize:"13px"}} />
+          <select className="form-input" value={adminSort} onChange={e => setAdminSort(e.target.value)} style={{flex:"0 0 auto",padding:"8px 14px",fontSize:"13px",minWidth:"160px"}}>
+            <option value="newest">Сначала новые</option>
+            <option value="oldest">Сначала старые</option>
+          </select>
+        </div>
+      )}
+
+      {!historyView && (
+        <>
+          <div style={{ background: "var(--rd-gray-bg)", borderRadius: "var(--rd-radius-sm)", padding: "20px", marginBottom: "24px", border: "1.5px solid var(--rd-gray-border)" }}>
+            <div style={{ fontWeight: 700, fontSize: "15px", marginBottom: "16px" }}>➕ Создать вклад</div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+              <div style={{ gridColumn: "1/-1" }}><label style={labelStyle}>Название вклада</label><input style={inputStyle} placeholder="Премиальный вклад" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} /></div>
+              <div><label style={labelStyle}>Срок (дней)</label><input type="number" style={inputStyle} placeholder="30" value={form.duration} onChange={e => setForm({ ...form, duration: e.target.value })} /></div>
+              <div><label style={labelStyle}>Ставка (%)</label><input type="number" step="0.1" style={inputStyle} placeholder="5.0" value={form.rate} onChange={e => setForm({ ...form, rate: e.target.value })} /></div>
+              <div style={{ gridColumn: "1/-1" }}>
+                <label style={labelStyle}>Фото</label>
+                {form.image ? (
                   <div style={{ position: "relative", display: "inline-block" }}>
-                    <img src={editForm.image} alt="" style={{ maxHeight: "100px", maxWidth: "100%", borderRadius: "8px", border: "1.5px solid var(--rd-gray-border)", display: "block" }} />
-                    <button onClick={() => setEditForm(f => ({ ...f, image: "" }))} style={{ position: "absolute", top: "4px", right: "4px", background: "rgba(0,0,0,0.6)", border: "none", borderRadius: "50%", width: "22px", height: "22px", color: "#fff", cursor: "pointer", fontSize: "13px", display: "flex", alignItems: "center", justifyContent: "center" }}>✕</button>
+                    <img src={form.image} alt="" style={{ maxHeight: "120px", maxWidth: "100%", borderRadius: "10px", border: "1.5px solid var(--rd-gray-border)" }} />
+                    <button onClick={() => setForm(f => ({ ...f, image: "" }))} style={{ position: "absolute", top: "4px", right: "4px", background: "rgba(0,0,0,0.6)", border: "none", borderRadius: "50%", width: "22px", height: "22px", color: "#fff", cursor: "pointer", fontSize: "13px" }}>✕</button>
                   </div>
                 ) : (
-                  <label style={{ display: "inline-flex", alignItems: "center", gap: "6px", padding: "6px 14px", border: "1.5px dashed var(--rd-gray-border)", borderRadius: "8px", cursor: "pointer", fontSize: "12px", fontWeight: 600, color: "var(--rd-gray-text)", background: "#fff" }}>
+                  <label style={{ display: "inline-flex", alignItems: "center", gap: "6px", padding: "8px 16px", border: "1.5px dashed var(--rd-gray-border)", borderRadius: "10px", cursor: "pointer", fontSize: "13px", fontWeight: 600, color: "var(--rd-gray-text)" }}>
                     🖼️ Добавить фото
-                    <input type="file" accept="image/*" style={{ display: "none" }} onChange={e => handleImage(e, img => setEditForm(f => ({ ...f, image: img })))} />
+                    <input type="file" accept="image/*" style={{ display: "none" }} onChange={e => handleImage(e, img => setForm(f => ({ ...f, image: img })))} />
                   </label>
                 )}
               </div>
-              <div style={{ display: "flex", gap: "8px" }}>
-                <button onClick={saveEdit} style={{ background: "var(--rd-red)", color: "#fff", border: "none", borderRadius: "8px", padding: "10px 20px", fontWeight: 700, cursor: "pointer" }}>Сохранить</button>
-                <button onClick={() => { setEditingId(null); setEditForm(null); }} style={{ background: "var(--rd-gray-bg)", border: "1.5px solid var(--rd-gray-border)", borderRadius: "8px", padding: "10px 20px", fontWeight: 700, cursor: "pointer" }}>Отмена</button>
-              </div>
             </div>
-          ) : (
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-                {deposit.image ? <img src={deposit.image} alt="" style={{ width: "56px", height: "40px", objectFit: "cover", borderRadius: "6px", border: "1px solid var(--rd-gray-border)" }} /> : <div style={{ width: "56px", height: "40px", background: "var(--rd-gray-bg)", borderRadius: "6px", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "20px" }}>🏦</div>}
-                <div>
-                  <div style={{ fontWeight: 700, fontSize: "15px" }}>{deposit.name}</div>
-                  <div style={{ fontSize: "13px", color: "var(--rd-gray-text)", marginTop: "4px" }}>
-                    📅 {deposit.duration} дней · 📈 {deposit.rate}% годовых
+            <button onClick={createDeposit} className="admin-red-btn" style={{ marginTop: "16px", background: "var(--rd-red)", color: "#fff", border: "none", borderRadius: "10px", padding: "12px 24px", fontWeight: 700, cursor: "pointer", fontSize: "14px", width: "100%" }}>
+              🏦 Создать вклад
+            </button>
+          </div>
+
+          {filtered.length > 0 && <div style={{ fontWeight: 700, fontSize: "14px", marginBottom: "12px", color: "var(--rd-dark)" }}>Активные вклады</div>}
+          {filtered.map(deposit => (
+            <div key={deposit.id} style={{ border: "1.5px solid var(--rd-gray-border)", borderRadius: "var(--rd-radius-sm)", padding: "16px", marginBottom: "12px", background: "#fff" }}>
+              {editingId === deposit.id && editForm ? (
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
+                  <div style={{ gridColumn: "1/-1" }}><label style={labelStyle}>Название</label><input style={inputStyle} value={editForm.name} onChange={e => setEditForm({ ...editForm, name: e.target.value })} /></div>
+                  <div><label style={labelStyle}>Срок (дней)</label><input type="number" style={inputStyle} value={editForm.duration} onChange={e => setEditForm({ ...editForm, duration: e.target.value })} /></div>
+                  <div><label style={labelStyle}>Ставка (%)</label><input type="number" step="0.1" style={inputStyle} value={editForm.rate} onChange={e => setEditForm({ ...editForm, rate: e.target.value })} /></div>
+                  <div style={{ gridColumn: "1/-1" }}>
+                    {editForm.image ? (
+                      <div style={{ position: "relative", display: "inline-block" }}>
+                        <img src={editForm.image} alt="" style={{ maxHeight: "100px", maxWidth: "100%", borderRadius: "10px", border: "1.5px solid var(--rd-gray-border)" }} />
+                        <button onClick={() => setEditForm(f => ({ ...f, image: "" }))} style={{ position: "absolute", top: "4px", right: "4px", background: "rgba(0,0,0,0.6)", border: "none", borderRadius: "50%", width: "22px", height: "22px", color: "#fff", cursor: "pointer", fontSize: "13px" }}>✕</button>
+                      </div>
+                    ) : (
+                      <label style={{ display: "inline-flex", alignItems: "center", gap: "6px", padding: "6px 14px", border: "1.5px dashed var(--rd-gray-border)", borderRadius: "10px", cursor: "pointer", fontSize: "12px", fontWeight: 600, color: "var(--rd-gray-text)" }}>
+                        🖼️ Добавить фото
+                        <input type="file" accept="image/*" style={{ display: "none" }} onChange={e => handleImage(e, img => setEditForm(f => ({ ...f, image: img })))} />
+                      </label>
+                    )}
+                  </div>
+                  <div style={{ gridColumn: "1/-1", display: "flex", gap: "8px" }}>
+                    <button onClick={saveEdit} className="admin-red-btn" style={{ background: "var(--rd-red)", color: "#fff", border: "none", borderRadius: "8px", padding: "8px 18px", fontWeight: 700, cursor: "pointer" }}>Сохранить</button>
+                    <button onClick={() => { setEditingId(null); setEditForm(null); }} style={{ background: "var(--rd-gray-bg)", border: "1.5px solid var(--rd-gray-border)", borderRadius: "8px", padding: "8px 18px", fontWeight: 700, cursor: "pointer" }}>Отмена</button>
                   </div>
                 </div>
-              </div>
-              <div style={{ display: "flex", gap: "6px" }}>
-                <button onClick={() => { setEditingId(deposit.id); setEditForm({ name: deposit.name, duration: String(deposit.duration), rate: String(deposit.rate), image: deposit.image || "" }); }} style={{ background: "var(--rd-gray-bg)", border: "1.5px solid var(--rd-gray-border)", borderRadius: "8px", padding: "8px 12px", cursor: "pointer", fontSize: "13px", fontWeight: 700 }}>✏️</button>
-                <button onClick={() => deleteDeposit(deposit.id)} style={{ background: "#fff0f0", border: "1.5px solid #fecaca", borderRadius: "8px", padding: "8px 12px", cursor: "pointer", fontSize: "13px", color: "var(--rd-red)", fontWeight: 700 }}>🗑️</button>
+              ) : (
+                <div style={{ display: "flex", gap: "14px", alignItems: "flex-start" }}>
+                  {deposit.image ? <img src={deposit.image} alt="" style={{ width: "70px", height: "70px", objectFit: "cover", borderRadius: "10px", flexShrink: 0 }} /> : <div style={{ width: "56px", height: "40px", background: "var(--rd-gray-bg)", borderRadius: "6px", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "20px" }}>🏦</div>}
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontWeight: 700, fontSize: "15px" }}>{deposit.name}</div>
+                    <div style={{ fontSize: "13px", color: "var(--rd-gray-text)", marginTop: "4px" }}>
+                      📅 {deposit.duration} дней · 📈 {deposit.rate}% годовых
+                    </div>
+                  </div>
+                  <div style={{ display: "flex", gap: "6px", flexShrink: 0 }}>
+                    <button onClick={() => { setEditingId(deposit.id); setEditForm({ name: deposit.name, duration: String(deposit.duration), rate: String(deposit.rate), image: deposit.image || "" }); }} style={{ background: "var(--rd-gray-bg)", border: "1.5px solid var(--rd-gray-border)", borderRadius: "8px", padding: "8px 12px", cursor: "pointer", fontSize: "13px", fontWeight: 700 }}>✏️</button>
+                    <button onClick={() => deleteDeposit(deposit.id)} style={{ background: "#fff0f0", border: "1.5px solid #fecaca", borderRadius: "8px", padding: "8px 12px", cursor: "pointer", fontSize: "13px", color: "var(--rd-red)", fontWeight: 700 }}>🗑️</button>
+                  </div>
+                </div>
+              )}
+            </div>
+          ))}
+          {filtered.length === 0 && <div style={{ color: "var(--rd-gray-text)", textAlign: "center", padding: "20px", fontSize: "14px" }}>Вкладов пока нет</div>}
+        </>
+      )}
+
+      {historyView && (
+        <div>
+          {filtered.length === 0 && <div style={{ color: "var(--rd-gray-text)", textAlign: "center", padding: "40px", fontSize: "14px" }}>Вкладов пока нет</div>}
+          {filtered.map(deposit => (
+            <div key={deposit.id} style={{ border: "1.5px solid var(--rd-gray-border)", borderRadius: "var(--rd-radius-sm)", padding: "16px", marginBottom: "12px", background: "#fff" }}>
+              <div style={{ display: "flex", gap: "14px", alignItems: "flex-start" }}>
+                {deposit.image ? <img src={deposit.image} alt="" style={{ width: "70px", height: "70px", objectFit: "cover", borderRadius: "10px", flexShrink: 0 }} /> : <div style={{ width: "56px", height: "40px", background: "var(--rd-gray-bg)", borderRadius: "6px", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "20px" }}>🏦</div>}
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontWeight: 700, fontSize: "15px" }}>{deposit.name}</div>
+                  <div style={{ fontSize: "13px", color: "var(--rd-gray-text)", marginTop: "4px" }}>📅 {deposit.duration} дней · 📈 {deposit.rate}% годовых</div>
+                  <div style={{ fontSize: "12px", color: "var(--rd-gray-text)", marginTop: "2px" }}>🕐 Создан: {new Date(deposit.createdAt).toLocaleString("ru-RU")}</div>
+                </div>
               </div>
             </div>
-          )}
+          ))}
         </div>
-      ))}
+      )}
     </div>
   );
 }

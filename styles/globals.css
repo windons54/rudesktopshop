@@ -324,6 +324,26 @@ body {
   transform: translateY(-1px);
 }
 .btn-primary:active { transform: translateY(0) scale(0.97); }
+/* Admin red buttons animation (matches store buttons) */
+.admin-red-btn {
+  transition: all 0.2s ease;
+  position: relative;
+  overflow: hidden;
+}
+.admin-red-btn::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, rgba(255,255,255,0.15) 0%, transparent 50%);
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+.admin-red-btn:hover {
+  box-shadow: 0 4px 16px rgba(199,22,24,0.3);
+  transform: translateY(-1px);
+}
+.admin-red-btn:hover::before { opacity: 1; }
+.admin-red-btn:active { transform: translateY(0) scale(0.97); }
 .btn-secondary {
   background: #fff;
   color: var(--rd-dark);
@@ -573,7 +593,7 @@ body {
   color: var(--rd-gray-text);
   background: var(--rd-gray-bg);
   padding: 3px 10px;
-  border-radius: 20px;
+  border-radius: var(--rd-radius-sm);
   margin-bottom: 12px;
 }
 .product-card .pc-name {
@@ -1620,7 +1640,7 @@ input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; }
   color: var(--rd-red);
   background: var(--rd-red-light);
   padding: 3px 10px;
-  border-radius: 20px;
+  border-radius: var(--rd-radius-sm);
   margin-bottom: 12px;
   border: 1.5px solid rgba(199,22,24,0.15);
 }
@@ -1762,7 +1782,7 @@ input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; }
   text-transform: uppercase;
   letter-spacing: 0.07em;
   padding: 4px 9px;
-  border-radius: 20px;
+  border-radius: var(--rd-radius-sm);
   line-height: 1;
   white-space: nowrap;
   box-shadow: 0 2px 6px rgba(0,0,0,0.15);
