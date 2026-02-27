@@ -4307,11 +4307,17 @@ function AdminPage({ users, saveUsers, orders, saveOrders, products, saveProduct
       )}
       {tab === "users" && (
         <div>
-          <div style={{marginBottom:"12px",display:"flex",alignItems:"center",gap:"10px",flexWrap:"wrap"}}>
-            <input className="form-input" style={{maxWidth:"220px"}} placeholder="Поиск по логину…" value={search} onChange={e => setSearch(e.target.value)} />
-            <button className="btn btn-primary btn-sm" onClick={() => setShowCreateUser(true)}>➕ Создать пользователя</button>
-            <div style={{display:"flex",gap:"6px"}}>
-              {[["all","Все пользователи"],["user","Пользователи"],["admin","Администраторы"]].map(([v,l]) => (
+          <div style={{marginBottom:"12px",display:"flex",alignItems:"center",gap:"8px",flexWrap:"wrap"}}>
+            <input className="form-input" style={{width:"180px",flexShrink:0}} placeholder="Поиск по логину…" value={search} onChange={e => setSearch(e.target.value)} />
+            <button className="btn btn-primary btn-sm" style={{flexShrink:0}} onClick={() => setShowCreateUser(true)}>➕ Создать</button>
+            <button className="btn btn-secondary btn-sm" style={{flexShrink:0}} onClick={exportUsersCSV}>⬇ CSV</button>
+            <button className="btn btn-secondary btn-sm" style={{flexShrink:0}} onClick={exportUsersXLSX}>⬇ XLSX</button>
+            <label className="btn btn-secondary btn-sm" style={{cursor:"pointer",position:"relative",flexShrink:0}}>
+              ⬆ Импорт
+              <input type="file" accept=".csv,.xlsx,.xls" style={{position:"absolute",inset:0,opacity:0,cursor:"pointer",width:"100%",height:"100%"}} onChange={handleUsersImport} />
+            </label>
+            <div style={{display:"flex",gap:"6px",marginLeft:"auto"}}>
+              {[["all","Все"],["user","Пользователи"],["admin","Администраторы"]].map(([v,l]) => (
                 <button key={v} onClick={() => setUserRoleFilter(v)}
                   style={{padding:"6px 14px",borderRadius:"var(--rd-radius-sm)",fontSize:"13px",fontWeight:700,cursor:"pointer",border:"1.5px solid",transition:"all 0.15s",
                     background:userRoleFilter===v?"var(--rd-green-light)":"#fff",
@@ -4320,14 +4326,6 @@ function AdminPage({ users, saveUsers, orders, saveOrders, products, saveProduct
                   {l}
                 </button>
               ))}
-            </div>
-            <div style={{marginLeft:"auto",display:"flex",gap:"8px",flexWrap:"wrap"}}>
-              <button className="btn btn-secondary btn-sm" onClick={exportUsersCSV}>⬇ CSV</button>
-              <button className="btn btn-secondary btn-sm" onClick={exportUsersXLSX}>⬇ XLSX</button>
-              <label className="btn btn-secondary btn-sm" style={{cursor:"pointer",position:"relative"}}>
-                ⬆ Импорт
-                <input type="file" accept=".csv,.xlsx,.xls" style={{position:"absolute",inset:0,opacity:0,cursor:"pointer",width:"100%",height:"100%"}} onChange={handleUsersImport} />
-              </label>
             </div>
           </div>
 
@@ -4524,7 +4522,7 @@ function AdminPage({ users, saveUsers, orders, saveOrders, products, saveProduct
       )}
 
       {tab === "import" && (
-        <div style={{maxWidth:"680px"}}>
+        <div>
           <div style={{background:"#fff",border:"1.5px solid var(--rd-gray-border)",borderRadius:"var(--rd-radius)",padding:"32px 28px",boxShadow:"var(--rd-shadow-md)",marginBottom:"20px"}}>
             <div style={{fontSize:"11px",fontWeight:700,textTransform:"uppercase",letterSpacing:"0.07em",color:"var(--rd-gray-text)",marginBottom:"16px",paddingBottom:"10px",borderBottom:"1px solid var(--rd-gray-border)"}}>Загрузка файла</div>
             <p style={{fontSize:"14px",color:"var(--rd-gray-text)",marginBottom:"24px",lineHeight:1.6}}>
@@ -4582,7 +4580,7 @@ function AdminPage({ users, saveUsers, orders, saveOrders, products, saveProduct
       )}
 
       {tab === "export" && (
-        <div style={{maxWidth:"680px"}}>
+        <div>
           <div style={{background:"#fff",border:"1.5px solid var(--rd-gray-border)",borderRadius:"var(--rd-radius)",padding:"32px 28px",boxShadow:"var(--rd-shadow-md)",marginBottom:"20px"}}>
             <div style={{fontSize:"11px",fontWeight:700,textTransform:"uppercase",letterSpacing:"0.07em",color:"var(--rd-gray-text)",marginBottom:"16px",paddingBottom:"10px",borderBottom:"1px solid var(--rd-gray-border)"}}>Экспорт каталога</div>
             <p style={{fontSize:"14px",color:"var(--rd-gray-text)",marginBottom:"28px",lineHeight:1.6}}>
@@ -5732,7 +5730,7 @@ function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbC
 
 
           {tab === "socials" && (
-            <div style={{maxWidth:"560px"}}>
+            <div>
               <div className="settings-card">
                 <div className="settings-section-title">🌐 Ссылки на социальные сети</div>
                 <p style={{fontSize:"13px",color:"var(--rd-gray-text)",marginBottom:"24px",lineHeight:1.6}}>
@@ -5867,7 +5865,7 @@ function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbC
               .sort((a, b) => a.diff - b.diff);
 
             return (
-              <div style={{maxWidth:"600px"}}>
+              <div>
                 {/* Enable toggle */}
                 <div className="settings-card" style={{marginBottom:"16px"}}>
                   <div className="settings-section-title">🎂 Автоначисление в день рождения</div>
