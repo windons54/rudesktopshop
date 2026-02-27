@@ -1,3 +1,53 @@
+/* ======= STOLZL FONTS ======= */
+@font-face {
+  font-family: 'Stolzl';
+  src: url('/fonts/stolzl_thin.woff') format('woff'),
+       url('/fonts/stolzl_thin.ttf') format('truetype');
+  font-weight: 100;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Stolzl';
+  src: url('/fonts/stolzl_light.woff') format('woff'),
+       url('/fonts/stolzl_light.ttf') format('truetype');
+  font-weight: 300;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Stolzl';
+  src: url('/fonts/stolzl_regular.woff') format('woff'),
+       url('/fonts/stolzl_regular.ttf') format('truetype');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Stolzl';
+  src: url('/fonts/stolzl_book.woff') format('woff'),
+       url('/fonts/stolzl_book.ttf') format('truetype');
+  font-weight: 450;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Stolzl';
+  src: url('/fonts/stolzl_medium.woff') format('woff'),
+       url('/fonts/stolzl_medium.ttf') format('truetype');
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Stolzl';
+  src: url('/fonts/stolzl_bold.woff') format('woff'),
+       url('/fonts/stolzl_bold.ttf') format('truetype');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
 /* ======= CSS VARIABLES (from order-v2_81.html) ======= */
 :root {
   --rd-red: #c71618;
@@ -27,7 +77,7 @@
 
 body {
   background: var(--rd-gray-bg);
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Inter', sans-serif;
+  font-family: 'Stolzl', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   color: var(--rd-dark);
   font-size: 15px;
   line-height: 1.6;
@@ -978,7 +1028,7 @@ input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; }
 
 /* ======= AUCTION ======= */
 @keyframes pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:0.5;transform:scale(0.8)} }
-.auction-page { padding: 40px 0 80px; }
+.auction-page { padding: 40px 0 80px; max-width: 1152px; }
 .auction-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 24px; }
 .auction-card {
   background: #fff;
