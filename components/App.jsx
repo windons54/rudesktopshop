@@ -8041,7 +8041,7 @@ function TransferPage({ currentUser, users, saveUsers, transfers, saveTransfers,
         </div>
 
         <div className="form-field">
-          <label className="form-label">Сумма ({cName})</label>
+          <label className="form-label">Сумма (<span style={{textTransform:"none"}}>{cName}</span>)</label>
           <input
             className="form-input"
             type="number"
