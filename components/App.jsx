@@ -126,6 +126,8 @@ const _cache = {};
 let _cacheReady = false;
 let _readyCallbacks = [];
 let _cacheVersion = 0; // версия данных в кэше — не перезаписываем старыми данными
+// Последняя известная версия данных — на уровне модуля чтобы daily_grants мог её обновить
+let _lastKnownVersion = null;
 
 function _applyData(data, version) {
   // Если версия меньше текущей — данные устарели, не перезаписываем
@@ -689,6 +691,11 @@ function App() {
 
       // Начисления (трудодни + дни рождения) — выполняются на сервере атомарно
       _apiCall('daily_grants').then(r => {
+        // ИСПРАВЛЕНИЕ: обновляем _lastKnownVersion после daily_grants.
+        // daily_grants вызывает bumpVersion на сервере (set cm_workday_grant),
+        // из-за чего polling через 3 секунды видел новую версию и делал лишний getAll.
+        // Теперь синхронизируем версию сразу — polling не будет делать лишний запрос.
+        if (r.ok && r.version) _lastKnownVersion = r.version;
         if (r.ok && r.users && (r.grants.workday > 0 || r.grants.birthday > 0)) {
           _cache['cm_users'] = r.users;
           setUsers(prev => {
@@ -785,7 +792,7 @@ function App() {
     };
 
     // Polling с проверкой версии — не тянем данные если ничего не изменилось
-    let _lastKnownVersion = _initVersion;
+    _lastKnownVersion = _initVersion; // синхронизируем с модульной переменной
     let _pollActive = true;
     const handleVisChange = () => { _pollActive = !document.hidden; };
     document.addEventListener('visibilitychange', handleVisChange);

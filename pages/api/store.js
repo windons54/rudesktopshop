@@ -532,7 +532,7 @@ export default async function handler(req, res) {
         await store.set('cm_users', updatedUsers);
       }
 
-      return res.json({ ok: true, grants, users: updatedUsers });
+      return res.json({ ok: true, grants, users: updatedUsers, version: g._dataVersion });
     } catch (e) {
       console.error('[daily_grants]', e);
       return res.json({ ok: false, error: e.message });
