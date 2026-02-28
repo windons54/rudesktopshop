@@ -2,23 +2,15 @@
 // Запускается Next.js один раз при старте сервера (до обработки первого запроса).
 // Прогреваем пул PostgreSQL заранее — чтобы первый запрос пользователя не ждал
 // установки TCP-соединения с БД (устраняет задержку ~3 сек при обновлении страницы).
-//
-// ВАЖНО: этот файл выполняется ТОЛЬКО на сервере (Node.js runtime).
-// Webpack не должен его бандлить для клиента — это обеспечивается проверкой
-// NEXT_RUNTIME и тем что pg импортируется только внутри async-функции register().
 
 export async function register() {
-  // Выполняем только в Node.js runtime, не в edge
-  if (process.env.NEXT_RUNTIME === 'edge') return;
-  // Дополнительная защита: не запускаем в браузере
-  if (typeof window !== 'undefined') return;
+  // Выполняем ТОЛЬКО в Node.js runtime — это ключевое условие,
+  // которое не даёт webpack включить серверные модули в клиентский бандл
+  if (process.env.NEXT_RUNTIME !== 'nodejs') return;
 
-  // Небольшая задержка чтобы сервер успел стартовать полностью
   await new Promise(r => setTimeout(r, 300));
 
   try {
-    // Все серверные импорты — строго внутри функции, чтобы webpack
-    // не включал их в клиентский бандл
     const { default: fs }   = await import('fs');
     const { default: path } = await import('path');
 
@@ -26,7 +18,6 @@ export async function register() {
     const PG_CFG_FILE = path.join(DATA_DIR, 'pg-config.json');
     const PG_ENV_FILE = path.join(DATA_DIR, 'pg-env.json');
 
-    // Читаем конфиг подключения (тот же порядок что и в store.js)
     let cfg = null;
     if (process.env.DATABASE_URL) {
       cfg = { connectionString: process.env.DATABASE_URL };
@@ -95,13 +86,11 @@ export async function register() {
       }
     });
 
-    // Прогрев: устанавливаем соединение и создаём таблицу
     await pool.query('SELECT 1');
     await pool.query(`CREATE TABLE IF NOT EXISTS kv (
       key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TIMESTAMPTZ DEFAULT NOW()
     )`);
 
-    // Сохраняем в globalThis — store.js найдёт готовый пул и не будет создавать новый
     globalThis._pgPool       = pool;
     globalThis._pgPoolKey    = cfgKey;
     globalThis._pgReady      = true;
@@ -112,6 +101,5 @@ export async function register() {
     console.warn('[instrumentation] PostgreSQL пул прогрет успешно ✓');
   } catch (e) {
     console.error('[instrumentation] Не удалось прогреть пул PostgreSQL:', e.message);
-    // Не критично — store.js создаст пул при первом запросе
   }
 }
