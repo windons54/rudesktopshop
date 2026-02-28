@@ -477,7 +477,7 @@ function applyTheme(themeKey, customColors = {}) {
   if (customColors.shopTextColor) { r.setProperty("--rd-shop-text", customColors.shopTextColor); } else { r.removeProperty("--rd-shop-text"); }
 }
 
-function App() {
+function App({ initialData, initialVersion }) {
   const [users, setUsers] = useState({});
   const [customProducts, setCustomProducts] = useState(null);
   const [customCategories, setCustomCategories] = useState(null);
@@ -576,7 +576,7 @@ function App() {
       .then(r => { if (r.ok && r.config) savePgConfigState(r.config); })
       .catch(() => {});
 
-    // Загружаем данные с сервера в фоне — страница рендерится сразу
+    // initStore обновит данные свежей версией (в фоне, пользователь уже видит контент)
     initStore().then((dataLoaded) => {
       // КРИТИЧНО: если PG недоступен при старте — данные не загружены.
       // НЕ трогаем state пустыми данными. Polling подгрузит всё как только БД поднимется.
@@ -865,6 +865,14 @@ function App() {
         applyAll(r);
       } catch(e) { /* ignore */ }
     };
+
+    // ИСПРАВЛЕНИЕ: применяем initialData из SSR сразу после определения _applyServerData.
+    // Данные уже пришли в HTML — не нужно ждать initStore/polling.
+    if (initialData && typeof initialData === 'object' && Object.keys(initialData).length > 0) {
+      console.log('[App] Применяем initialData из SSR. Ключей:', Object.keys(initialData).length);
+      _applyData(initialData, initialVersion || null);
+      _applyServerData(initialData);
+    }
 
     // Первый poll — сразу после монтирования
     runPoll();
