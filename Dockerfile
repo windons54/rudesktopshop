@@ -4,7 +4,8 @@ WORKDIR /app
 
 # Зависимости
 COPY package.json package-lock.json* ./
-COPY prisma ./prisma/
+RUN mkdir -p ./prisma
+COPY prisma* ./prisma/
 RUN npm install
 
 # Исходники
