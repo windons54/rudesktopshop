@@ -114,7 +114,7 @@ function deduplicatedFetch(action, body = {}) {
 async function _apiCall(action, body = {}) {
   const res = await fetch('/api/store', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', 'Accept-Encoding': 'gzip' },
     body: JSON.stringify({ action, ...body }),
     keepalive: action === 'version',
   });
@@ -806,13 +806,19 @@ function App({ initialData, initialVersion }) {
     const fetchAll = async () => {
       const res = await fetch('/api/store', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'getAll' }),
+        headers: { 'Content-Type': 'application/json', 'Accept-Encoding': 'gzip' },
+        // Передаём текущую версию — сервер вернёт 304 если данные не изменились (экономим трафик)
+        body: JSON.stringify({ action: 'getAll', clientVersion: _lastKnownVersion }),
       });
+      if (res.status === 304) {
+        // Данные не изменились — ничего не делаем
+        return { ok: true, notModified: true };
+      }
       return res.json();
     };
 
     const applyAll = (r) => {
+      if (r.notModified) return true; // 304 — данные актуальны, ничего не делаем
       if (r.ok && r.data) {
         const newVer = r.version || null;
         if (newVer) _lastKnownVersion = newVer;

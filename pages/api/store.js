@@ -4,6 +4,30 @@
 
 import fs from 'fs';
 import path from 'path';
+import zlib from 'zlib';
+
+// Отправляет JSON с gzip-сжатием если клиент поддерживает (режет 1.9MB → ~200KB)
+function sendCompressed(req, res, payload) {
+  const json = JSON.stringify(payload);
+  const acceptEncoding = req.headers?.['accept-encoding'] || '';
+  if (acceptEncoding.includes('gzip')) {
+    const buf = Buffer.from(json, 'utf8');
+    zlib.gzip(buf, { level: 6 }, (err, compressed) => {
+      if (err) {
+        res.setHeader('Content-Type', 'application/json');
+        res.end(json);
+        return;
+      }
+      res.setHeader('Content-Type', 'application/json');
+      res.setHeader('Content-Encoding', 'gzip');
+      res.setHeader('Vary', 'Accept-Encoding');
+      res.end(compressed);
+    });
+  } else {
+    res.setHeader('Content-Type', 'application/json');
+    res.end(json);
+  }
+}
 
 const DATA_DIR    = path.join(process.cwd(), 'data');
 const STORE_FILE  = path.join(DATA_DIR, 'store.json');
@@ -260,7 +284,7 @@ const bumpVersion = () => { g._dataVersion = Date.now(); g._allCache = null; g._
 // Кэш избегает 20 одинаковых запросов к БД в секунду
 if (!g._allCache) g._allCache = null;
 if (!g._allCacheExpiry) g._allCacheExpiry = 0;
-const ALL_CACHE_TTL = 1000; // 1 секунда
+const ALL_CACHE_TTL = 30000; // 30 секунд — при обновлении страницы почти всегда попадём в кэш
 
 // ── Утилиты ────────────────────────────────────────────────────────────────
 const serialize   = v => typeof v === 'string' ? v : JSON.stringify(v);
@@ -584,13 +608,24 @@ export default async function handler(req, res) {
       if (action === 'delete')  { await pgKv.delete(pool, key); return res.json({ ok: true }); }
       if (action === 'getAll') {
         const now = Date.now();
+
+        // ETag-проверка: если клиент уже имеет актуальную версию — отвечаем 304 без тела
+        const clientVersion = req.body?.clientVersion || null;
+        if (clientVersion && clientVersion === g._dataVersion && g._allCache) {
+          res.setHeader('Cache-Control', 'no-store');
+          return res.status(304).json({ ok: true, notModified: true, version: g._dataVersion });
+        }
+
+        // Серверный кэш — не дёргаем БД при каждом запросе
         if (g._allCache && now < g._allCacheExpiry) {
-          return res.json({ ok: true, data: g._allCache, version: g._dataVersion });
+          const payload = { ok: true, data: g._allCache, version: g._dataVersion };
+          return sendCompressed(req, res, payload);
         }
         const data = await pgKv.getAll(pool);
         g._allCache = data;
         g._allCacheExpiry = now + ALL_CACHE_TTL;
-        return res.json({ ok: true, data, version: g._dataVersion });
+        const payload = { ok: true, data, version: g._dataVersion };
+        return sendCompressed(req, res, payload);
       }
       if (action === 'setMany') { await pgKv.setMany(pool, data); return res.json({ ok: true }); }
     } else {
