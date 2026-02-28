@@ -1,18 +1,26 @@
 // instrumentation.js
 // Запускается Next.js один раз при старте сервера (до обработки первого запроса).
 // Прогреваем пул PostgreSQL заранее — чтобы первый запрос пользователя не ждал
-// установки TCP-соединения с БД (устраняет задержку 1-3 сек при обновлении страницы).
+// установки TCP-соединения с БД (устраняет задержку ~3 сек при обновлении страницы).
+//
+// ВАЖНО: этот файл выполняется ТОЛЬКО на сервере (Node.js runtime).
+// Webpack не должен его бандлить для клиента — это обеспечивается проверкой
+// NEXT_RUNTIME и тем что pg импортируется только внутри async-функции register().
 
 export async function register() {
-  // Запускаем только на сервере, не в edge runtime
+  // Выполняем только в Node.js runtime, не в edge
   if (process.env.NEXT_RUNTIME === 'edge') return;
+  // Дополнительная защита: не запускаем в браузере
+  if (typeof window !== 'undefined') return;
 
   // Небольшая задержка чтобы сервер успел стартовать полностью
-  await new Promise(r => setTimeout(r, 500));
+  await new Promise(r => setTimeout(r, 300));
 
   try {
-    const fs = await import('fs');
-    const path = await import('path');
+    // Все серверные импорты — строго внутри функции, чтобы webpack
+    // не включал их в клиентский бандл
+    const { default: fs }   = await import('fs');
+    const { default: path } = await import('path');
 
     const DATA_DIR    = path.join(process.cwd(), 'data');
     const PG_CFG_FILE = path.join(DATA_DIR, 'pg-config.json');
@@ -47,8 +55,6 @@ export async function register() {
       return;
     }
 
-    // Прогреваем пул: создаём соединение заранее и сохраняем в globalThis
-    // чтобы store.js переиспользовал его без пересоздания
     const { Pool } = await import('pg');
     const { source, ...poolCfg } = cfg;
 
@@ -80,7 +86,8 @@ export async function register() {
 
     pool.on('error', (err) => {
       console.error('[PG Pool] Ошибка idle-клиента:', err.message);
-      const fatal = err.code === 'ECONNREFUSED' || err.code === 'ENOTFOUND' || err.message?.includes('Connection terminated unexpectedly');
+      const fatal = err.code === 'ECONNREFUSED' || err.code === 'ENOTFOUND'
+        || err.message?.includes('Connection terminated unexpectedly');
       if (fatal && globalThis._pgPool === pool) {
         globalThis._pgReady = false;
         globalThis._pgPool = null;
@@ -88,19 +95,19 @@ export async function register() {
       }
     });
 
-    // Устанавливаем соединение и проверяем БД
+    // Прогрев: устанавливаем соединение и создаём таблицу
     await pool.query('SELECT 1');
     await pool.query(`CREATE TABLE IF NOT EXISTS kv (
       key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TIMESTAMPTZ DEFAULT NOW()
     )`);
 
     // Сохраняем в globalThis — store.js найдёт готовый пул и не будет создавать новый
-    globalThis._pgPool    = pool;
-    globalThis._pgPoolKey = cfgKey;
-    globalThis._pgReady   = true;
+    globalThis._pgPool       = pool;
+    globalThis._pgPoolKey    = cfgKey;
+    globalThis._pgReady      = true;
     globalThis._tableEnsured = true;
     if (poolCfg.connectionString) globalThis._savedConnStr = poolCfg.connectionString;
-    if (poolCfg.host) globalThis._savedPgCfg = { ...poolCfg };
+    if (poolCfg.host)             globalThis._savedPgCfg   = { ...poolCfg };
 
     console.warn('[instrumentation] PostgreSQL пул прогрет успешно ✓');
   } catch (e) {

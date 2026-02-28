@@ -76,12 +76,20 @@ const nextConfig = {
 
   webpack: (config, { isServer }) => {
     if (!isServer) {
+      // Серверные Node.js модули не доступны в браузере.
+      // pg (и instrumentation.js) используют net/tls/dns — помечаем их как false
+      // чтобы webpack не пытался их збандлить для клиентской сборки.
       config.resolve.fallback = {
         ...config.resolve.fallback,
         fs: false,
         path: false,
         crypto: false,
         buffer: false,
+        net: false,
+        tls: false,
+        dns: false,
+        stream: false,
+        os: false,
       };
     }
     return config;
