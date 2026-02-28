@@ -1,5 +1,5 @@
 'use client';
-import React, { useState, useEffect, useMemo, useCallback, memo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback, memo } from 'react';
 import Head from 'next/head';
 // XLSX loaded lazily — only when import/export is used
 let _xlsxModule = null;
@@ -472,6 +472,7 @@ function App() {
   const [taskSubmissions, setTaskSubmissions] = useState([]);
   const [dbConfig, setDbConfig] = useState({ connected: false, dbSize: 0, rowCounts: {} });
   const [dataReady, setDataReady] = useState(false); // true когда данные из БД загружены
+  const dataReadyRef = useRef(false);
   // pgConfig живёт на сервере, здесь только для отображения статуса в UI
   const [pgConfig, setPgConfig] = useState(null);
   const [isPgActive, setIsPgActive] = useState(false);
@@ -636,7 +637,7 @@ function App() {
       setUsers(base);
 
       setDbConfig({ connected: true, dbSize: Object.keys(storage.all()).length, rowCounts: getSQLiteStats() });
-      setDataReady(true);
+      setDataReady(true); dataReadyRef.current = true;
 
       // Восстанавливаем сессию — устанавливаем сразу, не проверяем наличие в base
       // (пользователь мог быть создан позже, данные придут через polling)
@@ -677,7 +678,7 @@ function App() {
     const _applyServerData = (data) => {
       if (!data) return;
       // Помечаем данные как загруженные (важно если initStore не смог загрузить при старте)
-      setDataReady(true);
+      setDataReady(true); dataReadyRef.current = true;
       // Защита: НЕ перезаписываем users пустым объектом если были данные
       if ('cm_users' in data) {
         const newUsers = data.cm_users;
@@ -747,18 +748,23 @@ function App() {
     const pollInterval = setInterval(async () => {
       if (!_pollActive) return; // не опрашиваем если вкладка скрыта
       try {
-        // Сначала проверяем версию (лёгкий запрос)
-        const vRes = await fetch('/api/store', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ action: 'version' }),
-        });
-        const vData = await vRes.json();
-        // Если PG временно недоступен — не обновляем данные, ждём восстановления
-        if (vData.pg_unavailable) return;
-        if (!vData.ok || vData.version === _lastKnownVersion) return; // данные не изменились
+        // Если данные ещё не загружены — пропускаем проверку версии, тянем сразу всё
+        const forceLoad = !dataReadyRef.current;
 
-        // Версия изменилась — тянем полные данные
+        if (!forceLoad) {
+          // Сначала проверяем версию (лёгкий запрос)
+          const vRes = await fetch('/api/store', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'version' }),
+          });
+          const vData = await vRes.json();
+          // Если PG временно недоступен — не обновляем данные, ждём восстановления
+          if (vData.pg_unavailable) return;
+          if (!vData.ok || vData.version === _lastKnownVersion) return; // данные не изменились
+        }
+
+        // Тянем полные данные
         const res = await fetch('/api/store', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -768,7 +774,7 @@ function App() {
         // Если PG недоступен или ответ не OK — не трогаем текущее состояние
         if (!r.ok || r.pg_unavailable) return;
         if (r.ok && r.data) {
-          const newVer = r.version || vData.version;
+          const newVer = r.version || Date.now();
           _lastKnownVersion = newVer;
           const filtered = {};
           // _applyData обновит кэш только если версия новее
