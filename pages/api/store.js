@@ -131,6 +131,12 @@ async function getPool() {
     return g._pgInitPromise;
   }
 
+  // Cooldown после ошибки: не пытаемся переподключиться чаще раза в 10 секунд
+  const now = Date.now();
+  if (g._pgLastError && g._pgPoolKey === cfgKey && (now - g._pgLastError) < 10000) {
+    return null;
+  }
+
   // Создаём новый пул
   g._pgPoolKey = cfgKey;
   g._pgReady = false;
@@ -174,6 +180,7 @@ async function getPool() {
       g._pgPool = null;
       g._pgReady = false;
       g._pgInitPromise = null;
+      g._pgLastError = Date.now();
       return null;
     }
   })();
@@ -525,6 +532,15 @@ export default async function handler(req, res) {
       }
       if (action === 'setMany') { await pgKv.setMany(pool, data); return res.json({ ok: true }); }
     } else {
+      // PG настроен но недоступен — сообщаем клиенту чтобы он не перезаписывал состояние
+      const pgCfgExists = !!readPgConfig();
+      if (pgCfgExists) {
+        if (action === 'getAll') return res.json({ ok: false, pg_unavailable: true, error: 'PostgreSQL временно недоступен' });
+        if (action === 'version') return res.json({ ok: true, version: g._dataVersion, pg_unavailable: true });
+        if (action === 'get')    return res.json({ ok: false, pg_unavailable: true, value: null });
+        if (action === 'set' || action === 'setMany' || action === 'delete')
+          return res.json({ ok: false, pg_unavailable: true, error: 'PostgreSQL временно недоступен' });
+      }
       if (action === 'get')     { const s = readJSON(); return res.json({ ok: true, value: s[key] !== undefined ? s[key] : null }); }
       if (action === 'getAll')  return res.json({ ok: true, data: readJSON(), version: g._dataVersion });
       if (action === 'set')     { await lock(() => { const s = readJSON(); s[key] = value; writeJSON(s); bumpVersion(); }); return res.json({ ok: true }); }

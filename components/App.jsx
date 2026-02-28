@@ -145,15 +145,28 @@ function _notifyReady() {
 let _initVersion = null;
 
 async function initStore() {
-  try {
+  const tryLoad = async () => {
     const timeout = new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 8000));
     const r = await Promise.race([_apiCall('getAll'), timeout]);
-    if (r.ok && r.data) {
+    return r;
+  };
+
+  let dataLoaded = false;
+  try {
+    let r = await tryLoad();
+    // Если PG временно недоступен — ждём и пробуем ещё раз (до 3 попыток)
+    for (let attempt = 0; !dataLoaded && r.pg_unavailable && attempt < 3; attempt++) {
+      await new Promise(res => setTimeout(res, 2000));
+      try { r = await tryLoad(); } catch { break; }
+    }
+    if (r.ok && r.data && !r.pg_unavailable) {
       _applyData(r.data, r.version || null);
       _initVersion = r.version || null;
+      dataLoaded = true;
     }
   } catch(e) { console.warn('Store init error', e); }
   _notifyReady();
+  return dataLoaded;
 }
 
 function whenStoreReady() {
@@ -523,7 +536,19 @@ function App() {
       .catch(() => {});
 
     // Загружаем данные с сервера в фоне — страница рендерится сразу
-    initStore().then(() => {
+    initStore().then((dataLoaded) => {
+      // КРИТИЧНО: если PG недоступен при старте — данные не загружены.
+      // НЕ трогаем state пустыми данными. Polling подгрузит всё как только БД поднимется.
+      if (!dataLoaded) {
+        console.warn('[Store] Данные не загружены при старте, ждём polling...');
+        const savedSession = _lsGet("cm_session");
+        if (savedSession && savedSession.user) {
+          // Устанавливаем currentUser сразу — НЕ ждём данных, иначе будет видимый логаут
+          setCurrentUser(savedSession.user);
+        }
+        return;
+      }
+
       const u  = storage.get("cm_users");
       const o  = storage.get("cm_orders");
       const cp = storage.get("cm_products");
@@ -589,43 +614,27 @@ function App() {
       const base = u || {};
       if (!base.admin) {
         base.admin = { username: "admin", password: "admin123", role: "admin", balance: 0, email: "admin@corp.ru", createdAt: Date.now() };
-        storage.set("cm_users", base); // записываем только если создали admin впервые
+        storage.set("cm_users", base);
       }
       setUsers(base);
-      // НЕ вызываем storage.set("cm_users") здесь — не затираем данные других браузеров!
 
       setDbConfig({ connected: true, dbSize: Object.keys(storage.all()).length, rowCounts: getSQLiteStats() });
 
-      // Восстанавливаем сессию из localStorage
+      // Восстанавливаем сессию — устанавливаем сразу, не проверяем наличие в base
+      // (пользователь мог быть создан позже, данные придут через polling)
       const savedSession = _lsGet("cm_session");
       if (savedSession && savedSession.user) {
-        // Восстанавливаем сессию если пользователь найден в базе
-        if (base[savedSession.user]) {
-          setCurrentUser(savedSession.user);
-        } else {
-          // Пользователь не найден — возможно данные ещё загружаются
-          // Устанавливаем таймер для повторной проверки
-          console.warn('[Session] Пользователь', savedSession.user, 'не найден в базе, попробуем позже');
-          setTimeout(() => {
-            const retryUsers = storage.get("cm_users");
-            if (retryUsers && retryUsers[savedSession.user]) {
-              setCurrentUser(savedSession.user);
-            }
-          }, 2000);
-        }
+        setCurrentUser(savedSession.user);
       }
 
       // Начисления (трудодни + дни рождения) — выполняются на сервере атомарно
       _apiCall('daily_grants').then(r => {
         if (r.ok && r.users && (r.grants.workday > 0 || r.grants.birthday > 0)) {
-          // Сервер сделал начисления — обновляем локальный кэш и UI
-          // Мержим а не заменяем, чтобы не потерять данные
           _cache['cm_users'] = r.users;
           setUsers(prev => {
             const merged = { ...prev };
             Object.keys(r.users).forEach(k => {
               merged[k] = { ...(merged[k] || {}), ...r.users[k] };
-              // Гарантируем что пароль не теряется
               if (!merged[k].password && prev[k]?.password) merged[k].password = prev[k].password;
             });
             return merged;
@@ -637,6 +646,9 @@ function App() {
 
     }).catch(err => {
       console.error('Store init failed', err);
+      // Даже при ошибке — восстанавливаем сессию, иначе будет логаут
+      const savedSession = _lsGet("cm_session");
+      if (savedSession && savedSession.user) setCurrentUser(savedSession.user);
     });
 
     const handleUnload = () => storage.flush();
@@ -720,6 +732,8 @@ function App() {
           body: JSON.stringify({ action: 'version' }),
         });
         const vData = await vRes.json();
+        // Если PG временно недоступен — не обновляем данные, ждём восстановления
+        if (vData.pg_unavailable) return;
         if (!vData.ok || vData.version === _lastKnownVersion) return; // данные не изменились
 
         // Версия изменилась — тянем полные данные
@@ -729,6 +743,8 @@ function App() {
           body: JSON.stringify({ action: 'getAll' }),
         });
         const r = await res.json();
+        // Если PG недоступен или ответ не OK — не трогаем текущее состояние
+        if (!r.ok || r.pg_unavailable) return;
         if (r.ok && r.data) {
           const newVer = r.version || vData.version;
           _lastKnownVersion = newVer;
@@ -2897,10 +2913,9 @@ function ShopPage({ products, allProducts, categories, filterCat, setFilterCat, 
         const allUsers = Object.entries(users || {});
         const nonAdminUsers = allUsers.filter(([, u]) => u.role !== "admin");
         const userCount = nonAdminUsers.length;
-        // Выпущено = текущие балансы всех не-админов + все не отменённые заказы
-        const totalBalances = nonAdminUsers.reduce((s, [, u]) => s + (u.balance || 0), 0);
-        const totalOrdersSpent = (orders || []).filter(o => o.status !== "Отменён").reduce((s, o) => s + (o.total || 0), 0);
-        const totalIssued = totalBalances + totalOrdersSpent;
+        // Выпущено = сумма всех балансов пользователей (не-admin)
+        const totalIssued = nonAdminUsers.reduce((s, [, u]) => s + (u.balance || 0), 0);
+        // Потрачено = сумма всех не отменённых заказов
         const totalSpent = (orders || []).filter(o => o.status !== "Отменён").reduce((s, o) => s + (o.total || 0), 0);
         const totalItems = (orders || []).filter(o => o.status !== "Отменён").reduce((s, o) => s + (o.items || []).reduce((ss, i) => ss + (i.qty || 1), 0), 0);
         const cName = getCurrName(currency);
