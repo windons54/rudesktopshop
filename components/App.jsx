@@ -1,5 +1,5 @@
 'use client';
-import React, { useState, useEffect, useRef, useMemo, useCallback, memo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, memo } from 'react';
 import Head from 'next/head';
 // XLSX loaded lazily — only when import/export is used
 let _xlsxModule = null;
@@ -472,7 +472,6 @@ function App() {
   const [taskSubmissions, setTaskSubmissions] = useState([]);
   const [dbConfig, setDbConfig] = useState({ connected: false, dbSize: 0, rowCounts: {} });
   const [dataReady, setDataReady] = useState(false); // true когда данные из БД загружены
-  const dataReadyRef = useRef(false);
   // pgConfig живёт на сервере, здесь только для отображения статуса в UI
   const [pgConfig, setPgConfig] = useState(null);
   const [isPgActive, setIsPgActive] = useState(false);
@@ -637,7 +636,7 @@ function App() {
       setUsers(base);
 
       setDbConfig({ connected: true, dbSize: Object.keys(storage.all()).length, rowCounts: getSQLiteStats() });
-      setDataReady(true); dataReadyRef.current = true;
+      setDataReady(true);
 
       // Восстанавливаем сессию — устанавливаем сразу, не проверяем наличие в base
       // (пользователь мог быть создан позже, данные придут через polling)
@@ -678,7 +677,7 @@ function App() {
     const _applyServerData = (data) => {
       if (!data) return;
       // Помечаем данные как загруженные (важно если initStore не смог загрузить при старте)
-      setDataReady(true); dataReadyRef.current = true;
+      setDataReady(true);
       // Защита: НЕ перезаписываем users пустым объектом если были данные
       if ('cm_users' in data) {
         const newUsers = data.cm_users;
@@ -748,23 +747,18 @@ function App() {
     const pollInterval = setInterval(async () => {
       if (!_pollActive) return; // не опрашиваем если вкладка скрыта
       try {
-        // Если данные ещё не загружены — пропускаем проверку версии, тянем сразу всё
-        const forceLoad = !dataReadyRef.current;
+        // Сначала проверяем версию (лёгкий запрос)
+        const vRes = await fetch('/api/store', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'version' }),
+        });
+        const vData = await vRes.json();
+        // Если PG временно недоступен — не обновляем данные, ждём восстановления
+        if (vData.pg_unavailable) return;
+        if (!vData.ok || vData.version === _lastKnownVersion) return; // данные не изменились
 
-        if (!forceLoad) {
-          // Сначала проверяем версию (лёгкий запрос)
-          const vRes = await fetch('/api/store', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ action: 'version' }),
-          });
-          const vData = await vRes.json();
-          // Если PG временно недоступен — не обновляем данные, ждём восстановления
-          if (vData.pg_unavailable) return;
-          if (!vData.ok || vData.version === _lastKnownVersion) return; // данные не изменились
-        }
-
-        // Тянем полные данные
+        // Версия изменилась — тянем полные данные
         const res = await fetch('/api/store', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -774,7 +768,7 @@ function App() {
         // Если PG недоступен или ответ не OK — не трогаем текущее состояние
         if (!r.ok || r.pg_unavailable) return;
         if (r.ok && r.data) {
-          const newVer = r.version || Date.now();
+          const newVer = r.version || vData.version;
           _lastKnownVersion = newVer;
           const filtered = {};
           // _applyData обновит кэш только если версия новее
@@ -2845,14 +2839,17 @@ function ShopPage({ products, allProducts, categories, filterCat, setFilterCat, 
                       <div style={{fontSize:"12px",color:"rgba(255,255,255,0.4)",marginTop:"2px"}}>Старт: {a.startPrice} {cName}</div>
                     </div>
                     {lastBid && (() => {
+                      const leaderUser = users && users[lastBid.user];
+                      const leaderName = leaderUser ? ((leaderUser.firstName || "") + " " + (leaderUser.lastName || "")).trim() || leaderUser.username || lastBid.user : lastBid.user;
+                      const leaderInitial = leaderUser?.firstName ? leaderUser.firstName[0].toUpperCase() : lastBid.user[0]?.toUpperCase();
                       return (
                         <div style={{background:"rgba(255,255,255,0.06)",border:"1.5px solid rgba(255,255,255,0.12)",borderRadius:"14px",padding:"14px 22px",flex:"1 1 180px",minWidth:"180px"}}>
                           <div style={{fontSize:"11px",color:"rgba(255,255,255,0.5)",textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:"6px"}}>Лидер аукциона</div>
                           <div style={{display:"flex",alignItems:"center",gap:"10px"}}>
                             <div style={{width:"36px",height:"36px",borderRadius:"50%",background:"linear-gradient(135deg,var(--rd-red),#ff6b6b)",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:800,color:"#fff",fontSize:"14px",flexShrink:0}}>
-                              {lastBid.user[0]?.toUpperCase()}
+                              {leaderInitial}
                             </div>
-                            <div style={{fontSize:"14px",fontWeight:700,color:"#fff",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",minWidth:0}}>{lastBid.user}</div>
+                            <div style={{fontSize:"14px",fontWeight:700,color:"#fff",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",minWidth:0}}>{leaderName}</div>
                           </div>
                         </div>
                       );

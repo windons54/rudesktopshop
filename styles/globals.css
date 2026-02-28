@@ -112,6 +112,9 @@ body {
 .rd-header:hover {
   box-shadow: var(--rd-shadow-md);
 }
+.rd-header > .container {
+  max-width: 1152px;
+}
 .rd-header-inner {
   display: flex;
   align-items: center;
@@ -174,7 +177,8 @@ body {
   display: flex;
   align-items: center;
   gap: 12px;
-  flex-shrink: 0;
+  flex-shrink: 1;
+  min-width: 0;
 }
 .balance-pill {
   display: inline-flex;
