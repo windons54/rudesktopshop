@@ -142,33 +142,58 @@ async function getPool() {
   g._pgReady = false;
 
   g._pgInitPromise = (async () => {
+    let newPool = null;
     try {
       const { Pool } = await import('pg');
-      if (g._pgPool) { try { await g._pgPool.end(); } catch {} }
+      if (g._pgPool) { try { await g._pgPool.end(); } catch {} g._pgPool = null; }
 
+      // ИСПРАВЛЕНИЕ: убран min:2 — постоянные idle-соединения убиваются сервером БД
+      // через 1-2 минуты бездействия, что приводит к падению сервера.
+      // Добавлены keepAlive для предотвращения тихого обрыва TCP-соединений.
       const opts = poolCfg.connectionString
         ? { connectionString: poolCfg.connectionString,
             ssl: { rejectUnauthorized: false },
-            max: 20, min: 2,
+            max: 20,
             connectionTimeoutMillis: 5000,
             idleTimeoutMillis: 30000,
-            allowExitOnIdle: false }
+            allowExitOnIdle: false,
+            keepAlive: true,
+            keepAliveInitialDelayMillis: 10000 }
         : { host: poolCfg.host, port: poolCfg.port || 5432,
             database: poolCfg.database, user: poolCfg.user, password: poolCfg.password,
             ssl: poolCfg.ssl ? { rejectUnauthorized: false } : false,
-            max: 20, min: 2,
+            max: 20,
             connectionTimeoutMillis: 5000,
             idleTimeoutMillis: 30000,
-            allowExitOnIdle: false };
+            allowExitOnIdle: false,
+            keepAlive: true,
+            keepAliveInitialDelayMillis: 10000 };
 
-      g._pgPool = new Pool(opts);
+      newPool = new Pool(opts);
+
+      // КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: обработчик ошибок idle-соединений.
+      // Без него Node.js выбрасывает необработанное исключение при обрыве соединения
+      // с БД (например, когда облачный PostgreSQL закрывает idle-подключения),
+      // что может привести к падению сервера.
+      newPool.on('error', (err) => {
+        console.error('[PG Pool] Ошибка idle-клиента:', err.message);
+        // Сбрасываем только если это наш текущий активный пул
+        if (g._pgPool === newPool) {
+          g._pgReady = false;
+          g._pgPool = null;
+          g._pgLastError = Date.now();
+        }
+      });
 
       // Один раз при старте: проверка + создание таблицы
-      await g._pgPool.query('SELECT 1');
-      await g._pgPool.query(`CREATE TABLE IF NOT EXISTS kv (
+      await newPool.query('SELECT 1');
+      await newPool.query(`CREATE TABLE IF NOT EXISTS kv (
         key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TIMESTAMPTZ DEFAULT NOW()
       )`);
 
+      // ИСПРАВЛЕНИЕ: g._pgPool устанавливается ПОСЛЕ успешной инициализации
+      // (раньше устанавливался до проверки, что приводило к утечке при ошибке)
+      g._pgPool = newPool;
       g._pgReady = true;
       g._pgInitPromise = null;
       // Кэшируем данные подключения для bootstrap после деплоя
@@ -176,7 +201,9 @@ async function getPool() {
       if (poolCfg.host) g._savedPgCfg = { ...poolCfg };
       return g._pgPool;
     } catch (e) {
-      console.error('[PG Pool] Ошибка:', e.message);
+      console.error('[PG Pool] Ошибка инициализации:', e.message);
+      // ИСПРАВЛЕНИЕ: закрываем pool при ошибке чтобы не было утечки соединений
+      if (newPool) { try { newPool.end(); } catch {} }
       g._pgPool = null;
       g._pgReady = false;
       g._pgInitPromise = null;

@@ -155,8 +155,9 @@ async function initStore() {
   try {
     let r = await tryLoad();
     console.log('[initStore] Первая попытка загрузки:', r.ok ? 'OK' : 'FAIL', r.pg_unavailable ? '(PG недоступен)' : '');
-    // Если PG временно недоступен — ждём и пробуем ещё раз (до 6 попыток, каждую секунду)
-    for (let attempt = 0; !dataLoaded && r.pg_unavailable && attempt < 6; attempt++) {
+    // ИСПРАВЛЕНИЕ: повторяем при ЛЮБОЙ ошибке (!r.ok), а не только при pg_unavailable.
+    // Раньше при ошибке подключения к БД (без флага pg_unavailable) повторов не было.
+    for (let attempt = 0; !dataLoaded && !r.ok && attempt < 6; attempt++) {
       console.log(`[initStore] Попытка ${attempt + 1}/6 переподключения...`);
       await new Promise(res => setTimeout(res, 1000));
       try { r = await tryLoad(); } catch { break; }
@@ -557,14 +558,16 @@ function App() {
       // НЕ трогаем state пустыми данными. Polling подгрузит всё как только БД поднимется.
       if (!dataLoaded) {
         console.warn('[Store] Данные не загружены при старте, ждём polling...');
-        // ВАЖНО: Всё равно устанавливаем dataReady=true чтобы страницы не зависали на "Загрузка..."
-        // Polling обновит данные когда БД станет доступна
-        setDataReady(true);
+        // Восстанавливаем сессию — пользователь должен остаться авторизованным
         const savedSession = _lsGet("cm_session");
         if (savedSession && savedSession.user) {
-          // Устанавливаем currentUser сразу — НЕ ждём данных, иначе будет видимый логаут
           setCurrentUser(savedSession.user);
         }
+        // ИСПРАВЛЕНИЕ: НЕ устанавливаем dataReady=true сразу с пустыми данными —
+        // это приводило к «сломанному» интерфейсу (авторизация есть, данных нет).
+        // _applyServerData из polling установит dataReady=true когда данные реально загрузятся.
+        // Fallback: если за 10 секунд polling так и не загрузил данные — показываем интерфейс.
+        setTimeout(() => setDataReady(true), 10000);
         return;
       }
 
@@ -1004,6 +1007,8 @@ ym(${integ.ymCounterId}, "init", { clickmap:true, trackLinks:true, accurateTrack
   const checkout = () => {
     if (!currentUser) { setPage("login"); return; }
     const user = users[currentUser];
+    // ИСПРАВЛЕНИЕ: защита от undefined когда данные ещё не загрузились из БД
+    if (!user) { notify("Данные пользователя ещё загружаются, подождите...", "err"); return; }
     if ((user.balance || 0) < cartTotal) { notify("Недостаточно " + currName() + "!", "err"); return; }
     const newUsers = { ...users, [currentUser]: { ...user, balance: user.balance - cartTotal } };
     const order = { id: Date.now(), user: currentUser, items: [...cart], total: cartTotal, date: new Date().toLocaleString("ru-RU"), status: "Обрабатывается" };
