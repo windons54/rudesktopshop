@@ -460,6 +460,7 @@ function App() {
   const [customProducts, setCustomProducts] = useState(null);
   const [customCategories, setCustomCategories] = useState(null);
   const [transfers, setTransfers] = useState([]);
+  const [totalIssued, setTotalIssued] = useState(0); // Накопленный счётчик выпущенных монет
   const [faq, setFaq] = useState([]);
   const [videos, setVideos] = useState([]);
   const [tasks, setTasks] = useState([]);
@@ -553,6 +554,7 @@ function App() {
       const o  = storage.get("cm_orders");
       const cp = storage.get("cm_products");
       const tr = storage.get("cm_transfers");
+      const ti = storage.get("cm_total_issued");
       const cc = storage.get("cm_categories");
       const fq = storage.get("cm_faq");
       const vd = storage.get("cm_videos");
@@ -568,6 +570,20 @@ function App() {
       if (o)  setOrders(o);
       if (cp) setCustomProducts(cp);
       if (tr) setTransfers(tr);
+      if (ti != null && ti > 0) {
+        setTotalIssued(ti);
+      } else if (tr && tr.length > 0) {
+        // Первичная инициализация: считаем из transfers все поступления к не-admin
+        const usersData = u || {};
+        const fromTransfers = tr.reduce((s, t) => {
+          const toIsUser = t.to && usersData[t.to] && usersData[t.to].role !== 'admin';
+          return s + (toIsUser ? (t.amount || 0) : 0);
+        }, 0);
+        if (fromTransfers > 0) {
+          setTotalIssued(fromTransfers);
+          storage.set("cm_total_issued", fromTransfers);
+        }
+      }
       if (cc) setCustomCategories(cc);
       if (tk) setTasks(tk);
       if (ts) setTaskSubmissions(ts);
@@ -639,6 +655,7 @@ function App() {
             });
             return merged;
           });
+          if (r.grants.totalCoins > 0) addIssued(r.grants.totalCoins);
           _lsSet('cm_workday_grant', new Date().toISOString().slice(0, 10));
           _lsSet('cm_birthday_grant', String(new Date().getFullYear()));
         }
@@ -691,6 +708,7 @@ function App() {
       if ('cm_orders'           in data) setOrders(data.cm_orders);
       if ('cm_products'         in data) setCustomProducts(data.cm_products);
       if ('cm_transfers'        in data) setTransfers(data.cm_transfers);
+      if ('cm_total_issued'     in data && data.cm_total_issued > 0) setTotalIssued(data.cm_total_issued);
       if ('cm_categories'       in data) setCustomCategories(data.cm_categories);
       if ('cm_faq'              in data) setFaq(data.cm_faq);
       if ('cm_videos'           in data) setVideos(data.cm_videos);
@@ -816,6 +834,15 @@ function App() {
   const saveOrders = useCallback((o) => { setOrders(o); storage.set("cm_orders", o); }, []);
   const saveProducts = useCallback((p) => { setCustomProducts(p); storage.set("cm_products", p); }, []);
   const saveTransfers = useCallback((t) => { setTransfers(t); storage.set("cm_transfers", t); }, []);
+  // Счётчик выпущенных монет — только растёт, никогда не уменьшается
+  const addIssued = useCallback((amount) => {
+    if (!amount || amount <= 0) return;
+    setTotalIssued(prev => {
+      const next = prev + amount;
+      storage.set("cm_total_issued", next);
+      return next;
+    });
+  }, []);
   const saveDbConfig = (db) => { setDbConfig(db); };
   const saveAppearance = (ap) => {
     if (ap.currency) _globalCurrency = { ...ap.currency };
@@ -1202,13 +1229,13 @@ ym(${integ.ymCounterId}, "init", { clickmap:true, trackLinks:true, accurateTrack
       })()}
 
       <main className="page-fade" style={{flex:1}}>
-        {page === "shop" && <ShopPage products={filtered} allProducts={activeProducts} categories={shopCategories} filterCat={filterCat} setFilterCat={setFilterCat} addToCart={addToCart} setPage={setPage} currentUser={currentUser} users={users} favorites={favorites} toggleFavorite={toggleFavorite} currency={appearance.currency} faq={faq} videos={videos} tasks={tasks} auctions={auctions} appearance={appearance} orders={orders} transfers={transfers} />}
+        {page === "shop" && <ShopPage products={filtered} allProducts={activeProducts} categories={shopCategories} filterCat={filterCat} setFilterCat={setFilterCat} addToCart={addToCart} setPage={setPage} currentUser={currentUser} users={users} favorites={favorites} toggleFavorite={toggleFavorite} currency={appearance.currency} faq={faq} videos={videos} tasks={tasks} auctions={auctions} appearance={appearance} orders={orders} transfers={transfers} totalIssued={totalIssued} />}
         {page === "faq" && <FaqPage faq={faq} />}
         {page === "auction" && appearance.features?.auction !== false && <AuctionPage auctions={auctions} saveAuctions={saveAuctions} currentUser={currentUser} users={users} saveUsers={saveUsers} notify={notify} currency={appearance.currency} appearance={appearance} />}
         {page === "auction" && appearance.features?.auction === false && <div className="empty-state"><div className="empty-state-icon">🔨</div><div className="empty-state-text">Раздел «Аукцион» недоступен</div></div>}
         {page === "lottery" && appearance.features?.lottery !== false && <LotteryPage lotteries={lotteries} currentUser={currentUser} currency={appearance.currency} appearance={appearance} />}
         {page === "lottery" && appearance.features?.lottery === false && <div className="empty-state"><div className="empty-state-icon">🎰</div><div className="empty-state-text">Раздел «Лотерея» недоступен</div></div>}
-        {page === "voting" && appearance.features?.voting !== false && <VotingPage polls={polls} savePolls={savePolls} currentUser={currentUser} users={users} saveUsers={saveUsers} notify={notify} currency={appearance.currency} appearance={appearance} />}
+        {page === "voting" && appearance.features?.voting !== false && <VotingPage polls={polls} savePolls={savePolls} currentUser={currentUser} users={users} saveUsers={saveUsers} notify={notify} currency={appearance.currency} appearance={appearance} addIssued={addIssued} />}
         {page === "voting" && appearance.features?.voting === false && <div className="empty-state"><div className="empty-state-icon">🗳️</div><div className="empty-state-text">Раздел «Голосования» недоступен</div></div>}
         {page === "bank" && appearance.features?.bank !== false && <BankPage deposits={deposits} userDeposits={userDeposits} saveUserDeposits={saveUserDeposits} currentUser={currentUser} users={users} saveUsers={saveUsers} notify={notify} currency={appearance.currency} appearance={appearance} />}
         {page === "bank" && appearance.features?.bank === false && <div className="empty-state"><div className="empty-state-icon">🏦</div><div className="empty-state-text">Раздел «Банк» недоступен</div></div>}
@@ -1222,7 +1249,7 @@ ym(${integ.ymCounterId}, "init", { clickmap:true, trackLinks:true, accurateTrack
         
         {page === "orders" && currentUser && <OrdersPage orders={orders.filter(o => o.user === currentUser)} currency={appearance.currency} />}
         {page === "transfer" && currentUser && <TransferPage currentUser={currentUser} users={users} saveUsers={saveUsers} transfers={transfers} saveTransfers={saveTransfers} notify={notify} setPage={setPage} currency={appearance.currency} />}
-        {page === "settings" && currentUser && <SettingsPage currentUser={currentUser} users={users} saveUsers={saveUsers} notify={notify} setPage={setPage} dbConfig={dbConfig} saveDbConfig={saveDbConfig} refreshDbConfig={refreshDbConfig} pgConfig={pgConfig} savePgConfig={savePgConfigState} isPgActive={isPgActive} isAdmin={isAdmin} orders={orders} saveOrders={saveOrders} products={allProducts} saveProducts={saveProducts} categories={allCategories} saveCategories={saveCategories} appearance={appearance} saveAppearance={saveAppearance} transfers={transfers} saveTransfers={saveTransfers} markOrdersSeen={markOrdersSeen} faq={faq} saveFaq={saveFaq} videos={videos} saveVideos={saveVideos} tasks={tasks} saveTasks={saveTasks} taskSubmissions={taskSubmissions} saveTaskSubmissions={saveTaskSubmissions} auctions={auctions} saveAuctions={saveAuctions} lotteries={lotteries} saveLotteries={saveLotteries} polls={polls} savePolls={savePolls} deposits={deposits} saveDeposits={saveDeposits} userDeposits={userDeposits} saveUserDeposits={saveUserDeposits} users={users} saveUsers={saveUsers} sqliteDisabled={sqliteDisabled} setSqliteDisabled={setSqliteDisabled} />}
+        {page === "settings" && currentUser && <SettingsPage currentUser={currentUser} users={users} saveUsers={saveUsers} notify={notify} setPage={setPage} dbConfig={dbConfig} saveDbConfig={saveDbConfig} refreshDbConfig={refreshDbConfig} pgConfig={pgConfig} savePgConfig={savePgConfigState} isPgActive={isPgActive} isAdmin={isAdmin} orders={orders} saveOrders={saveOrders} products={allProducts} saveProducts={saveProducts} categories={allCategories} saveCategories={saveCategories} appearance={appearance} saveAppearance={saveAppearance} transfers={transfers} saveTransfers={saveTransfers} markOrdersSeen={markOrdersSeen} faq={faq} saveFaq={saveFaq} videos={videos} saveVideos={saveVideos} tasks={tasks} saveTasks={saveTasks} taskSubmissions={taskSubmissions} saveTaskSubmissions={saveTaskSubmissions} auctions={auctions} saveAuctions={saveAuctions} lotteries={lotteries} saveLotteries={saveLotteries} polls={polls} savePolls={savePolls} deposits={deposits} saveDeposits={saveDeposits} userDeposits={userDeposits} saveUserDeposits={saveUserDeposits} users={users} saveUsers={saveUsers} sqliteDisabled={sqliteDisabled} setSqliteDisabled={setSqliteDisabled} addIssued={addIssued} />}
       </main>
 
       <footer className="rd-footer" style={appearance.footerBg ? {background: appearance.footerBg} : {}}>
@@ -1439,6 +1466,7 @@ function TasksPage({ tasks, currentUser, taskSubmissions, saveTaskSubmissions, n
       const sub = { id: Date.now(), taskId: task.id, taskTitle: task.title, user: currentUser, date: new Date().toLocaleString("ru-RU"), status: "approved", comment: `Квиз пройден: ${pct}% (${correct}/${total})`, reward: task.reward || 0 };
       saveTaskSubmissions([...(taskSubmissions || []), sub]);
       saveUsers({ ...users, [currentUser]: { ...users[currentUser], balance: (users[currentUser]?.balance || 0) + (task.reward || 0) } });
+      addIssued(task.reward || 0);
       notify(`🎉 Квиз пройден! +${task.reward} монет`);
     } else {
       const sub = { id: Date.now(), taskId: task.id, taskTitle: task.title, user: currentUser, date: new Date().toLocaleString("ru-RU"), status: "rejected", comment: `Квиз не пройден: ${pct}% (нужно ${task.quizPassPct || 80}%)`, reward: 0 };
@@ -1783,6 +1811,7 @@ function TasksAdminTab({ tasks, saveTasks, taskSubmissions, saveTaskSubmissions,
       if (currentUsers[sub.user]) {
         const updatedUsers = {...currentUsers, [sub.user]: {...currentUsers[sub.user], balance: (currentUsers[sub.user].balance || 0) + (sub.reward || 0)}};
         saveUsers(updatedUsers);
+        addIssued(sub.reward || 0);
         notify(`✅ ${sub.reward} монет начислено пользователю ${sub.user}`);
       } else {
         notify("Статус: Выполнено");
@@ -2619,7 +2648,7 @@ function FaqPage({ faq }) {
 
 // ── SHOP ──────────────────────────────────────────────────────────────────
 
-function ShopPage({ products, allProducts, categories, filterCat, setFilterCat, addToCart, setPage, currentUser, users, favorites, toggleFavorite, currency, faq, videos, tasks, auctions, appearance, orders, transfers }) {
+function ShopPage({ products, allProducts, categories, filterCat, setFilterCat, addToCart, setPage, currentUser, users, favorites, toggleFavorite, currency, faq, videos, tasks, auctions, appearance, orders, transfers, totalIssued }) {
   const cName = getCurrName(currency);
   const [modalProduct, setModalProduct] = useState(null);
   const [search, setSearch] = useState("");
@@ -2913,15 +2942,15 @@ function ShopPage({ products, allProducts, categories, filterCat, setFilterCat, 
         const allUsers = Object.entries(users || {});
         const nonAdminUsers = allUsers.filter(([, u]) => u.role !== "admin");
         const userCount = nonAdminUsers.length;
-        // Выпущено = сумма всех балансов пользователей (не-admin)
-        const totalIssued = nonAdminUsers.reduce((s, [, u]) => s + (u.balance || 0), 0);
         // Потрачено = сумма всех не отменённых заказов
         const totalSpent = (orders || []).filter(o => o.status !== "Отменён").reduce((s, o) => s + (o.total || 0), 0);
+        // Выпущено за всё время = cm_total_issued (только растёт, списания не учитываются)
+        const issuedVal = totalIssued || 0;
         const totalItems = (orders || []).filter(o => o.status !== "Отменён").reduce((s, o) => s + (o.items || []).reduce((ss, i) => ss + (i.qty || 1), 0), 0);
         const cName = getCurrName(currency);
         const fmt = (n) => n >= 1000000 ? (n/1000000).toFixed(1).replace(/\.0$/,"") + "M" : n >= 1000 ? (n/1000).toFixed(1).replace(/\.0$/,"") + "K" : String(n);
         const stats = [
-          { num: fmt(totalIssued), label: `Выпущено ${cName}` },
+          { num: fmt(issuedVal), label: `Выпущено ${cName}` },
           { num: fmt(totalSpent), label: `Потрачено ${cName}` },
           { num: fmt(totalItems), label: "Куплено товаров" },
           { num: fmt(userCount), label: "Пользователей" },
@@ -3510,7 +3539,7 @@ const EMOJIS = ["🛍️","👕","🧥","🧢","👟","🎒","☕","🍵","📓"
 
 
 // ── WORKDAYS TAB ─────────────────────────────────────────────────────────────
-function WorkdaysTab({ users, currentUser, notify, saveUsers, transfers, saveTransfers, appearance, saveAppearance }) {
+function WorkdaysTab({ users, currentUser, notify, saveUsers, transfers, saveTransfers, appearance, saveAppearance, addIssued }) {
   const workdaysCfg = (appearance.workdays) || {};
   const wdCurrName = getCurrName(appearance.currency);
   const [coinsPerDay, setCoinsPerDay] = useState(String(workdaysCfg.coinsPerDay || 10));
@@ -3578,6 +3607,9 @@ function WorkdaysTab({ users, currentUser, notify, saveUsers, transfers, saveTra
     if (count === 0) { notify("Нет пользователей для начисления (не указаны даты)", "err"); return; }
     saveUsers(updated);
     if (saveTransfers) saveTransfers(newTransfers);
+    // Подсчитываем итого начислено и обновляем счётчик
+    const totalAccrued = newTransfers.slice(-(count)).reduce((s, t) => s + (t.amount || 0), 0);
+    if (addIssued && totalAccrued > 0) addIssued(totalAccrued);
     notify("Трудодни начислены " + count + " пользователям ✓");
   };
 
@@ -3717,7 +3749,7 @@ function WorkdaysTab({ users, currentUser, notify, saveUsers, transfers, saveTra
   );
 }
 
-function BulkAccrualTab({ users, currentUser, notify, saveUsers, transfers, saveTransfers, appearance }) {
+function BulkAccrualTab({ users, currentUser, notify, saveUsers, transfers, saveTransfers, appearance, addIssued }) {
   const bulkCurrName = getCurrName(appearance?.currency);
   
   const allUsers = Object.entries(users).filter(([u]) => u !== currentUser);
@@ -3747,6 +3779,7 @@ function BulkAccrualTab({ users, currentUser, notify, saveUsers, transfers, save
     });
     saveUsers(updated);
     if (saveTransfers) saveTransfers(newTransfers);
+    if (addIssued) addIssued(amt * bulkSelected.size);
     notify(`Начислено ${amt} ${getCurrName()} для ${bulkSelected.size} пользователей ✓`);
     setBulkAmt(""); setBulkSelected(new Set(allUsers.map(([u]) => u)));
   };
@@ -4102,7 +4135,7 @@ function VideoAdminTab({ videos, saveVideos, notify }) {
   );
 }
 
-function AdminPage({ users, saveUsers, orders, saveOrders, products, saveProducts, categories, saveCategories, notify, setPage, currentUser, transfers, saveTransfers, activeTab, setActiveTab, faq, saveFaq, embedded }) {
+function AdminPage({ users, saveUsers, orders, saveOrders, products, saveProducts, categories, saveCategories, notify, setPage, currentUser, transfers, saveTransfers, activeTab, setActiveTab, faq, saveFaq, embedded, addIssued }) {
   const isAdmin = currentUser && users[currentUser]?.role === "admin";
   const cName = getCurrName();
   const [internalTab, setInternalTab] = useState("products");
@@ -4353,6 +4386,7 @@ function AdminPage({ users, saveUsers, orders, saveOrders, products, saveProduct
     const user = users[username];
     const newBal = sign > 0 ? (user.balance || 0) + amt : Math.max(0, (user.balance || 0) - amt);
     saveUsers({ ...users, [username]: { ...user, balance: newBal } });
+    if (sign > 0 && addIssued) addIssued(amt);
     setAmounts(prev => ({ ...prev, [username]: "" }));
     notify(sign > 0 ? `+${amt} ${getCurrName()} → ${username}` : `-${amt} ${getCurrName()} у ${username}`);
   };
@@ -5387,7 +5421,7 @@ function CurrencySettingsTab({ appearance, saveAppearance, notify }) {
   );
 }
 
-function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbConfig, refreshDbConfig, pgConfig, savePgConfig, isPgActive, isAdmin, orders, saveOrders, products, saveProducts, categories, saveCategories, appearance, saveAppearance, markOrdersSeen, transfers, saveTransfers, faq, saveFaq, videos, saveVideos, tasks, saveTasks, taskSubmissions, saveTaskSubmissions, auctions, saveAuctions, lotteries, saveLotteries, polls, savePolls, deposits, saveDeposits, userDeposits, saveUserDeposits, sqliteDisabled, setSqliteDisabled }) {
+function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbConfig, refreshDbConfig, pgConfig, savePgConfig, isPgActive, isAdmin, orders, saveOrders, products, saveProducts, categories, saveCategories, appearance, saveAppearance, markOrdersSeen, transfers, saveTransfers, faq, saveFaq, videos, saveVideos, tasks, saveTasks, taskSubmissions, saveTaskSubmissions, auctions, saveAuctions, lotteries, saveLotteries, polls, savePolls, deposits, saveDeposits, userDeposits, saveUserDeposits, sqliteDisabled, setSqliteDisabled, addIssued }) {
   const [tab, setTab] = useState("profile");
   const setTabSafe = (t) => { if (!isAdmin && t !== "profile") return; setTab(t); };
   const [adminTab, setAdminTab] = useState("products");
@@ -6253,6 +6287,7 @@ function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbC
               });
               if (count > 0) {
                 saveUsers(updated);
+                if (addIssued) addIssued(amount * count);
                 try { storage.set('cm_birthday_grant', String(nowBd.getFullYear())); } catch(e) {}
                 notify(`🎂 Начислено ${amount} ${getCurrName(appearance.currency)} для ${count} ${count === 1 ? "именинника" : count < 5 ? "именинников" : "именинников"}!`);
               } else {
@@ -6394,11 +6429,11 @@ function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbC
           })()}
 
           {tab === "currency" && currencySubTab === "currency_bulk" && isAdmin && (
-            <BulkAccrualTab users={users} currentUser={currentUser} notify={notify} saveUsers={saveUsers} transfers={transfers} saveTransfers={saveTransfers} appearance={appearance} />
+            <BulkAccrualTab users={users} currentUser={currentUser} notify={notify} saveUsers={saveUsers} transfers={transfers} saveTransfers={saveTransfers} appearance={appearance} addIssued={addIssued} />
           )}
 
           {tab === "currency" && currencySubTab === "currency_workdays" && isAdmin && (
-            <WorkdaysTab users={users} currentUser={currentUser} notify={notify} saveUsers={saveUsers} transfers={transfers} saveTransfers={saveTransfers} appearance={appearance} saveAppearance={saveAppearance} />
+            <WorkdaysTab users={users} currentUser={currentUser} notify={notify} saveUsers={saveUsers} transfers={transfers} saveTransfers={saveTransfers} appearance={appearance} saveAppearance={saveAppearance} addIssued={addIssued} />
           )}
 
           {tab === "integrations" && isAdmin && (
@@ -7059,6 +7094,7 @@ function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbC
                 transfers={transfers} saveTransfers={saveTransfers}
                 embedded={true} activeTab="users" setActiveTab={() => {}}
                 faq={faq} saveFaq={saveFaq}
+                addIssued={addIssued}
               />
             </div>
           )}
@@ -7074,6 +7110,7 @@ function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbC
                 transfers={transfers} saveTransfers={saveTransfers}
                 embedded={true} activeTab={adminTab} setActiveTab={setAdminTab}
                 faq={faq} saveFaq={saveFaq}
+                addIssued={addIssued}
               />
             </div>
           )}
@@ -7119,7 +7156,7 @@ function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbC
               <div style={{fontWeight:700,fontSize:"18px",color:"var(--rd-dark)",marginBottom:"20px",paddingBottom:"14px",borderBottom:"1.5px solid var(--rd-gray-border)"}}>
                 🎰 Управление лотереями
               </div>
-              <LotteryAdminTab lotteries={lotteries} saveLotteries={saveLotteries} notify={notify} users={users} saveUsers={saveUsers} appearance={appearance} />
+              <LotteryAdminTab lotteries={lotteries} saveLotteries={saveLotteries} notify={notify} users={users} saveUsers={saveUsers} appearance={appearance} addIssued={addIssued} />
             </div>
           )}
 
@@ -7303,7 +7340,7 @@ function LotteryCountdown({ endsAt, large }) {
   );
 }
 
-function LotteryAdminTab({ lotteries, saveLotteries, notify, users, saveUsers, appearance }) {
+function LotteryAdminTab({ lotteries, saveLotteries, notify, users, saveUsers, appearance, addIssued }) {
   const list = lotteries || [];
   const emptyForm = { name: "", image: "", coins: "", participants: "", endsAt: "" };
   const [form, setForm] = useState(emptyForm);
@@ -7340,6 +7377,7 @@ function LotteryAdminTab({ lotteries, saveLotteries, notify, users, saveUsers, a
     const newUsers = { ...users };
     winners.forEach(w => { newUsers[w] = { ...newUsers[w], balance: (newUsers[w].balance || 0) + prizePerWinner }; });
     saveUsers(newUsers);
+    if (addIssued) addIssued(lottery.coins);
     const winnerList = winners.map(w => ({ user: w, prize: prizePerWinner }));
     const updated = (currentList || list).map(l => l.id === lottery.id ? { ...l, status: "ended", winners: winnerList } : l);
     saveLotteries(updated);
@@ -7792,6 +7830,7 @@ function VotingAdminTab({ polls, savePolls, notify, users, saveUsers }) {
       const newUsers = { ...users };
       unique.forEach(u => { if (newUsers[u]) newUsers[u] = { ...newUsers[u], balance: (newUsers[u].balance || 0) + prizePerUser }; });
       saveUsers(newUsers);
+      if (addIssued) addIssued(prizePerUser * unique.length);
     }
     savePolls(list.map(p => p.id === poll.id ? { ...p, status: "ended", winnersAwarded: true, awardedUsers: unique, prizePerUser } : p));
     notify(`Монеты начислены ${unique.length} победителям (+${prizePerUser} 🪙)`);
@@ -7902,7 +7941,7 @@ function VotingAdminTab({ polls, savePolls, notify, users, saveUsers }) {
   );
 }
 
-function VotingPage({ polls, savePolls, currentUser, users, saveUsers, notify, currency, appearance }) {
+function VotingPage({ polls, savePolls, currentUser, users, saveUsers, notify, currency, appearance, addIssued }) {
   const list = polls || [];
   const now = Date.now();
   const active = list.filter(p => p.status === "active").sort((a, b) => a.endsAt - b.endsAt);
