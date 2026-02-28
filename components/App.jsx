@@ -154,9 +154,9 @@ async function initStore() {
   let dataLoaded = false;
   try {
     let r = await tryLoad();
-    // Если PG временно недоступен — ждём и пробуем ещё раз (до 3 попыток)
-    for (let attempt = 0; !dataLoaded && r.pg_unavailable && attempt < 3; attempt++) {
-      await new Promise(res => setTimeout(res, 2000));
+    // Если PG временно недоступен — ждём и пробуем ещё раз (до 6 попыток, каждую секунду)
+    for (let attempt = 0; !dataLoaded && r.pg_unavailable && attempt < 6; attempt++) {
+      await new Promise(res => setTimeout(res, 1000));
       try { r = await tryLoad(); } catch { break; }
     }
     if (r.ok && r.data && !r.pg_unavailable) {

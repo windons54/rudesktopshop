@@ -131,9 +131,9 @@ async function getPool() {
     return g._pgInitPromise;
   }
 
-  // Cooldown после ошибки: не пытаемся переподключиться чаще раза в 10 секунд
+  // Cooldown после ошибки: не пытаемся переподключиться чаще раза в 3 секунды
   const now = Date.now();
-  if (g._pgLastError && g._pgPoolKey === cfgKey && (now - g._pgLastError) < 10000) {
+  if (g._pgLastError && g._pgPoolKey === cfgKey && (now - g._pgLastError) < 3000) {
     return null;
   }
 
