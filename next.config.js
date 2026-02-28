@@ -41,6 +41,9 @@ const nextConfig = {
     instrumentationHook: true,
   },
 
+  // pg и другие Node.js пакеты НЕ должны бандлиться webpack-ом — только нативные require на сервере
+  serverExternalPackages: ['pg', 'pg-pool', 'pg-connection-string'],
+
   compress: true,
   poweredByHeader: false,
 
