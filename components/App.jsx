@@ -154,17 +154,31 @@ async function initStore() {
   let dataLoaded = false;
   try {
     let r = await tryLoad();
+    console.log('[initStore] Первая попытка загрузки:', r.ok ? 'OK' : 'FAIL', r.pg_unavailable ? '(PG недоступен)' : '');
     // Если PG временно недоступен — ждём и пробуем ещё раз (до 6 попыток, каждую секунду)
     for (let attempt = 0; !dataLoaded && r.pg_unavailable && attempt < 6; attempt++) {
+      console.log(`[initStore] Попытка ${attempt + 1}/6 переподключения...`);
       await new Promise(res => setTimeout(res, 1000));
       try { r = await tryLoad(); } catch { break; }
     }
-    if (r.ok && r.data && !r.pg_unavailable) {
+    // Загружаем данные если они есть (из PG или JSON fallback)
+    if (r.ok && r.data) {
       _applyData(r.data, r.version || null);
       _initVersion = r.version || null;
       dataLoaded = true;
+      console.log('[initStore] Данные загружены успешно. Ключей:', Object.keys(r.data).length);
     }
-  } catch(e) { console.warn('Store init error', e); }
+    // Даже если PG недоступен, могут быть данные из JSON fallback
+    else if (r.pg_unavailable && r.data) {
+      _applyData(r.data, null);
+      dataLoaded = true;
+      console.log('[initStore] Загружены данные из JSON fallback. Ключей:', Object.keys(r.data).length);
+    } else {
+      console.warn('[initStore] Не удалось загрузить данные');
+    }
+  } catch(e) { 
+    console.warn('Store init error', e); 
+  }
   _notifyReady();
   return dataLoaded;
 }
@@ -543,6 +557,9 @@ function App() {
       // НЕ трогаем state пустыми данными. Polling подгрузит всё как только БД поднимется.
       if (!dataLoaded) {
         console.warn('[Store] Данные не загружены при старте, ждём polling...');
+        // ВАЖНО: Всё равно устанавливаем dataReady=true чтобы страницы не зависали на "Загрузка..."
+        // Polling обновит данные когда БД станет доступна
+        setDataReady(true);
         const savedSession = _lsGet("cm_session");
         if (savedSession && savedSession.user) {
           // Устанавливаем currentUser сразу — НЕ ждём данных, иначе будет видимый логаут
@@ -665,7 +682,9 @@ function App() {
 
     }).catch(err => {
       console.error('Store init failed', err);
-      // Даже при ошибке — восстанавливаем сессию, иначе будет логаут
+      // Даже при ошибке — устанавливаем dataReady=true чтобы страницы не зависали
+      setDataReady(true);
+      // Восстанавливаем сессию, иначе будет логаут
       const savedSession = _lsGet("cm_session");
       if (savedSession && savedSession.user) setCurrentUser(savedSession.user);
     });
@@ -673,9 +692,10 @@ function App() {
     const handleUnload = () => storage.flush();
     window.addEventListener('beforeunload', handleUnload);
 
-    // ── Polling: обновляем данные с сервера каждые 4 секунды ──
+    // ── Polling: обновляем данные с сервера каждые 3 секунды ──
     const _applyServerData = (data) => {
       if (!data) return;
+      console.log('[Polling] Применяем данные с сервера:', Object.keys(data).join(', '));
       // Помечаем данные как загруженные (важно если initStore не смог загрузить при старте)
       setDataReady(true);
       // Защита: НЕ перезаписываем users пустым объектом если были данные
@@ -754,8 +774,25 @@ function App() {
           body: JSON.stringify({ action: 'version' }),
         });
         const vData = await vRes.json();
-        // Если PG временно недоступен — не обновляем данные, ждём восстановления
-        if (vData.pg_unavailable) return;
+        // Если PG временно недоступен — всё равно пробуем загрузить данные (может быть JSON fallback)
+        // но не обновляем версию (чтобы не пропустить обновления когда PG восстановится)
+        if (vData.pg_unavailable) {
+          // Пробуем загрузить из JSON fallback
+          const res = await fetch('/api/store', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'getAll' }),
+          });
+          const r = await res.json();
+          if (r.ok && r.data) {
+            const filtered = {};
+            Object.keys(r.data).forEach(k => {
+              if (!_pendingWrites.has(k)) filtered[k] = r.data[k];
+            });
+            _applyServerData(filtered);
+          }
+          return;
+        }
         if (!vData.ok || vData.version === _lastKnownVersion) return; // данные не изменились
 
         // Версия изменилась — тянем полные данные
@@ -779,7 +816,7 @@ function App() {
           _applyServerData(filtered);
         }
       } catch(e) { /* ignore */ }
-    }, 5000);
+    }, 3000); // Проверяем каждые 3 секунды для быстрого восстановления после обновлений
 
     return () => {
       clearInterval(pollInterval);
