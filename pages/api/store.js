@@ -109,6 +109,7 @@ async function tryBootstrapFromDb() {
 // поэтому globalThis._pgPool живёт между запросами.
 const g = globalThis;
 
+
 async function getPool() {
   // Если конфига нет — пробуем восстановить из БД (после git deploy)
   if (!readPgConfig()) {
@@ -236,6 +237,15 @@ async function getPool() {
   })();
 
   return g._pgInitPromise;
+}
+
+// Прогрев пула при первой загрузке модуля (серверный контекст).
+// Запускается один раз — заменяет instrumentation.js, который не собирается
+// webpack'ом корректно в Next.js 14 из-за статического анализа импортов.
+if (!g._pgWarmupStarted) {
+  g._pgWarmupStarted = true;
+  // setImmediate чтобы не блокировать загрузку модуля
+  setImmediate(() => { getPool().catch(() => {}); });
 }
 
 // ── Версия данных для polling (ETag) ───────────────────────────────────────
