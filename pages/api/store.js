@@ -311,7 +311,22 @@ const pgKv = {
   async getAll(pool) {
     const r = await pool.query(`SELECT key,value FROM kv WHERE key!=$1 ORDER BY key`, [PG_CFG_KEY]);
     const out = {};
-    r.rows.forEach(({ key, value }) => { out[key] = deserialize(value); });
+    r.rows.forEach(({ key, value }) => {
+      const parsed = deserialize(value);
+      // ОПТИМИЗАЦИЯ: вырезаем base64-картинки из cm_appearance при getAll.
+      // Они хранятся отдельно в cm_images и загружаются клиентом один раз через localStorage.
+      // Это режет cm_appearance с ~715KB до ~5KB.
+      if (key === 'cm_appearance' && parsed && typeof parsed === 'object') {
+        const slim = { ...parsed };
+        if (slim.logo && slim.logo.startsWith('data:')) slim.logo = '__stored__';
+        if (slim.banner && slim.banner.image && slim.banner.image.startsWith('data:')) slim.banner = { ...slim.banner, image: '__stored__' };
+        if (slim.currency && slim.currency.logo && slim.currency.logo.startsWith('data:')) slim.currency = { ...slim.currency, logo: '__stored__' };
+        if (slim.seo && slim.seo.favicon && slim.seo.favicon.startsWith('data:')) slim.seo = { ...slim.seo, favicon: '__stored__' };
+        out[key] = slim;
+      } else {
+        out[key] = parsed;
+      }
+    });
     return out;
   },
   async setMany(pool, data) {

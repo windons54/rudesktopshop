@@ -121,6 +121,53 @@ async function _apiCall(action, body = {}) {
   return res.json();
 }
 
+// ── Кэш изображений (logo, banner, favicon) ─────────────────────────────
+// Изображения хранятся отдельно в БД (cm_images) и кэшируются в localStorage.
+// При getAll сервер возвращает '__stored__' вместо base64 — так экономим ~700KB трафика.
+const IMAGES_LS_KEY = '_cm_images_cache';
+const IMAGES_VERSION_KEY = '_cm_images_version';
+
+function _loadImagesFromLS() {
+  try {
+    const raw = typeof localStorage !== 'undefined' ? localStorage.getItem(IMAGES_LS_KEY) : null;
+    if (raw) return JSON.parse(raw);
+  } catch {}
+  return {};
+}
+
+function _saveImagesToLS(images) {
+  try {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(IMAGES_LS_KEY, JSON.stringify(images));
+      localStorage.setItem(IMAGES_VERSION_KEY, String(Date.now()));
+    }
+  } catch {}
+}
+
+// Загружаем изображения с сервера и кэшируем в localStorage
+async function _fetchAndCacheImages() {
+  try {
+    const r = await fetch('/api/images', { method: 'GET' });
+    const data = await r.json();
+    if (data.ok && data.images) {
+      _saveImagesToLS(data.images);
+      return data.images;
+    }
+  } catch {}
+  return {};
+}
+
+// Восстанавливает '__stored__' поля в appearance из кэша изображений
+function _restoreImages(ap, images) {
+  if (!ap || !images) return ap;
+  const out = { ...ap };
+  if (out.logo === '__stored__') out.logo = images.logo || null;
+  if (out.banner?.image === '__stored__') out.banner = { ...out.banner, image: images.bannerImage || '' };
+  if (out.currency?.logo === '__stored__') out.currency = { ...out.currency, logo: images.currencyLogo || '' };
+  if (out.seo?.favicon === '__stored__') out.seo = { ...out.seo, favicon: images.favicon || '' };
+  return out;
+}
+
 // Кэш — синхронный слой, обновляется polling-ом
 const _cache = {};
 let _cacheReady = false;
@@ -576,6 +623,17 @@ function App({ initialData, initialVersion }) {
       .then(r => { if (r.ok && r.config) savePgConfigState(r.config); })
       .catch(() => {});
 
+    // Загружаем изображения в фоне — применяем к appearance если оно уже загружено
+    _fetchAndCacheImages().then(images => {
+      if (images && Object.keys(images).length > 0) {
+        const currentAp = storage.get('cm_appearance');
+        if (currentAp) {
+          const restored = _restoreImages(currentAp, images);
+          if (restored !== currentAp) setAppearance(prev => _restoreImages(prev, images));
+        }
+      }
+    });
+
     // initStore обновит данные свежей версией (в фоне, пользователь уже видит контент)
     initStore().then((dataLoaded) => {
       // КРИТИЧНО: если PG недоступен при старте — данные не загружены.
@@ -610,7 +668,7 @@ function App({ initialData, initialVersion }) {
       const pl = storage.get("cm_polls");
       const dp = storage.get("cm_deposits");
       const ud = storage.get("cm_user_deposits");
-      const ap = storage.get("cm_appearance");
+      const ap = _restoreImages(storage.get("cm_appearance"), _loadImagesFromLS());
 
       if (o)  setOrders(o);
       if (cp) setCustomProducts(cp);
@@ -776,7 +834,9 @@ function App({ initialData, initialVersion }) {
       if ('cm_deposits'         in data) setDeposits(data.cm_deposits);
       if ('cm_user_deposits'    in data) setUserDeposits(data.cm_user_deposits);
       if (data.cm_appearance) {
-        const ap = data.cm_appearance;
+        // Восстанавливаем изображения из localStorage-кэша (сервер отдаёт '__stored__' вместо base64)
+        const _cachedImgs = _loadImagesFromLS();
+        const ap = _restoreImages(data.cm_appearance, _cachedImgs);
         if (ap.currency) _globalCurrency = { ...ap.currency };
         setAppearance(prev => ({ ...prev, ...ap,
           socials:         { ...(prev.socials||{}),         ...(ap.socials||{}) },
@@ -953,7 +1013,20 @@ function App({ initialData, initialVersion }) {
   const saveDbConfig = (db) => { setDbConfig(db); };
   const saveAppearance = (ap) => {
     if (ap.currency) _globalCurrency = { ...ap.currency };
-    setAppearance(ap); storage.set("cm_appearance", ap); applyTheme(ap.theme, ap);
+    // Вынимаем base64-изображения в отдельный кэш, чтобы не раздувать cm_appearance (~700KB экономии)
+    const _imgs = _loadImagesFromLS();
+    let slimAp = { ...ap };
+    if (ap.logo && ap.logo.startsWith('data:')) { _imgs.logo = ap.logo; slimAp.logo = '__stored__'; }
+    else if (ap.logo && ap.logo !== '__stored__') _imgs.logo = null;
+    if (ap.banner?.image && ap.banner.image.startsWith('data:')) { _imgs.bannerImage = ap.banner.image; slimAp.banner = { ...ap.banner, image: '__stored__' }; }
+    if (ap.currency?.logo && ap.currency.logo.startsWith('data:')) { _imgs.currencyLogo = ap.currency.logo; slimAp.currency = { ...ap.currency, logo: '__stored__' }; }
+    if (ap.seo?.favicon && ap.seo.favicon.startsWith('data:')) { _imgs.favicon = ap.seo.favicon; slimAp.seo = { ...ap.seo, favicon: '__stored__' }; }
+    _saveImagesToLS(_imgs);
+    // Сохраняем изображения отдельно на сервер (не блокируем UI)
+    fetch('/api/images', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'set', images: _imgs }) }).catch(() => {});
+    setAppearance(ap); // В state держим полные данные с картинками для немедленного рендера
+    storage.set("cm_appearance", slimAp); // В БД сохраняем slim-версию без base64
+    applyTheme(ap.theme, ap);
     // Apply SEO immediately on save
     if (ap.seo) applySeo(ap.seo);
   };
