@@ -490,7 +490,16 @@ function App() {
   const [userDeposits, setUserDeposits] = useState([]); // Депозиты пользователей
   const [taskSubmissions, setTaskSubmissions] = useState([]);
   const [dbConfig, setDbConfig] = useState({ connected: false, dbSize: 0, rowCounts: {} });
-  const [dataReady, setDataReady] = useState(false); // true когда данные из БД загружены
+  const [dataReady, setDataReady] = useState(() => {
+    // Если сессия уже есть в localStorage — не блокируем интерфейс экраном «Загрузка данных...».
+    // Данные подгрузятся в фоне через initStore/polling и обновят state без перезагрузки страницы.
+    // Иначе показываем экран загрузки только для неавторизованных первичных посещений.
+    try {
+      const s = typeof localStorage !== 'undefined' ? localStorage.getItem('_store_cm_session') : null;
+      if (s) { const parsed = JSON.parse(s); if (parsed?.user) return true; }
+    } catch {}
+    return false;
+  }); // true когда данные из БД загружены
   // pgConfig живёт на сервере, здесь только для отображения статуса в UI
   const [pgConfig, setPgConfig] = useState(null);
   const [isPgActive, setIsPgActive] = useState(false);
@@ -520,7 +529,15 @@ function App() {
     return <span>{(appearance.currency && appearance.currency.icon) ? appearance.currency.icon : "🪙"}</span>;
   };
   const [appearance, setAppearance] = useState({ logo: null, theme: "default", headerBg: "", footerBg: "", pageBg: "", accentColor: "", shopTextColor: "", socials: { telegram: "", max: "", vk: "", rutube: "", vkvideo: "" }, birthdayBonus: 100, birthdayEnabled: true, integrations: { tgEnabled: false, tgBotToken: "", tgChatId: "", maxEnabled: false, maxBotToken: "", maxChatId: "" }, currency: { name: "RuDeCoin", icon: "🪙", logo: "" }, seo: { title: "", description: "", favicon: "" }, registrationEnabled: true, bitrix24: { enabled: false, clientId: "", clientSecret: "", portalUrl: "" }, features: { auction: true, lottery: true, voting: true, bank: true, tasks: true }, sectionSettings: { auction: { title: "Аукцион", description: "Делайте ставки и выигрывайте эксклюзивные товары", banner: "" }, lottery: { title: "Лотерея", description: "Участвуйте в розыгрышах и выигрывайте призы", banner: "" }, voting: { title: "Голосования", description: "Участвуйте в опросах и влияйте на решения", banner: "" }, bank: { title: "Банк", description: "Управляйте своими депозитами и получайте проценты", banner: "" }, tasks: { title: "Задания за монеты", description: "Выполняйте задания и получайте корпоративные монеты", banner: "" } } });
-  const [currentUser, setCurrentUser] = useState(null);
+  const [currentUser, setCurrentUser] = useState(() => {
+    // Восстанавливаем сессию МГНОВЕННО при монтировании — не ждём загрузки БД.
+    // Это предотвращает кратковременный выброс из аккаунта при обновлении страницы.
+    try {
+      const s = typeof localStorage !== 'undefined' ? localStorage.getItem('_store_cm_session') : null;
+      if (s) { const parsed = JSON.parse(s); return parsed?.user || null; }
+    } catch {}
+    return null;
+  });
   const [cart, setCart] = useState([]);
   const [orderSuccess, setOrderSuccess] = useState(false);
   const [page, setPage] = useState("shop");
@@ -771,20 +788,20 @@ function App() {
     let _pollActive = true;
     const handleVisChange = () => { _pollActive = !document.hidden; };
     document.addEventListener('visibilitychange', handleVisChange);
-    const pollInterval = setInterval(async () => {
-      if (!_pollActive) return; // не опрашиваем если вкладка скрыта
+
+    // ИСПРАВЛЕНИЕ: запускаем немедленный getAll при старте, не ждём первого интервала (3 сек).
+    // Это устраняет задержку подгрузки данных после обновления страницы для авторизованных
+    // пользователей у которых dataReady уже true (интерфейс видят сразу, данные придут быстро).
+    const runPoll = async () => {
+      if (!_pollActive) return;
       try {
-        // Сначала проверяем версию (лёгкий запрос)
         const vRes = await fetch('/api/store', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ action: 'version' }),
         });
         const vData = await vRes.json();
-        // Если PG временно недоступен — всё равно пробуем загрузить данные (может быть JSON fallback)
-        // но не обновляем версию (чтобы не пропустить обновления когда PG восстановится)
         if (vData.pg_unavailable) {
-          // Пробуем загрузить из JSON fallback
           const res = await fetch('/api/store', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -800,30 +817,29 @@ function App() {
           }
           return;
         }
-        if (!vData.ok || vData.version === _lastKnownVersion) return; // данные не изменились
-
-        // Версия изменилась — тянем полные данные
+        if (!vData.ok || vData.version === _lastKnownVersion) return;
         const res = await fetch('/api/store', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ action: 'getAll' }),
         });
         const r = await res.json();
-        // Если PG недоступен или ответ не OK — не трогаем текущее состояние
         if (!r.ok || r.pg_unavailable) return;
         if (r.ok && r.data) {
           const newVer = r.version || vData.version;
           _lastKnownVersion = newVer;
-          const filtered = {};
-          // _applyData обновит кэш только если версия новее
           _applyData(r.data, newVer);
+          const filtered = {};
           Object.keys(r.data).forEach(k => {
             if (!_pendingWrites.has(k)) filtered[k] = r.data[k];
           });
           _applyServerData(filtered);
         }
       } catch(e) { /* ignore */ }
-    }, 3000); // Проверяем каждые 3 секунды для быстрого восстановления после обновлений
+    };
+    // Первый poll — сразу после монтирования (не ждём initStore если сессия уже есть)
+    runPoll();
+    const pollInterval = setInterval(runPoll, 3000);
 
     return () => {
       clearInterval(pollInterval);
