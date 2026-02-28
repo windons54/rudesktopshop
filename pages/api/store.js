@@ -133,7 +133,7 @@ async function getPool() {
 
   // Cooldown после ошибки: не пытаемся переподключиться чаще раза в 3 секунды
   const now = Date.now();
-  if (g._pgLastError && g._pgPoolKey === cfgKey && (now - g._pgLastError) < 3000) {
+  if (g._pgLastError && g._pgPoolKey === cfgKey && (now - g._pgLastError) < 10000) {
     return null;
   }
 
@@ -147,15 +147,18 @@ async function getPool() {
       const { Pool } = await import('pg');
       if (g._pgPool) { try { await g._pgPool.end(); } catch {} g._pgPool = null; }
 
-      // ИСПРАВЛЕНИЕ: убран min:2 — постоянные idle-соединения убиваются сервером БД
-      // через 1-2 минуты бездействия, что приводит к падению сервера.
-      // Добавлены keepAlive для предотвращения тихого обрыва TCP-соединений.
+      // ИСПРАВЛЕНИЕ: idleTimeoutMillis увеличен с 30s до 600s (10 минут).
+      // При 30s пул закрывал все соединения в период бездействия, и при обновлении
+      // страницы требовалось заново устанавливать TCP-соединение с БД — отсюда
+      // задержка 3-5 секунд. С 10 минутами соединение остаётся живым между визитами.
+      // min:1 — одно соединение всегда готово, исключает холодный старт первого запроса.
       const opts = poolCfg.connectionString
         ? { connectionString: poolCfg.connectionString,
             ssl: { rejectUnauthorized: false },
             max: 20,
+            min: 1,
             connectionTimeoutMillis: 5000,
-            idleTimeoutMillis: 30000,
+            idleTimeoutMillis: 600000,
             allowExitOnIdle: false,
             keepAlive: true,
             keepAliveInitialDelayMillis: 10000 }
@@ -163,8 +166,9 @@ async function getPool() {
             database: poolCfg.database, user: poolCfg.user, password: poolCfg.password,
             ssl: poolCfg.ssl ? { rejectUnauthorized: false } : false,
             max: 20,
+            min: 1,
             connectionTimeoutMillis: 5000,
-            idleTimeoutMillis: 30000,
+            idleTimeoutMillis: 600000,
             allowExitOnIdle: false,
             keepAlive: true,
             keepAliveInitialDelayMillis: 10000 };
@@ -176,20 +180,28 @@ async function getPool() {
       // с БД (например, когда облачный PostgreSQL закрывает idle-подключения),
       // что может привести к падению сервера.
       newPool.on('error', (err) => {
+        // Ошибки отдельных idle-соединений не должны уничтожать весь пул —
+        // pg автоматически удалит сломанный клиент из пула и создаст новый.
+        // Мы только логируем. Обнуляем пул лишь при фатальных ошибках (ECONNREFUSED и т.п.)
         console.error('[PG Pool] Ошибка idle-клиента:', err.message);
-        // Сбрасываем только если это наш текущий активный пул
-        if (g._pgPool === newPool) {
+        const fatal = err.code === 'ECONNREFUSED' || err.code === 'ENOTFOUND' || err.message?.includes('Connection terminated unexpectedly');
+        if (fatal && g._pgPool === newPool) {
           g._pgReady = false;
           g._pgPool = null;
           g._pgLastError = Date.now();
         }
       });
 
-      // Один раз при старте: проверка + создание таблицы
+      // Проверка соединения (SELECT 1). CREATE TABLE выполняется только один раз
+      // за жизнь процесса — флаг g._tableEnsured экономит лишний round-trip к БД
+      // при каждом пересоздании пула (например, после idle-ошибки).
       await newPool.query('SELECT 1');
-      await newPool.query(`CREATE TABLE IF NOT EXISTS kv (
-        key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TIMESTAMPTZ DEFAULT NOW()
-      )`);
+      if (!g._tableEnsured) {
+        await newPool.query(`CREATE TABLE IF NOT EXISTS kv (
+          key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TIMESTAMPTZ DEFAULT NOW()
+        )`);
+        g._tableEnsured = true;
+      }
 
       // ИСПРАВЛЕНИЕ: g._pgPool устанавливается ПОСЛЕ успешной инициализации
       // (раньше устанавливался до проверки, что приводило к утечке при ошибке)

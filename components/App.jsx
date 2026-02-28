@@ -145,22 +145,26 @@ function _notifyReady() {
 let _initVersion = null;
 
 async function initStore() {
-  const tryLoad = async () => {
-    const timeout = new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 8000));
+  // ИСПРАВЛЕНИЕ: первый запрос идёт с коротким таймаутом 3s.
+  // Если пул уже готов (нормальный случай при обновлении страницы) — ответ придёт быстро.
+  // Если пул инициализируется — первый запрос всё равно подождёт его через _pgInitPromise.
+  // Ретраи используют экспоненциальные задержки: 500ms, 1s, 2s, 3s, 3s, 3s — итого не > 12s.
+  const tryLoad = async (timeoutMs = 5000) => {
+    const timeout = new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), timeoutMs));
     const r = await Promise.race([_apiCall('getAll'), timeout]);
     return r;
   };
 
   let dataLoaded = false;
   try {
-    let r = await tryLoad();
+    let r = await tryLoad(5000);
     console.log('[initStore] Первая попытка загрузки:', r.ok ? 'OK' : 'FAIL', r.pg_unavailable ? '(PG недоступен)' : '');
-    // ИСПРАВЛЕНИЕ: повторяем при ЛЮБОЙ ошибке (!r.ok), а не только при pg_unavailable.
-    // Раньше при ошибке подключения к БД (без флага pg_unavailable) повторов не было.
-    for (let attempt = 0; !dataLoaded && !r.ok && attempt < 6; attempt++) {
-      console.log(`[initStore] Попытка ${attempt + 1}/6 переподключения...`);
-      await new Promise(res => setTimeout(res, 1000));
-      try { r = await tryLoad(); } catch { break; }
+    const retryDelays = [500, 1000, 2000, 3000, 3000, 3000];
+    for (let attempt = 0; !dataLoaded && !r.ok && attempt < retryDelays.length; attempt++) {
+      const delay = retryDelays[attempt];
+      console.log(`[initStore] Попытка ${attempt + 1}/${retryDelays.length} переподключения через ${delay}ms...`);
+      await new Promise(res => setTimeout(res, delay));
+      try { r = await tryLoad(5000); } catch { break; }
     }
     // Загружаем данные если они есть (из PG или JSON fallback)
     if (r.ok && r.data) {
