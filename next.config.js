@@ -35,6 +35,10 @@ copySqlWasm();
 
 const nextConfig = {
   reactStrictMode: false,
+  experimental: {
+    // Включает instrumentation.js — прогрев пула БД при старте сервера
+    instrumentationHook: true,
+  },
   compress: true,
   poweredByHeader: false,
 

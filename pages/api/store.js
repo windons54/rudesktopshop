@@ -192,22 +192,33 @@ async function getPool() {
         }
       });
 
-      // Проверка соединения (SELECT 1). CREATE TABLE выполняется только один раз
-      // за жизнь процесса — флаг g._tableEnsured экономит лишний round-trip к БД
-      // при каждом пересоздании пула (например, после idle-ошибки).
-      await newPool.query('SELECT 1');
-      if (!g._tableEnsured) {
-        await newPool.query(`CREATE TABLE IF NOT EXISTS kv (
-          key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TIMESTAMPTZ DEFAULT NOW()
-        )`);
-        g._tableEnsured = true;
-      }
-
-      // ИСПРАВЛЕНИЕ: g._pgPool устанавливается ПОСЛЕ успешной инициализации
-      // (раньше устанавливался до проверки, что приводило к утечке при ошибке)
+      // ИСПРАВЛЕНИЕ: пул помечается как готовый ДО SELECT 1 и CREATE TABLE.
+      // Это убирает задержку 1-3 RTT из критического пути первого запроса.
+      // SELECT 1 + CREATE TABLE выполняются в фоне — они нужны только для проверки
+      // и создания таблицы, но не блокируют основные запросы.
       g._pgPool = newPool;
       g._pgReady = true;
       g._pgInitPromise = null;
+
+      // Фоновая проверка + создание таблицы (не блокирует первый запрос)
+      (async () => {
+        try {
+          await newPool.query('SELECT 1');
+          if (!g._tableEnsured) {
+            await newPool.query(`CREATE TABLE IF NOT EXISTS kv (
+              key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TIMESTAMPTZ DEFAULT NOW()
+            )`);
+            g._tableEnsured = true;
+          }
+        } catch (e) {
+          console.error('[PG Pool] Фоновая проверка не прошла:', e.message);
+          if (g._pgPool === newPool) {
+            g._pgReady = false;
+            g._pgPool = null;
+            g._pgLastError = Date.now();
+          }
+        }
+      })();
       // Кэшируем данные подключения для bootstrap после деплоя
       if (poolCfg.connectionString) g._savedConnStr = poolCfg.connectionString;
       if (poolCfg.host) g._savedPgCfg = { ...poolCfg };
