@@ -471,6 +471,7 @@ function App() {
   const [userDeposits, setUserDeposits] = useState([]); // Депозиты пользователей
   const [taskSubmissions, setTaskSubmissions] = useState([]);
   const [dbConfig, setDbConfig] = useState({ connected: false, dbSize: 0, rowCounts: {} });
+  const [dataReady, setDataReady] = useState(false); // true когда данные из БД загружены
   // pgConfig живёт на сервере, здесь только для отображения статуса в UI
   const [pgConfig, setPgConfig] = useState(null);
   const [isPgActive, setIsPgActive] = useState(false);
@@ -635,6 +636,7 @@ function App() {
       setUsers(base);
 
       setDbConfig({ connected: true, dbSize: Object.keys(storage.all()).length, rowCounts: getSQLiteStats() });
+      setDataReady(true);
 
       // Восстанавливаем сессию — устанавливаем сразу, не проверяем наличие в base
       // (пользователь мог быть создан позже, данные придут через polling)
@@ -674,6 +676,8 @@ function App() {
     // ── Polling: обновляем данные с сервера каждые 4 секунды ──
     const _applyServerData = (data) => {
       if (!data) return;
+      // Помечаем данные как загруженные (важно если initStore не смог загрузить при старте)
+      setDataReady(true);
       // Защита: НЕ перезаписываем users пустым объектом если были данные
       if ('cm_users' in data) {
         const newUsers = data.cm_users;
@@ -1231,15 +1235,15 @@ ym(${integ.ymCounterId}, "init", { clickmap:true, trackLinks:true, accurateTrack
       <main className="page-fade" style={{flex:1}}>
         {page === "shop" && <ShopPage products={filtered} allProducts={activeProducts} categories={shopCategories} filterCat={filterCat} setFilterCat={setFilterCat} addToCart={addToCart} setPage={setPage} currentUser={currentUser} users={users} favorites={favorites} toggleFavorite={toggleFavorite} currency={appearance.currency} faq={faq} videos={videos} tasks={tasks} auctions={auctions} appearance={appearance} orders={orders} transfers={transfers} totalIssued={totalIssued} />}
         {page === "faq" && <FaqPage faq={faq} />}
-        {page === "auction" && appearance.features?.auction !== false && <AuctionPage auctions={auctions} saveAuctions={saveAuctions} currentUser={currentUser} users={users} saveUsers={saveUsers} notify={notify} currency={appearance.currency} appearance={appearance} />}
+        {page === "auction" && appearance.features?.auction !== false && <AuctionPage auctions={auctions} saveAuctions={saveAuctions} currentUser={currentUser} users={users} saveUsers={saveUsers} notify={notify} currency={appearance.currency} appearance={appearance} dataReady={dataReady} />}
         {page === "auction" && appearance.features?.auction === false && <div className="empty-state"><div className="empty-state-icon">🔨</div><div className="empty-state-text">Раздел «Аукцион» недоступен</div></div>}
-        {page === "lottery" && appearance.features?.lottery !== false && <LotteryPage lotteries={lotteries} currentUser={currentUser} currency={appearance.currency} appearance={appearance} />}
+        {page === "lottery" && appearance.features?.lottery !== false && <LotteryPage lotteries={lotteries} currentUser={currentUser} currency={appearance.currency} appearance={appearance} dataReady={dataReady} />}
         {page === "lottery" && appearance.features?.lottery === false && <div className="empty-state"><div className="empty-state-icon">🎰</div><div className="empty-state-text">Раздел «Лотерея» недоступен</div></div>}
-        {page === "voting" && appearance.features?.voting !== false && <VotingPage polls={polls} savePolls={savePolls} currentUser={currentUser} users={users} saveUsers={saveUsers} notify={notify} currency={appearance.currency} appearance={appearance} addIssued={addIssued} />}
+        {page === "voting" && appearance.features?.voting !== false && <VotingPage polls={polls} savePolls={savePolls} currentUser={currentUser} users={users} saveUsers={saveUsers} notify={notify} currency={appearance.currency} appearance={appearance} addIssued={addIssued} dataReady={dataReady} />}
         {page === "voting" && appearance.features?.voting === false && <div className="empty-state"><div className="empty-state-icon">🗳️</div><div className="empty-state-text">Раздел «Голосования» недоступен</div></div>}
-        {page === "bank" && appearance.features?.bank !== false && <BankPage deposits={deposits} userDeposits={userDeposits} saveUserDeposits={saveUserDeposits} currentUser={currentUser} users={users} saveUsers={saveUsers} notify={notify} currency={appearance.currency} appearance={appearance} />}
+        {page === "bank" && appearance.features?.bank !== false && <BankPage deposits={deposits} userDeposits={userDeposits} saveUserDeposits={saveUserDeposits} currentUser={currentUser} users={users} saveUsers={saveUsers} notify={notify} currency={appearance.currency} appearance={appearance} dataReady={dataReady} />}
         {page === "bank" && appearance.features?.bank === false && <div className="empty-state"><div className="empty-state-icon">🏦</div><div className="empty-state-text">Раздел «Банк» недоступен</div></div>}
-        {page === "tasks" && appearance.features?.tasks !== false && <TasksPage tasks={tasks} currentUser={currentUser} taskSubmissions={taskSubmissions} saveTaskSubmissions={saveTaskSubmissions} notify={notify} appearance={appearance} users={users} saveUsers={saveUsers} />}
+        {page === "tasks" && appearance.features?.tasks !== false && <TasksPage tasks={tasks} currentUser={currentUser} taskSubmissions={taskSubmissions} saveTaskSubmissions={saveTaskSubmissions} notify={notify} appearance={appearance} users={users} saveUsers={saveUsers} dataReady={dataReady} />}
         {page === "tasks" && appearance.features?.tasks === false && <div className="empty-state"><div className="empty-state-icon">🎯</div><div className="empty-state-text">Раздел «Задания» недоступен</div></div>}
         {page === "favorites" && currentUser && <FavoritesPage products={activeProducts.filter(p => favorites.includes(p.id))} favorites={favorites} toggleFavorite={toggleFavorite} addToCart={addToCart} setPage={setPage} />}
         {page === "history" && currentUser && <HistoryPage currentUser={currentUser} transfers={transfers} orders={orders} taskSubmissions={taskSubmissions} currency={appearance.currency} />}
@@ -1368,12 +1372,13 @@ function TaskCountdown({ deadline }) {
 
 // ── TASKS ─────────────────────────────────────────────────────────────────
 
-function TaskSubmitButton({ task, currentUser, taskSubmissions, saveTaskSubmissions, notify, appearance, onClose, isShopModal }) {
+function TaskSubmitButton({ task, currentUser, taskSubmissions, saveTaskSubmissions, notify, appearance, onClose, isShopModal, dataReady }) {
   // If isShopModal, we use global window access pattern - pass real props when used standalone
   const alreadySubmitted = (taskSubmissions || []).some(s => s.taskId === task.id && s.user === currentUser && (s.status === "pending" || s.status === "approved"));
 
   const handleSubmit = () => {
     if (!currentUser) { if (notify) notify("Войдите в аккаунт", "err"); return; }
+    if (dataReady === false) { if (notify) notify("Данные ещё загружаются, подождите", "err"); return; }
     if (alreadySubmitted) return;
     const submission = {
       id: Date.now(),
@@ -1431,7 +1436,15 @@ function TaskSubmitButton({ task, currentUser, taskSubmissions, saveTaskSubmissi
   );
 }
 
-function TasksPage({ tasks, currentUser, taskSubmissions, saveTaskSubmissions, notify, appearance, users, saveUsers }) {
+function TasksPage({ tasks, currentUser, taskSubmissions, saveTaskSubmissions, notify, appearance, users, saveUsers, dataReady }) {
+  if (!dataReady) return (
+    <div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:"60px 20px",gap:"16px",color:"var(--rd-gray-text)"}}>
+      <div style={{fontSize:"32px"}}>⏳</div>
+      <div style={{fontWeight:700,fontSize:"16px"}}>Загрузка данных...</div>
+      <div style={{fontSize:"13px",opacity:0.7}}>Подождите, данные из базы данных загружаются</div>
+    </div>
+  );
+
   const [modalTask, setModalTask] = useState(null);
   const [quizState, setQuizState] = useState(null);
   const activeTasks = (tasks || []).filter(t => t.active !== false);
@@ -1452,6 +1465,7 @@ function TasksPage({ tasks, currentUser, taskSubmissions, saveTaskSubmissions, n
 
   const submitQuiz = (task) => {
     if (!currentUser) { notify("Войдите в аккаунт", "err"); return; }
+    if (!dataReady) { notify("Данные ещё загружаются, подождите", "err"); return; }
     const questions = task.quizQuestions || [];
     const total = questions.length;
     if (total === 0) return;
@@ -1490,6 +1504,7 @@ function TasksPage({ tasks, currentUser, taskSubmissions, saveTaskSubmissions, n
     const alreadySubmitted = (taskSubmissions || []).some(s => s.taskId === task.id && s.user === currentUser && (s.status === "pending" || s.status === "approved"));
     const handleSubmit = () => {
       if (!currentUser) { notify("Войдите в аккаунт", "err"); return; }
+      if (!dataReady) { notify("Данные ещё загружаются, подождите", "err"); return; }
       if (alreadySubmitted) return;
       const submission = { id: Date.now(), taskId: task.id, taskTitle: task.title, user: currentUser, date: new Date().toLocaleString("ru-RU"), status: "pending", comment: "", reward: task.reward || 0 };
       saveTaskSubmissions([...(taskSubmissions || []), submission]);
@@ -2191,6 +2206,7 @@ function AuctionCard({ auction, currentUser, users, saveUsers, saveAuctions, all
 
   const placeBid = () => {
     if (!currentUser) { notify("Войдите в аккаунт, чтобы делать ставки", "err"); return; }
+    if (!dataReady) { notify("Данные ещё загружаются, подождите", "err"); return; }
     const amt = parseInt(bidAmt);
     if (!amt || amt < minNext) { notify(`Минимальная ставка: ${minNext} ${cName}`, "err"); return; }
     const myBalance = users[currentUser]?.balance || 0;
@@ -2293,7 +2309,15 @@ function AuctionCard({ auction, currentUser, users, saveUsers, saveAuctions, all
   );
 }
 
-function AuctionPage({ auctions, saveAuctions, currentUser, users, saveUsers, notify, currency, appearance }) {
+function AuctionPage({ auctions, saveAuctions, currentUser, users, saveUsers, notify, currency, appearance, dataReady }) {
+  if (!dataReady) return (
+    <div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:"60px 20px",gap:"16px",color:"var(--rd-gray-text)"}}>
+      <div style={{fontSize:"32px"}}>⏳</div>
+      <div style={{fontWeight:700,fontSize:"16px"}}>Загрузка данных...</div>
+      <div style={{fontSize:"13px",opacity:0.7}}>Подождите, данные из базы данных загружаются</div>
+    </div>
+  );
+
   const active = (auctions || []).filter(a => Date.now() < a.endsAt);
   const ended = (auctions || []).filter(a => Date.now() >= a.endsAt);
   const sectionSettings = appearance?.sectionSettings?.auction || {};
@@ -7548,7 +7572,15 @@ function LotteryAdminTab({ lotteries, saveLotteries, notify, users, saveUsers, a
   );
 }
 
-function LotteryPage({ lotteries, currentUser, currency, appearance }) {
+function LotteryPage({ lotteries, currentUser, currency, appearance, dataReady }) {
+  if (!dataReady) return (
+    <div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:"60px 20px",gap:"16px",color:"var(--rd-gray-text)"}}>
+      <div style={{fontSize:"32px"}}>⏳</div>
+      <div style={{fontWeight:700,fontSize:"16px"}}>Загрузка данных...</div>
+      <div style={{fontSize:"13px",opacity:0.7}}>Подождите, данные из базы данных загружаются</div>
+    </div>
+  );
+
   const list = lotteries || [];
   const active = list.filter(l => l.status === "active").sort((a, b) => a.endsAt - b.endsAt);
   const ended = list.filter(l => l.status === "ended").sort((a, b) => b.endsAt - a.endsAt);
@@ -7943,7 +7975,15 @@ function VotingAdminTab({ polls, savePolls, notify, users, saveUsers }) {
   );
 }
 
-function VotingPage({ polls, savePolls, currentUser, users, saveUsers, notify, currency, appearance, addIssued }) {
+function VotingPage({ polls, savePolls, currentUser, users, saveUsers, notify, currency, appearance, addIssued, dataReady }) {
+  if (!dataReady) return (
+    <div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:"60px 20px",gap:"16px",color:"var(--rd-gray-text)"}}>
+      <div style={{fontSize:"32px"}}>⏳</div>
+      <div style={{fontWeight:700,fontSize:"16px"}}>Загрузка данных...</div>
+      <div style={{fontSize:"13px",opacity:0.7}}>Подождите, данные из базы данных загружаются</div>
+    </div>
+  );
+
   const list = polls || [];
   const now = Date.now();
   const active = list.filter(p => p.status === "active").sort((a, b) => a.endsAt - b.endsAt);
@@ -7961,6 +8001,7 @@ function VotingPage({ polls, savePolls, currentUser, users, saveUsers, notify, c
 
   const vote = (poll, optionId) => {
     if (!currentUser) { notify("Войдите, чтобы голосовать", "err"); return; }
+    if (!dataReady) { notify("Данные ещё загружаются, подождите", "err"); return; }
     if (now > poll.endsAt) { notify("Голосование завершено", "err"); return; }
     const myVotes = getUserVotes(poll);
     const isVoted = myVotes.includes(optionId);
@@ -8344,7 +8385,15 @@ function BankAdminTab({ deposits, saveDeposits, notify }) {
   );
 }
 
-function BankPage({ deposits, userDeposits, saveUserDeposits, currentUser, users, saveUsers, notify, currency, appearance }) {
+function BankPage({ deposits, userDeposits, saveUserDeposits, currentUser, users, saveUsers, notify, currency, appearance, dataReady }) {
+  if (!dataReady) return (
+    <div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:"60px 20px",gap:"16px",color:"var(--rd-gray-text)"}}>
+      <div style={{fontSize:"32px"}}>⏳</div>
+      <div style={{fontWeight:700,fontSize:"16px"}}>Загрузка данных...</div>
+      <div style={{fontSize:"13px",opacity:0.7}}>Подождите, данные из базы данных загружаются</div>
+    </div>
+  );
+
   const [modalDeposit, setModalDeposit] = useState(null); // deposit object shown in modal
   const [amount, setAmount] = useState("");
   const cName = getCurrName(currency);
@@ -8389,6 +8438,7 @@ function BankPage({ deposits, userDeposits, saveUserDeposits, currentUser, users
 
   const openDeposit = () => {
     if (!modalDeposit) return;
+    if (!dataReady) { notify("Данные ещё загружаются, подождите", "err"); return; }
     const amt = parseInt(amount);
     if (!amt || amt <= 0) { notify("Введите сумму", "err"); return; }
     if (amt > myBalance) { notify("Недостаточно средств", "err"); return; }
