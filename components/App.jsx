@@ -159,12 +159,24 @@ async function _fetchAndCacheImages() {
 
 // Восстанавливает '__stored__' поля в appearance из кэша изображений
 function _restoreImages(ap, images) {
-  if (!ap || !images) return ap;
+  if (!ap || !images || typeof images !== 'object') return ap;
   const out = { ...ap };
   if (out.logo === '__stored__') out.logo = images.logo || null;
   if (out.banner?.image === '__stored__') out.banner = { ...out.banner, image: images.bannerImage || '' };
   if (out.currency?.logo === '__stored__') out.currency = { ...out.currency, logo: images.currencyLogo || '' };
   if (out.seo?.favicon === '__stored__') out.seo = { ...out.seo, favicon: images.favicon || '' };
+  // Восстанавливаем баннеры секций
+  if (out.sectionSettings && typeof out.sectionSettings === 'object') {
+    const ss = { ...out.sectionSettings };
+    let ssChanged = false;
+    for (const section of Object.keys(ss)) {
+      if (ss[section]?.banner === '__stored__') {
+        ss[section] = { ...ss[section], banner: images['section_' + section + '_banner'] || '' };
+        ssChanged = true;
+      }
+    }
+    if (ssChanged) out.sectionSettings = ss;
+  }
   return out;
 }
 
@@ -867,13 +879,9 @@ function App({ initialData, initialVersion }) {
       const res = await fetch('/api/store', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Accept-Encoding': 'gzip' },
-        // Передаём текущую версию — сервер вернёт 304 если данные не изменились (экономим трафик)
+        // Передаём текущую версию — сервер вернёт notModified:true если данные не изменились
         body: JSON.stringify({ action: 'getAll', clientVersion: _lastKnownVersion }),
       });
-      if (res.status === 304) {
-        // Данные не изменились — ничего не делаем
-        return { ok: true, notModified: true };
-      }
       return res.json();
     };
 
@@ -1021,6 +1029,17 @@ function App({ initialData, initialVersion }) {
     if (ap.banner?.image && ap.banner.image.startsWith('data:')) { _imgs.bannerImage = ap.banner.image; slimAp.banner = { ...ap.banner, image: '__stored__' }; }
     if (ap.currency?.logo && ap.currency.logo.startsWith('data:')) { _imgs.currencyLogo = ap.currency.logo; slimAp.currency = { ...ap.currency, logo: '__stored__' }; }
     if (ap.seo?.favicon && ap.seo.favicon.startsWith('data:')) { _imgs.favicon = ap.seo.favicon; slimAp.seo = { ...ap.seo, favicon: '__stored__' }; }
+    // Вырезаем баннеры секций
+    if (ap.sectionSettings && typeof ap.sectionSettings === 'object') {
+      const ss = { ...ap.sectionSettings };
+      for (const section of Object.keys(ss)) {
+        if (ss[section]?.banner && ss[section].banner.startsWith('data:')) {
+          _imgs['section_' + section + '_banner'] = ss[section].banner;
+          ss[section] = { ...ss[section], banner: '__stored__' };
+        }
+      }
+      slimAp.sectionSettings = ss;
+    }
     _saveImagesToLS(_imgs);
     // Сохраняем изображения отдельно на сервер (не блокируем UI)
     fetch('/api/images', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'set', images: _imgs }) }).catch(() => {});

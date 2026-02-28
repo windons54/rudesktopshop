@@ -624,11 +624,12 @@ export default async function handler(req, res) {
       if (action === 'getAll') {
         const now = Date.now();
 
-        // ETag-проверка: если клиент уже имеет актуальную версию — отвечаем 304 без тела
+        // ETag-проверка: если клиент уже имеет актуальную версию — отвечаем без данных
         const clientVersion = req.body?.clientVersion || null;
-        if (clientVersion && clientVersion === g._dataVersion && g._allCache) {
+        if (clientVersion && String(clientVersion) === String(g._dataVersion) && g._allCache) {
           res.setHeader('Cache-Control', 'no-store');
-          return res.status(304).json({ ok: true, notModified: true, version: g._dataVersion });
+          // Возвращаем 200 с notModified:true — НЕ 304, у которого нет тела (ломает res.json на клиенте)
+          return res.json({ ok: true, notModified: true, version: g._dataVersion });
         }
 
         // Серверный кэш — не дёргаем БД при каждом запросе
