@@ -134,7 +134,9 @@ async function getPool() {
 
   // Cooldown после ошибки: не пытаемся переподключиться чаще раза в 3 секунды
   const now = Date.now();
-  if (g._pgLastError && g._pgPoolKey === cfgKey && (now - g._pgLastError) < 10000) {
+  // Cooldown 1s — минимальная пауза между попытками переподключения.
+  // Раньше было 10s — слишком долго для пользователя ждущего загрузки страницы.
+  if (g._pgLastError && g._pgPoolKey === cfgKey && (now - g._pgLastError) < 1000) {
     return null;
   }
 
@@ -240,12 +242,12 @@ async function getPool() {
 }
 
 // Прогрев пула при первой загрузке модуля (серверный контекст).
-// Запускается один раз — заменяет instrumentation.js, который не собирается
-// webpack'ом корректно в Next.js 14 из-за статического анализа импортов.
+// Запускаем сразу и сохраняем промис — getPool() будет ждать его если пул ещё не готов.
+// ВАЖНО: не используем setImmediate — он выполняется ПОСЛЕ первого запроса,
+// из-за чего первый getAll получал pg_unavailable и клиент ждал 500ms+.
 if (!g._pgWarmupStarted) {
   g._pgWarmupStarted = true;
-  // setImmediate чтобы не блокировать загрузку модуля
-  setImmediate(() => { getPool().catch(() => {}); });
+  getPool().catch(() => {});
 }
 
 // ── Версия данных для polling (ETag) ───────────────────────────────────────

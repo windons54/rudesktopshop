@@ -159,10 +159,11 @@ async function initStore() {
   try {
     let r = await tryLoad(5000);
     console.log('[initStore] Первая попытка загрузки:', r.ok ? 'OK' : 'FAIL', r.pg_unavailable ? '(PG недоступен)' : '');
-    const retryDelays = [500, 1000, 2000, 3000, 3000, 3000];
+    // Ретраи при ошибке: короткие интервалы — пул БД обычно поднимается за <1s.
+    // Активное восстановление также ведёт recoverFromPgUnavailable в polling.
+    const retryDelays = [300, 500, 1000, 2000, 3000];
     for (let attempt = 0; !dataLoaded && !r.ok && attempt < retryDelays.length; attempt++) {
       const delay = retryDelays[attempt];
-      console.log(`[initStore] Попытка ${attempt + 1}/${retryDelays.length} переподключения через ${delay}ms...`);
       await new Promise(res => setTimeout(res, delay));
       try { r = await tryLoad(5000); } catch { break; }
     }
@@ -792,6 +793,48 @@ function App() {
     // ИСПРАВЛЕНИЕ: запускаем немедленный getAll при старте, не ждём первого интервала (3 сек).
     // Это устраняет задержку подгрузки данных после обновления страницы для авторизованных
     // пользователей у которых dataReady уже true (интерфейс видят сразу, данные придут быстро).
+    // Флаг активного восстановления — не запускаем параллельные ретраи
+    let _recovering = false;
+
+    const fetchAll = async () => {
+      const res = await fetch('/api/store', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'getAll' }),
+      });
+      return res.json();
+    };
+
+    const applyAll = (r) => {
+      if (r.ok && r.data) {
+        const newVer = r.version || null;
+        if (newVer) _lastKnownVersion = newVer;
+        _applyData(r.data, newVer);
+        const filtered = {};
+        Object.keys(r.data).forEach(k => {
+          if (!_pendingWrites.has(k)) filtered[k] = r.data[k];
+        });
+        _applyServerData(filtered);
+        return true;
+      }
+      return false;
+    };
+
+    // При pg_unavailable — активно ретраим каждые 300ms до победы (макс 15 раз = 4.5s)
+    // вместо того чтобы ждать следующего тика через 3 секунды.
+    const recoverFromPgUnavailable = async () => {
+      if (_recovering) return;
+      _recovering = true;
+      for (let i = 0; i < 15; i++) {
+        await new Promise(r => setTimeout(r, 300));
+        try {
+          const r = await fetchAll();
+          if (applyAll(r)) { _recovering = false; return; }
+        } catch {}
+      }
+      _recovering = false;
+    };
+
     const runPoll = async () => {
       if (!_pollActive) return;
       try {
@@ -801,43 +844,22 @@ function App() {
           body: JSON.stringify({ action: 'version' }),
         });
         const vData = await vRes.json();
-        if (vData.pg_unavailable) {
-          const res = await fetch('/api/store', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ action: 'getAll' }),
-          });
-          const r = await res.json();
-          if (r.ok && r.data) {
-            const filtered = {};
-            Object.keys(r.data).forEach(k => {
-              if (!_pendingWrites.has(k)) filtered[k] = r.data[k];
-            });
-            _applyServerData(filtered);
-          }
+
+        // БД недоступна — запускаем активное восстановление с короткими ретраями
+        if (vData.pg_unavailable || !vData.ok) {
+          recoverFromPgUnavailable();
           return;
         }
-        if (!vData.ok || vData.version === _lastKnownVersion) return;
-        const res = await fetch('/api/store', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ action: 'getAll' }),
-        });
-        const r = await res.json();
-        if (!r.ok || r.pg_unavailable) return;
-        if (r.ok && r.data) {
-          const newVer = r.version || vData.version;
-          _lastKnownVersion = newVer;
-          _applyData(r.data, newVer);
-          const filtered = {};
-          Object.keys(r.data).forEach(k => {
-            if (!_pendingWrites.has(k)) filtered[k] = r.data[k];
-          });
-          _applyServerData(filtered);
-        }
+
+        if (vData.version === _lastKnownVersion) return; // данные не изменились
+
+        const r = await fetchAll();
+        if (r.pg_unavailable || !r.ok) { recoverFromPgUnavailable(); return; }
+        applyAll(r);
       } catch(e) { /* ignore */ }
     };
-    // Первый poll — сразу после монтирования (не ждём initStore если сессия уже есть)
+
+    // Первый poll — сразу после монтирования
     runPoll();
     const pollInterval = setInterval(runPoll, 3000);
 
