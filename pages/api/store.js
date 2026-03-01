@@ -355,11 +355,11 @@ if (!g._pgWarmupStarted) {
 }
 
 // ── Keepalive ping — не даём соединениям протухнуть ──────────────────────
-// Многие облачные PostgreSQL (и NAT/файрволы между сервером и БД) закрывают
-// idle TCP-соединения через 5-10 минут. TCP keepalive не всегда помогает,
-// потому что файрвол может отслеживать именно отсутствие SQL-трафика.
-// Пинг раз в 4 минуты гарантирует что соединение остаётся живым.
-const KEEPALIVE_INTERVAL = 4 * 60 * 1000; // 4 минуты
+// PostgreSQL-сервер имеет idle_session_timeout, который убивает соединения
+// без SQL-трафика. TCP keepalive не помогает — сервер отслеживает именно
+// отсутствие запросов. Пинг раз в 30 секунд гарантирует что ни одно
+// соединение не будет убито по idle_session_timeout.
+const KEEPALIVE_INTERVAL = 30 * 1000; // 30 секунд
 if (!g._pgKeepaliveTimer) {
   g._pgKeepaliveTimer = setInterval(async () => {
     const pool = g._pgPool;
