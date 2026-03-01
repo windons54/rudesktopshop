@@ -655,7 +655,7 @@ function App({ initialData, initialVersion }) {
     });
 
     // initStore обновит данные свежей версией (в фоне, пользователь уже видит контент)
-    initStore().then((dataLoaded) => {
+    initStore().then(async (dataLoaded) => {
       // КРИТИЧНО: если PG недоступен при старте — данные не загружены.
       // НЕ трогаем state пустыми данными. Polling подгрузит всё как только БД поднимется.
       if (!dataLoaded) {
