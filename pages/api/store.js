@@ -167,6 +167,52 @@ async function tryBootstrapFromDb() {
 // поэтому globalThis._pgPool живёт между запросами.
 const g = globalThis;
 
+// ── Retry-обёртка: автоматически пересоздаёт пул при обрыве соединения ───
+// Решает проблему «пользователь долго не заходил → соединения протухли»:
+// первый запрос может упасть на мёртвом соединении, retry пересоздаёт пул
+// и выполняет запрос на свежем соединении — пользователь не замечает проблему.
+const CONNECTION_ERRORS = new Set([
+  'ECONNRESET', 'ECONNREFUSED', 'EPIPE', 'ETIMEDOUT', 'ENOTFOUND',
+  'CONNECTION_ENDED', 'CONNECTION_DESTROYED',
+]);
+
+function isConnectionError(err) {
+  if (!err) return false;
+  if (CONNECTION_ERRORS.has(err.code)) return true;
+  const msg = (err.message || '').toLowerCase();
+  return msg.includes('connection terminated') ||
+         msg.includes('connection reset') ||
+         msg.includes('client has encountered a connection error') ||
+         msg.includes('cannot acquire a client') ||
+         msg.includes('terminating connection due to idle') ||
+         msg.includes('server closed the connection unexpectedly') ||
+         msg.includes('socket hang up') ||
+         msg.includes('read econnreset');
+}
+
+async function queryWithRetry(queryFn, maxRetries = 1) {
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      return await queryFn();
+    } catch (err) {
+      if (attempt < maxRetries && isConnectionError(err)) {
+        console.warn(`[PG Retry] Обрыв соединения (${err.code || err.message}), пересоздаём пул...`);
+        // Сбрасываем пул чтобы getPool() создал новый
+        if (g._pgPool) { try { g._pgPool.end(); } catch {} }
+        g._pgPool = null;
+        g._pgReady = false;
+        g._pgInitPromise = null;
+        g._pgLastError = null; // Сбрасываем cooldown чтобы retry прошёл сразу
+        // Даём время на создание нового пула
+        const retryPool = await getPool();
+        if (!retryPool) throw err; // Не смогли переподключиться
+        continue;
+      }
+      throw err;
+    }
+  }
+}
+
 
 async function getPool() {
   // Если конфига нет — пробуем восстановить из БД (после git deploy)
@@ -306,6 +352,27 @@ async function getPool() {
 if (!g._pgWarmupStarted) {
   g._pgWarmupStarted = true;
   getPool().catch(() => {});
+}
+
+// ── Keepalive ping — не даём соединениям протухнуть ──────────────────────
+// Многие облачные PostgreSQL (и NAT/файрволы между сервером и БД) закрывают
+// idle TCP-соединения через 5-10 минут. TCP keepalive не всегда помогает,
+// потому что файрвол может отслеживать именно отсутствие SQL-трафика.
+// Пинг раз в 4 минуты гарантирует что соединение остаётся живым.
+const KEEPALIVE_INTERVAL = 4 * 60 * 1000; // 4 минуты
+if (!g._pgKeepaliveTimer) {
+  g._pgKeepaliveTimer = setInterval(async () => {
+    const pool = g._pgPool;
+    if (!pool || !g._pgReady) return;
+    try {
+      await pool.query('SELECT 1');
+    } catch (err) {
+      console.warn('[PG Keepalive] Пинг не прошёл:', err.message);
+      // Не сбрасываем пул — следующий реальный запрос через queryWithRetry сам пересоздаст
+    }
+  }, KEEPALIVE_INTERVAL);
+  // Не блокируем завершение процесса
+  if (g._pgKeepaliveTimer.unref) g._pgKeepaliveTimer.unref();
 }
 
 // ── Версия данных для polling (ETag) ───────────────────────────────────────
@@ -662,9 +729,18 @@ export default async function handler(req, res) {
     }
 
     if (pool) {
-      if (action === 'get')     return res.json({ ok: true, value: await pgKv.get(pool, key) });
-      if (action === 'set')     { await pgKv.set(pool, key, value); return res.json({ ok: true }); }
-      if (action === 'delete')  { await pgKv.delete(pool, key); return res.json({ ok: true }); }
+      if (action === 'get') {
+        const value = await queryWithRetry(() => pgKv.get(g._pgPool || pool, key));
+        return res.json({ ok: true, value });
+      }
+      if (action === 'set') {
+        await queryWithRetry(() => pgKv.set(g._pgPool || pool, key, value));
+        return res.json({ ok: true });
+      }
+      if (action === 'delete') {
+        await queryWithRetry(() => pgKv.delete(g._pgPool || pool, key));
+        return res.json({ ok: true });
+      }
       if (action === 'getAll') {
         const now = Date.now();
 
@@ -681,13 +757,16 @@ export default async function handler(req, res) {
           const payload = { ok: true, data: g._allCache, version: g._dataVersion };
           return sendCompressed(req, res, payload);
         }
-        const data = await pgKv.getAll(pool);
-        g._allCache = data;
+        const freshData = await queryWithRetry(() => pgKv.getAll(g._pgPool || pool));
+        g._allCache = freshData;
         g._allCacheExpiry = now + ALL_CACHE_TTL;
-        const payload = { ok: true, data, version: g._dataVersion };
+        const payload = { ok: true, data: freshData, version: g._dataVersion };
         return sendCompressed(req, res, payload);
       }
-      if (action === 'setMany') { await pgKv.setMany(pool, data); return res.json({ ok: true }); }
+      if (action === 'setMany') {
+        await queryWithRetry(() => pgKv.setMany(g._pgPool || pool, data));
+        return res.json({ ok: true });
+      }
     } else {
       // PG настроен но недоступен — сообщаем клиенту чтобы он не перезаписывал состояние
       const pgCfgExists = !!readPgConfig();
