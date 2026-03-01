@@ -5545,7 +5545,7 @@ function BannerSettingsTab({ appearance, saveAppearance, notify }) {
 }
 
 function SeoSettingsTab({ appearance, saveAppearance, notify }) {
-  
+
   const seo = appearance.seo || {};
   const [form, setForm] = useState({ title: seo.title || "", description: seo.description || "", favicon: seo.favicon || "" });
 
@@ -5563,6 +5563,67 @@ function SeoSettingsTab({ appearance, saveAppearance, notify }) {
     };
     reader.readAsDataURL(file); e.target.value = "";
   };
+
+  /* ── SSL state ── */
+  const [sslStatus, setSslStatus] = useState(null);
+  const [sslLoading, setSslLoading] = useState(true);
+  const [sslUploading, setSslUploading] = useState(false);
+  const [sslCert, setSslCert] = useState("");
+  const [sslKey, setSslKey] = useState("");
+  const [sslCa, setSslCa] = useState("");
+  const [sslExpanded, setSslExpanded] = useState(false);
+
+  const loadSslStatus = async () => {
+    try {
+      setSslLoading(true);
+      const r = await fetch('/api/ssl', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'status' }) });
+      const data = await r.json();
+      setSslStatus(data);
+    } catch { setSslStatus(null); }
+    finally { setSslLoading(false); }
+  };
+
+  useEffect(() => { loadSslStatus(); }, []);
+
+  const handleSslFileRead = (setter) => (e) => {
+    const file = e.target.files[0]; if (!file) return;
+    const reader = new FileReader();
+    reader.onload = ev => setter(ev.target.result);
+    reader.readAsText(file); e.target.value = "";
+  };
+
+  const uploadSsl = async () => {
+    if (!sslCert.trim() || !sslKey.trim()) { notify("Укажите сертификат и приватный ключ", "err"); return; }
+    setSslUploading(true);
+    try {
+      const r = await fetch('/api/ssl', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'upload', cert: sslCert, key: sslKey, ca: sslCa || undefined }),
+      });
+      const data = await r.json();
+      if (data.ok) {
+        notify(data.message || "SSL-сертификат установлен ✓");
+        setSslCert(""); setSslKey(""); setSslCa("");
+        setSslExpanded(false);
+        loadSslStatus();
+      } else {
+        (data.errors || []).forEach(e => notify(e, "err"));
+      }
+    } catch (e) { notify("Ошибка загрузки SSL: " + e.message, "err"); }
+    finally { setSslUploading(false); }
+  };
+
+  const deleteSsl = async () => {
+    if (!confirm("Удалить SSL-сертификат? HTTPS будет деактивирован после перезапуска.")) return;
+    try {
+      const r = await fetch('/api/ssl', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'delete' }) });
+      const data = await r.json();
+      if (data.ok) { notify("SSL-сертификат удалён"); loadSslStatus(); }
+    } catch (e) { notify("Ошибка: " + e.message, "err"); }
+  };
+
+  const fmtDate = (s) => { try { return new Date(s).toLocaleDateString("ru-RU", { day:"numeric", month:"long", year:"numeric" }); } catch { return s; } };
 
   return (
     <div>
@@ -5649,6 +5710,174 @@ function SeoSettingsTab({ appearance, saveAppearance, notify }) {
         <div style={{marginTop:"24px"}}>
           <button className="btn btn-primary" onClick={save}>💾 Сохранить</button>
         </div>
+      </div>
+
+      {/* ═══════════ SSL CERTIFICATE ═══════════ */}
+      <div className="settings-card" style={{marginTop:"24px"}}>
+        <div className="settings-section-title">🔒 SSL-сертификат</div>
+        <div style={{fontSize:"13px",color:"var(--rd-gray-text)",marginBottom:"20px",lineHeight:"1.7"}}>
+          Подключите SSL-сертификат для работы сайта по HTTPS. Загрузите файлы сертификата и приватного ключа в формате PEM.
+        </div>
+
+        {/* Status */}
+        {sslLoading ? (
+          <div style={{padding:"20px",textAlign:"center",color:"var(--rd-gray-text)",fontSize:"13px"}}>Загрузка статуса SSL...</div>
+        ) : sslStatus && sslStatus.installed ? (
+          <div style={{padding:"16px",background:"linear-gradient(135deg, rgba(5,150,105,0.06) 0%, rgba(5,150,105,0.02) 100%)",border:"1.5px solid rgba(5,150,105,0.25)",borderRadius:"var(--rd-radius-sm)",marginBottom:"20px"}}>
+            <div style={{display:"flex",alignItems:"center",gap:"10px",marginBottom:"12px"}}>
+              <div style={{width:"32px",height:"32px",borderRadius:"50%",background:"rgba(5,150,105,0.12)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:"16px",flexShrink:0}}>
+                {sslStatus.expired ? "⚠️" : "✅"}
+              </div>
+              <div>
+                <div style={{fontWeight:700,fontSize:"14px",color: sslStatus.expired ? "#d97706" : "var(--rd-green)"}}>
+                  {sslStatus.expired ? "Сертификат истёк" : "SSL-сертификат установлен"}
+                </div>
+                {sslStatus.httpsActive && <div style={{fontSize:"12px",color:"var(--rd-green)",fontWeight:600,marginTop:"2px"}}>HTTPS активен</div>}
+              </div>
+            </div>
+
+            {sslStatus.certInfo && !sslStatus.certInfo.error && (
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"8px 20px",fontSize:"12px",lineHeight:"1.8"}}>
+                <div>
+                  <span style={{color:"var(--rd-gray-text)"}}>Субъект: </span>
+                  <span style={{fontWeight:600,color:"var(--rd-dark)"}}>{(sslStatus.certInfo.subject || "").replace(/CN=/g,"").split("\n")[0]}</span>
+                </div>
+                <div>
+                  <span style={{color:"var(--rd-gray-text)"}}>Издатель: </span>
+                  <span style={{fontWeight:600,color:"var(--rd-dark)"}}>{(sslStatus.certInfo.issuer || "").replace(/CN=/g,"").split("\n")[0]}</span>
+                </div>
+                <div>
+                  <span style={{color:"var(--rd-gray-text)"}}>Действует с: </span>
+                  <span style={{fontWeight:600,color:"var(--rd-dark)"}}>{fmtDate(sslStatus.certInfo.validFrom)}</span>
+                </div>
+                <div>
+                  <span style={{color:"var(--rd-gray-text)"}}>Истекает: </span>
+                  <span style={{fontWeight:600,color: sslStatus.expired ? "#dc2626" : "var(--rd-dark)"}}>{fmtDate(sslStatus.certInfo.validTo)}</span>
+                </div>
+                {!sslStatus.matched && (
+                  <div style={{gridColumn:"1 / -1",color:"#dc2626",fontWeight:700}}>
+                    ⚠ Сертификат и ключ не совпадают!
+                  </div>
+                )}
+              </div>
+            )}
+
+            <div style={{display:"flex",gap:"10px",marginTop:"16px",flexWrap:"wrap"}}>
+              <button className="btn btn-secondary" onClick={() => setSslExpanded(e => !e)}>
+                {sslExpanded ? "✕ Отмена" : "🔄 Заменить сертификат"}
+              </button>
+              <button className="btn btn-ghost" onClick={deleteSsl} style={{color:"var(--rd-red)"}}>
+                🗑 Удалить сертификат
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div style={{padding:"16px",background:"var(--rd-gray-bg)",border:"1.5px dashed var(--rd-gray-border)",borderRadius:"var(--rd-radius-sm)",marginBottom:"20px",textAlign:"center"}}>
+            <div style={{fontSize:"28px",marginBottom:"8px"}}>🔓</div>
+            <div style={{fontWeight:700,fontSize:"14px",color:"var(--rd-dark)",marginBottom:"4px"}}>SSL не подключён</div>
+            <div style={{fontSize:"12px",color:"var(--rd-gray-text)",marginBottom:"12px"}}>Сайт работает по HTTP. Загрузите сертификат для активации HTTPS.</div>
+            {!sslExpanded && (
+              <button className="btn btn-primary" onClick={() => setSslExpanded(true)}>
+                🔒 Подключить SSL
+              </button>
+            )}
+          </div>
+        )}
+
+        {/* Upload form */}
+        {sslExpanded && (
+          <div style={{padding:"20px",background:"#fafbfc",border:"1.5px solid var(--rd-gray-border)",borderRadius:"var(--rd-radius-sm)"}}>
+            <div style={{fontSize:"13px",fontWeight:700,color:"var(--rd-dark)",marginBottom:"16px"}}>Загрузка SSL-сертификата</div>
+
+            {/* Certificate */}
+            <div className="form-field">
+              <label className="form-label">Сертификат (cert.pem) *</label>
+              <div style={{display:"flex",gap:"8px",alignItems:"flex-start",marginBottom:"6px"}}>
+                <label className="btn btn-secondary" style={{cursor:"pointer",position:"relative",flexShrink:0}}>
+                  📄 Выбрать файл
+                  <input type="file" accept=".pem,.crt,.cer,.cert" style={{position:"absolute",inset:0,opacity:0,cursor:"pointer"}} onChange={handleSslFileRead(setSslCert)} />
+                </label>
+                {sslCert && <span style={{fontSize:"12px",color:"var(--rd-green)",fontWeight:600,paddingTop:"8px"}}>✓ Загружен ({sslCert.length} символов)</span>}
+              </div>
+              <textarea
+                className="form-input"
+                placeholder={"-----BEGIN CERTIFICATE-----\nMIID...\n-----END CERTIFICATE-----"}
+                value={sslCert}
+                onChange={e => setSslCert(e.target.value)}
+                rows={4}
+                style={{resize:"vertical",minHeight:"80px",fontFamily:"monospace",fontSize:"11px"}}
+              />
+              <div style={{fontSize:"11px",color:"var(--rd-gray-text)",marginTop:"4px"}}>
+                Файл .pem, .crt или .cer — основной сертификат, можно с цепочкой (chain)
+              </div>
+            </div>
+
+            {/* Private Key */}
+            <div className="form-field" style={{marginTop:"16px"}}>
+              <label className="form-label">Приватный ключ (key.pem) *</label>
+              <div style={{display:"flex",gap:"8px",alignItems:"flex-start",marginBottom:"6px"}}>
+                <label className="btn btn-secondary" style={{cursor:"pointer",position:"relative",flexShrink:0}}>
+                  🔑 Выбрать файл
+                  <input type="file" accept=".pem,.key" style={{position:"absolute",inset:0,opacity:0,cursor:"pointer"}} onChange={handleSslFileRead(setSslKey)} />
+                </label>
+                {sslKey && <span style={{fontSize:"12px",color:"var(--rd-green)",fontWeight:600,paddingTop:"8px"}}>✓ Загружен ({sslKey.length} символов)</span>}
+              </div>
+              <textarea
+                className="form-input"
+                placeholder={"-----BEGIN PRIVATE KEY-----\nMIIE...\n-----END PRIVATE KEY-----"}
+                value={sslKey}
+                onChange={e => setSslKey(e.target.value)}
+                rows={4}
+                style={{resize:"vertical",minHeight:"80px",fontFamily:"monospace",fontSize:"11px"}}
+              />
+              <div style={{fontSize:"11px",color:"var(--rd-gray-text)",marginTop:"4px"}}>
+                Файл .pem или .key — приватный ключ (RSA / ECDSA)
+              </div>
+            </div>
+
+            {/* CA Chain (optional) */}
+            <div className="form-field" style={{marginTop:"16px"}}>
+              <label className="form-label">CA-цепочка (ca.pem) — необязательно</label>
+              <div style={{display:"flex",gap:"8px",alignItems:"flex-start",marginBottom:"6px"}}>
+                <label className="btn btn-secondary" style={{cursor:"pointer",position:"relative",flexShrink:0}}>
+                  📎 Выбрать файл
+                  <input type="file" accept=".pem,.crt,.cer,.ca-bundle" style={{position:"absolute",inset:0,opacity:0,cursor:"pointer"}} onChange={handleSslFileRead(setSslCa)} />
+                </label>
+                {sslCa && <span style={{fontSize:"12px",color:"var(--rd-green)",fontWeight:600,paddingTop:"8px"}}>✓ Загружен ({sslCa.length} символов)</span>}
+              </div>
+              <textarea
+                className="form-input"
+                placeholder={"-----BEGIN CERTIFICATE-----\n(промежуточные сертификаты)\n-----END CERTIFICATE-----"}
+                value={sslCa}
+                onChange={e => setSslCa(e.target.value)}
+                rows={3}
+                style={{resize:"vertical",minHeight:"60px",fontFamily:"monospace",fontSize:"11px"}}
+              />
+              <div style={{fontSize:"11px",color:"var(--rd-gray-text)",marginTop:"4px"}}>
+                Промежуточные сертификаты удостоверяющего центра (необязательно, если уже включены в cert.pem)
+              </div>
+            </div>
+
+            {/* Upload actions */}
+            <div style={{display:"flex",gap:"10px",marginTop:"20px",flexWrap:"wrap",alignItems:"center"}}>
+              <button className="btn btn-primary" onClick={uploadSsl} disabled={sslUploading || !sslCert.trim() || !sslKey.trim()}>
+                {sslUploading ? "⏳ Проверка и установка..." : "🔒 Установить сертификат"}
+              </button>
+              <button className="btn btn-ghost" onClick={() => { setSslExpanded(false); setSslCert(""); setSslKey(""); setSslCa(""); }}>
+                Отмена
+              </button>
+            </div>
+
+            {/* Help note */}
+            <div style={{marginTop:"16px",padding:"12px 14px",background:"rgba(59,130,246,0.06)",border:"1px solid rgba(59,130,246,0.15)",borderRadius:"var(--rd-radius-sm)",fontSize:"12px",lineHeight:"1.7",color:"#475569"}}>
+              <strong>Как получить SSL-сертификат:</strong><br/>
+              1. <strong>Let's Encrypt</strong> (бесплатно) — используйте certbot: <code style={{background:"rgba(0,0,0,0.06)",padding:"1px 5px",borderRadius:"3px",fontSize:"11px"}}>certbot certonly --standalone -d yourdomain.com</code><br/>
+              2. <strong>Коммерческий</strong> — закажите у провайдера (Comodo, DigiCert, GlobalSign и др.)<br/>
+              3. <strong>Self-signed</strong> (для тестов) — <code style={{background:"rgba(0,0,0,0.06)",padding:"1px 5px",borderRadius:"3px",fontSize:"11px"}}>openssl req -x509 -nodes -days 365 -newkey rsa:2048 -keyout key.pem -out cert.pem</code><br/>
+              После установки <strong>перезапустите сервер</strong> для активации HTTPS.
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
