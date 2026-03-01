@@ -19,6 +19,7 @@ const nextConfig = {
         stream: false,
         path: false,
         os: false,
+        child_process: false,
       };
     }
     return config;

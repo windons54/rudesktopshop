@@ -2,10 +2,10 @@
 // Управление SSL-сертификатами: загрузка, удаление, статус, Let's Encrypt.
 // Сертификаты хранятся в /ssl/ в корне проекта (cert.pem, key.pem, ca.pem).
 
-const fs = require('fs');
-const path = require('path');
-const crypto = require('crypto');
-const { execSync, spawn } = require('child_process');
+import fs from 'fs';
+import path from 'path';
+import crypto from 'crypto';
+import { execSync } from 'child_process';
 
 const SSL_DIR = path.join(process.cwd(), 'ssl');
 const CERT_PATH = path.join(SSL_DIR, 'cert.pem');
@@ -39,7 +39,7 @@ function validateKey(pemStr) {
   try {
     crypto.createPrivateKey(pemStr);
     return true;
-  } catch {
+  } catch (_e) {
     return false;
   }
 }
@@ -52,7 +52,7 @@ function certKeyMatch(certPem, keyPem) {
     const privKey = crypto.createPrivateKey(keyPem);
     const pubFromKey = crypto.createPublicKey(privKey);
     return pubFromCert.export({ type: 'spki', format: 'pem' }) === pubFromKey.export({ type: 'spki', format: 'pem' });
-  } catch {
+  } catch (_e) {
     return false;
   }
 }
@@ -104,7 +104,7 @@ export default async function handler(req, res) {
     if (!key || !key.trim()) errors.push('Приватный ключ (key.pem) обязателен');
 
     if (cert && !cert.includes('-----BEGIN CERTIFICATE-----')) errors.push('Некорректный формат сертификата (ожидается PEM)');
-    if (key && !key.includes('-----BEGIN') ) errors.push('Некорректный формат ключа (ожидается PEM)');
+    if (key && !key.includes('-----BEGIN')) errors.push('Некорректный формат ключа (ожидается PEM)');
 
     if (errors.length) return res.json({ ok: false, errors });
 
@@ -153,7 +153,7 @@ export default async function handler(req, res) {
   if (action === 'delete') {
     ensureDir();
     [CERT_PATH, KEY_PATH, CA_PATH].forEach(f => {
-      try { if (fs.existsSync(f)) fs.unlinkSync(f); } catch {}
+      try { if (fs.existsSync(f)) fs.unlinkSync(f); } catch (_e) { /* ignore */ }
     });
     return res.json({ ok: true, message: 'SSL-сертификаты удалены.' });
   }
@@ -165,7 +165,7 @@ export default async function handler(req, res) {
     try {
       certbotVersion = execSync('certbot --version 2>&1', { encoding: 'utf-8', timeout: 5000 }).trim();
       certbotInstalled = true;
-    } catch {}
+    } catch (_e) { /* certbot not found */ }
 
     return res.json({
       ok: true,
@@ -191,31 +191,28 @@ export default async function handler(req, res) {
     if (errors.length) return res.json({ ok: false, errors });
 
     const d = domain.trim();
-    const e = email.trim();
+    const em = email.trim();
     const useStandalone = method !== 'webroot';
-    const httpPort = parseInt(process.env.PORT, 10) || 3000;
 
     // Формируем команду certbot
     let cmd;
     if (useStandalone) {
-      // standalone: certbot поднимает свой HTTP-сервер на порту 80
       cmd = [
         'certbot', 'certonly', '--standalone',
         '--non-interactive', '--agree-tos',
-        '--email', e,
+        '--email', em,
         '-d', d,
         '--cert-path', CERT_PATH,
         '--key-path', KEY_PATH,
         '--fullchain-path', CERT_PATH,
-        '--http-01-port', String(httpPort === 80 ? 80 : 80),
+        '--http-01-port', '80',
       ];
     } else {
-      // webroot: certbot использует существующую папку для HTTP-challenge
       const webrootPath = path.join(process.cwd(), 'public');
       cmd = [
         'certbot', 'certonly', '--webroot',
         '--non-interactive', '--agree-tos',
-        '--email', e,
+        '--email', em,
         '-d', d,
         '--webroot-path', webrootPath,
       ];
@@ -232,7 +229,6 @@ export default async function handler(req, res) {
       fs.writeFileSync(LE_LOG_PATH, result, 'utf-8');
 
       // Certbot по умолчанию кладёт сертификаты в /etc/letsencrypt/live/<domain>/
-      // Копируем в нашу ssl/ директорию
       const liveDir = '/etc/letsencrypt/live/' + d;
       const liveCert = path.join(liveDir, 'fullchain.pem');
       const liveKey = path.join(liveDir, 'privkey.pem');
@@ -240,8 +236,7 @@ export default async function handler(req, res) {
       if (fs.existsSync(liveCert) && fs.existsSync(liveKey)) {
         fs.copyFileSync(liveCert, CERT_PATH);
         fs.copyFileSync(liveKey, KEY_PATH);
-        // CA chain is already in fullchain.pem
-        if (fs.existsSync(CA_PATH)) try { fs.unlinkSync(CA_PATH); } catch {}
+        if (fs.existsSync(CA_PATH)) try { fs.unlinkSync(CA_PATH); } catch (_e) { /* ok */ }
 
         const certPem = fs.readFileSync(CERT_PATH, 'utf-8');
         const certInfo = parseCertInfo(certPem);
@@ -272,12 +267,12 @@ export default async function handler(req, res) {
         log: result.slice(-1000),
       });
 
-    } catch (e) {
-      const output = (e.stdout || '') + '\n' + (e.stderr || '') + '\n' + e.message;
+    } catch (err) {
+      const output = (err.stdout || '') + '\n' + (err.stderr || '') + '\n' + err.message;
       fs.writeFileSync(LE_LOG_PATH, output, 'utf-8');
       return res.json({
         ok: false,
-        errors: ['Ошибка certbot: ' + (e.stderr || e.message || 'неизвестная ошибка').slice(0, 300)],
+        errors: ['Ошибка certbot: ' + (err.stderr || err.message || 'неизвестная ошибка').slice(0, 300)],
         log: output.slice(-1000),
       });
     }
@@ -311,11 +306,11 @@ export default async function handler(req, res) {
         log: result.slice(-500),
         message: 'Продление сертификата завершено. Перезапустите сервер при необходимости.',
       });
-    } catch (e) {
-      const output = (e.stdout || '') + '\n' + (e.stderr || '') + '\n' + e.message;
+    } catch (err) {
+      const output = (err.stdout || '') + '\n' + (err.stderr || '') + '\n' + err.message;
       return res.json({
         ok: false,
-        errors: ['Ошибка при продлении: ' + (e.stderr || e.message || '').slice(0, 300)],
+        errors: ['Ошибка при продлении: ' + (err.stderr || err.message || '').slice(0, 300)],
         log: output.slice(-1000),
       });
     }
