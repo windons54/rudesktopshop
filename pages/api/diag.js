@@ -133,9 +133,10 @@ export default async function handler(req, res) {
   const fsInfo = {
     cwd: process.cwd(),
     dataDir: DATA_DIR,
-    hasPgConfig: fs.existsSync(path.join(DATA_DIR, 'pg-config.json')),
-    hasPgEnv:    fs.existsSync(path.join(DATA_DIR, 'pg-env.json')),
-    hasStoreJson:fs.existsSync(path.join(DATA_DIR, 'store.json')),
+    hasPgConfig:    fs.existsSync(path.join(DATA_DIR, 'pg-config.json')),
+    hasPgEnv:       fs.existsSync(path.join(DATA_DIR, 'pg-env.json')),
+    hasPgEnvFile:   fs.existsSync(path.join(process.cwd(), 'pg.env')),  // файл в git-репозитории
+    hasStoreJson:   fs.existsSync(path.join(DATA_DIR, 'store.json')),
   };
   if (fsInfo.hasStoreJson) {
     try {
