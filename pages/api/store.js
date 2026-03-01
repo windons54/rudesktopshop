@@ -167,6 +167,27 @@ async function tryBootstrapFromDb() {
 // поэтому globalThis._pgPool живёт между запросами.
 const g = globalThis;
 
+// ── Логирование подключений к БД ────────────────────────────────────────
+// Ring-буфер последних событий подключения: connect, disconnect, retry,
+// keepalive, error, query timing. Используется для диагностики в админке.
+const PG_LOG_MAX = 200;
+if (!g._pgLogs) g._pgLogs = [];
+
+function pgLog(type, message, extra) {
+  const entry = {
+    ts: new Date().toISOString(),
+    type,       // 'connect' | 'disconnect' | 'retry' | 'keepalive' | 'error' | 'query' | 'pool' | 'init'
+    message,
+    ...(extra || {}),
+  };
+  g._pgLogs.push(entry);
+  if (g._pgLogs.length > PG_LOG_MAX) g._pgLogs.splice(0, g._pgLogs.length - PG_LOG_MAX);
+  // Дублируем в консоль для серверных логов
+  const prefix = `[PG:${type}]`;
+  if (type === 'error') console.error(prefix, message, extra?.detail || '');
+  else console.log(prefix, message, extra?.detail || '');
+}
+
 // ── Retry-обёртка: автоматически пересоздаёт пул при обрыве соединения ───
 // Решает проблему «пользователь долго не заходил → соединения протухли»:
 // первый запрос может упасть на мёртвом соединении, retry пересоздаёт пул
@@ -193,10 +214,14 @@ function isConnectionError(err) {
 async function queryWithRetry(queryFn, maxRetries = 1) {
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
-      return await queryFn();
+      const start = Date.now();
+      const result = await queryFn();
+      const dur = Date.now() - start;
+      if (dur > 2000) pgLog('query', `Медленный запрос: ${dur}ms`, { duration: dur });
+      return result;
     } catch (err) {
       if (attempt < maxRetries && isConnectionError(err)) {
-        console.warn(`[PG Retry] Обрыв соединения (${err.code || err.message}), пересоздаём пул...`);
+        pgLog('retry', `Обрыв соединения, пересоздаём пул`, { detail: err.code || err.message });
         // Сбрасываем пул чтобы getPool() создал новый
         if (g._pgPool) { try { g._pgPool.end(); } catch {} }
         g._pgPool = null;
@@ -205,9 +230,14 @@ async function queryWithRetry(queryFn, maxRetries = 1) {
         g._pgLastError = null; // Сбрасываем cooldown чтобы retry прошёл сразу
         // Даём время на создание нового пула
         const retryPool = await getPool();
-        if (!retryPool) throw err; // Не смогли переподключиться
+        if (!retryPool) {
+          pgLog('error', 'Retry не удался — пул не создан', { detail: err.message });
+          throw err;
+        }
+        pgLog('retry', 'Пул пересоздан, повторяем запрос');
         continue;
       }
+      pgLog('error', `Ошибка запроса: ${err.message}`, { detail: err.code || '' });
       throw err;
     }
   }
@@ -247,12 +277,13 @@ async function getPool() {
   // Создаём новый пул
   g._pgPoolKey = cfgKey;
   g._pgReady = false;
+  pgLog('pool', 'Создаём новый пул соединений', { detail: `source=${source}` });
 
   g._pgInitPromise = (async () => {
     let newPool = null;
     try {
       const { Pool } = await import('pg');
-      if (g._pgPool) { try { await g._pgPool.end(); } catch {} g._pgPool = null; }
+      if (g._pgPool) { pgLog('pool', 'Закрываем старый пул'); try { await g._pgPool.end(); } catch {} g._pgPool = null; }
 
       // ИСПРАВЛЕНИЕ: idleTimeoutMillis увеличен с 30s до 600s (10 минут).
       // При 30s пул закрывал все соединения в период бездействия, и при обновлении
@@ -290,9 +321,10 @@ async function getPool() {
         // Ошибки отдельных idle-соединений не должны уничтожать весь пул —
         // pg автоматически удалит сломанный клиент из пула и создаст новый.
         // Мы только логируем. Обнуляем пул лишь при фатальных ошибках (ECONNREFUSED и т.п.)
-        console.error('[PG Pool] Ошибка idle-клиента:', err.message);
+        pgLog('error', `Ошибка idle-клиента: ${err.message}`, { detail: err.code || '' });
         const fatal = err.code === 'ECONNREFUSED' || err.code === 'ENOTFOUND' || err.message?.includes('Connection terminated unexpectedly');
         if (fatal && g._pgPool === newPool) {
+          pgLog('disconnect', 'Фатальная ошибка idle — пул сброшен', { detail: err.message });
           g._pgReady = false;
           g._pgPool = null;
           g._pgLastError = Date.now();
@@ -306,20 +338,26 @@ async function getPool() {
       g._pgPool = newPool;
       g._pgReady = true;
       g._pgInitPromise = null;
+      pgLog('connect', 'Пул создан и помечен как готовый');
 
       // Фоновая проверка + создание таблицы (не блокирует первый запрос)
       (async () => {
         try {
+          const t0 = Date.now();
           await newPool.query('SELECT 1');
+          const pingMs = Date.now() - t0;
+          pgLog('connect', `Фоновая проверка OK (SELECT 1 = ${pingMs}ms)`, { duration: pingMs });
           if (!g._tableEnsured) {
             await newPool.query(`CREATE TABLE IF NOT EXISTS kv (
               key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TIMESTAMPTZ DEFAULT NOW()
             )`);
             g._tableEnsured = true;
+            pgLog('init', 'Таблица kv проверена/создана');
           }
         } catch (e) {
-          console.error('[PG Pool] Фоновая проверка не прошла:', e.message);
+          pgLog('error', `Фоновая проверка не прошла: ${e.message}`, { detail: e.code || '' });
           if (g._pgPool === newPool) {
+            pgLog('disconnect', 'Пул сброшен после неудачной фоновой проверки');
             g._pgReady = false;
             g._pgPool = null;
             g._pgLastError = Date.now();
@@ -331,7 +369,7 @@ async function getPool() {
       if (poolCfg.host) g._savedPgCfg = { ...poolCfg };
       return g._pgPool;
     } catch (e) {
-      console.error('[PG Pool] Ошибка инициализации:', e.message);
+      pgLog('error', `Ошибка инициализации пула: ${e.message}`, { detail: e.code || '' });
       // ИСПРАВЛЕНИЕ: закрываем pool при ошибке чтобы не было утечки соединений
       if (newPool) { try { newPool.end(); } catch {} }
       g._pgPool = null;
@@ -365,9 +403,12 @@ if (!g._pgKeepaliveTimer) {
     const pool = g._pgPool;
     if (!pool || !g._pgReady) return;
     try {
+      const t0 = Date.now();
       await pool.query('SELECT 1');
+      const ms = Date.now() - t0;
+      pgLog('keepalive', `Пинг OK (${ms}ms)`, { duration: ms });
     } catch (err) {
-      console.warn('[PG Keepalive] Пинг не прошёл:', err.message);
+      pgLog('error', `Keepalive пинг не прошёл: ${err.message}`, { detail: err.code || '' });
       // Не сбрасываем пул — следующий реальный запрос через queryWithRetry сам пересоздаст
     }
   }, KEEPALIVE_INTERVAL);
@@ -526,6 +567,24 @@ export default async function handler(req, res) {
       safe._passwordSaved = !!password;
       return res.json({ ok: true, config: safe, source: source || 'unknown' });
     } catch (e) { return res.json({ ok: true, config: null, source: 'none', error: e.message }); }
+  }
+
+  // ── Логи подключения к БД ──
+  if (action === 'pg_logs') {
+    const pool = g._pgPool;
+    return res.json({
+      ok: true,
+      logs: [...(g._pgLogs || [])],
+      poolStatus: {
+        ready: !!g._pgReady,
+        hasPool: !!pool,
+        totalCount: pool?.totalCount ?? null,
+        idleCount: pool?.idleCount ?? null,
+        waitingCount: pool?.waitingCount ?? null,
+      },
+      uptime: process.uptime(),
+      memoryMB: Math.round(process.memoryUsage().rss / 1024 / 1024),
+    });
   }
 
   // ── Тест подключения ──
@@ -771,6 +830,7 @@ export default async function handler(req, res) {
       // PG настроен но недоступен — сообщаем клиенту чтобы он не перезаписывал состояние
       const pgCfgExists = !!readPgConfig();
       if (pgCfgExists) {
+        pgLog('error', `Пул недоступен при запросе action=${action}`, { detail: 'pg_unavailable' });
         if (action === 'getAll') return res.json({ ok: false, pg_unavailable: true, error: 'PostgreSQL временно недоступен' });
         if (action === 'version') return res.json({ ok: true, version: g._dataVersion, pg_unavailable: true });
         if (action === 'get')    return res.json({ ok: false, pg_unavailable: true, value: null });

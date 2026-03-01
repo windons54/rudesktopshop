@@ -5739,6 +5739,44 @@ function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbC
     return disabled ? 'postgres' : 'sqlite';
   });
 
+  // ── Состояние для вкладки «Логи БД» ──
+  const [pgLogs, setPgLogs] = useState([]);
+  const [pgLogsPoolStatus, setPgLogsPoolStatus] = useState(null);
+  const [pgLogsUptime, setPgLogsUptime] = useState(0);
+  const [pgLogsMemory, setPgLogsMemory] = useState(0);
+  const [pgLogsLoading, setPgLogsLoading] = useState(false);
+  const [pgLogsAutoRefresh, setPgLogsAutoRefresh] = useState(false);
+  const [pgLogsFilter, setPgLogsFilter] = useState('all'); // all | error | connect | keepalive | retry | query
+
+  const fetchPgLogs = async () => {
+    setPgLogsLoading(true);
+    try {
+      const r = await fetch('/api/store', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'pg_logs' }),
+      });
+      const d = await r.json();
+      if (d.ok) {
+        setPgLogs(d.logs || []);
+        setPgLogsPoolStatus(d.poolStatus || null);
+        setPgLogsUptime(d.uptime || 0);
+        setPgLogsMemory(d.memoryMB || 0);
+      }
+    } catch (e) { console.warn('[Logs] fetch error:', e.message); }
+    setPgLogsLoading(false);
+  };
+
+  // Автообновление логов когда вкладка открыта
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (tab !== 'logs') return;
+    fetchPgLogs();
+    if (!pgLogsAutoRefresh) return;
+    const iv = setInterval(fetchPgLogs, 3000);
+    return () => clearInterval(iv);
+  }, [tab, pgLogsAutoRefresh]);
+
   const testPgConnection = async (cfg) => {
     setPgTesting(true); setPgTestResult(null);
     try {
@@ -6070,6 +6108,7 @@ function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbC
     { id: "currency",   icon: "🪙", label: "Валюта" },
     { id: "seo",        icon: "🔍", label: "SEO" },
     { id: "database",   icon: "🗄️", label: "База данных" },
+    { id: "logs",       icon: "📋", label: "Логи БД" },
     { id: "socials",    icon: "🌐", label: "Соц. сети" },
     { id: "faq",        icon: "❓", label: "Вопрос / Ответ" },
     { id: "tasks",      icon: "🎯", label: "Задания" },
@@ -6457,6 +6496,157 @@ function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbC
             </div>
           )}
 
+
+          {tab === "logs" && (
+            <div>
+              <div className="settings-card">
+                <div className="settings-section-title">📋 Логи подключения к БД</div>
+                <p style={{fontSize:"13px",color:"var(--rd-gray-text)",marginBottom:"16px",lineHeight:1.6}}>
+                  Журнал событий подключения к PostgreSQL: создание пула, keepalive-пинги, обрывы, retry, ошибки.
+                  Помогает понять задержки при загрузке данных после обновления страницы.
+                </p>
+
+                {/* Статус пула */}
+                <div style={{display:"flex",gap:"12px",flexWrap:"wrap",marginBottom:"16px"}}>
+                  <div style={{padding:"10px 16px",borderRadius:"10px",background:pgLogsPoolStatus?.ready?"#e8f5e9":"#fbe9e7",border:"1px solid",borderColor:pgLogsPoolStatus?.ready?"#a5d6a7":"#ef9a9a",fontSize:"13px"}}>
+                    <b>Пул:</b> {pgLogsPoolStatus?.ready ? "✅ Готов" : "❌ Не готов"}
+                    {pgLogsPoolStatus?.hasPool && <span style={{marginLeft:"8px",color:"#666"}}>
+                      (всего: {pgLogsPoolStatus.totalCount}, idle: {pgLogsPoolStatus.idleCount}, ожидает: {pgLogsPoolStatus.waitingCount})
+                    </span>}
+                  </div>
+                  <div style={{padding:"10px 16px",borderRadius:"10px",background:"#f5f5f5",border:"1px solid #e0e0e0",fontSize:"13px"}}>
+                    <b>Uptime:</b> {Math.floor(pgLogsUptime / 3600)}ч {Math.floor((pgLogsUptime % 3600) / 60)}м {Math.floor(pgLogsUptime % 60)}с
+                  </div>
+                  <div style={{padding:"10px 16px",borderRadius:"10px",background:"#f5f5f5",border:"1px solid #e0e0e0",fontSize:"13px"}}>
+                    <b>Память:</b> {pgLogsMemory} MB
+                  </div>
+                </div>
+
+                {/* Управление */}
+                <div style={{display:"flex",gap:"8px",flexWrap:"wrap",marginBottom:"16px",alignItems:"center"}}>
+                  <button className="btn" onClick={fetchPgLogs} disabled={pgLogsLoading}
+                    style={{fontSize:"13px"}}>
+                    {pgLogsLoading ? "⏳ Загрузка…" : "🔄 Обновить"}
+                  </button>
+                  <label style={{display:"flex",alignItems:"center",gap:"6px",fontSize:"13px",cursor:"pointer"}}>
+                    <input type="checkbox" checked={pgLogsAutoRefresh}
+                      onChange={(e) => setPgLogsAutoRefresh(e.target.checked)} />
+                    Автообновление (3 сек)
+                  </label>
+                  <span style={{marginLeft:"auto",fontSize:"12px",color:"#999"}}>
+                    Записей: {pgLogs.length} / 200
+                  </span>
+                </div>
+
+                {/* Фильтры */}
+                <div style={{display:"flex",gap:"4px",flexWrap:"wrap",marginBottom:"12px"}}>
+                  {[
+                    ['all', '📋 Все'],
+                    ['error', '❌ Ошибки'],
+                    ['connect', '🟢 Подключения'],
+                    ['disconnect', '🔴 Отключения'],
+                    ['retry', '🔁 Retry'],
+                    ['keepalive', '💓 Keepalive'],
+                    ['query', '🐌 Медленные'],
+                    ['pool', '🏊 Пул'],
+                  ].map(([id, label]) => (
+                    <button key={id} onClick={() => setPgLogsFilter(id)}
+                      style={{
+                        padding:"4px 10px",fontSize:"12px",borderRadius:"6px",cursor:"pointer",
+                        border:"1px solid",
+                        borderColor: pgLogsFilter === id ? "var(--rd-red)" : "#ddd",
+                        background: pgLogsFilter === id ? "var(--rd-red)" : "#fff",
+                        color: pgLogsFilter === id ? "#fff" : "#333",
+                      }}>
+                      {label}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Таблица логов */}
+                <div style={{maxHeight:"500px",overflow:"auto",border:"1px solid #e0e0e0",borderRadius:"8px",background:"#fafafa"}}>
+                  <table style={{width:"100%",borderCollapse:"collapse",fontSize:"12px",fontFamily:"monospace"}}>
+                    <thead>
+                      <tr style={{position:"sticky",top:0,background:"#f0f0f0",zIndex:1}}>
+                        <th style={{padding:"6px 10px",textAlign:"left",borderBottom:"1px solid #ddd",whiteSpace:"nowrap"}}>Время</th>
+                        <th style={{padding:"6px 10px",textAlign:"left",borderBottom:"1px solid #ddd",whiteSpace:"nowrap"}}>Тип</th>
+                        <th style={{padding:"6px 10px",textAlign:"left",borderBottom:"1px solid #ddd"}}>Сообщение</th>
+                        <th style={{padding:"6px 10px",textAlign:"right",borderBottom:"1px solid #ddd",whiteSpace:"nowrap"}}>Детали</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(() => {
+                        const filtered = pgLogsFilter === 'all'
+                          ? pgLogs
+                          : pgLogs.filter(l => l.type === pgLogsFilter);
+                        if (filtered.length === 0) {
+                          return (
+                            <tr><td colSpan={4} style={{padding:"20px",textAlign:"center",color:"#999"}}>
+                              {pgLogs.length === 0 ? "Логов пока нет. Нажмите «Обновить» или включите автообновление." : "Нет записей с таким фильтром."}
+                            </td></tr>
+                          );
+                        }
+                        return [...filtered].reverse().map((log, i) => {
+                          const typeColors = {
+                            connect: '#2e7d32', disconnect: '#c62828', error: '#c62828',
+                            retry: '#e65100', keepalive: '#1565c0', query: '#f9a825',
+                            pool: '#6a1b9a', init: '#00695c',
+                          };
+                          const typeBg = {
+                            error: '#fff3f0', disconnect: '#fff3f0', retry: '#fff8e1',
+                          };
+                          const ts = log.ts ? new Date(log.ts) : null;
+                          const timeStr = ts ? ts.toLocaleTimeString('ru-RU', {hour:'2-digit',minute:'2-digit',second:'2-digit'}) : '—';
+                          const dateStr = ts ? ts.toLocaleDateString('ru-RU', {day:'2-digit',month:'2-digit'}) : '';
+                          return (
+                            <tr key={i} style={{background: typeBg[log.type] || (i%2===0?"#fff":"#fafafa")}}>
+                              <td style={{padding:"5px 10px",borderBottom:"1px solid #f0f0f0",whiteSpace:"nowrap",color:"#666"}}>
+                                <span style={{fontSize:"10px",color:"#aaa"}}>{dateStr} </span>{timeStr}
+                              </td>
+                              <td style={{padding:"5px 10px",borderBottom:"1px solid #f0f0f0",whiteSpace:"nowrap"}}>
+                                <span style={{
+                                  display:"inline-block",padding:"1px 6px",borderRadius:"4px",fontSize:"11px",fontWeight:600,
+                                  color:"#fff",background: typeColors[log.type] || '#757575',
+                                }}>{log.type}</span>
+                              </td>
+                              <td style={{padding:"5px 10px",borderBottom:"1px solid #f0f0f0",wordBreak:"break-word"}}>
+                                {log.message}
+                              </td>
+                              <td style={{padding:"5px 10px",borderBottom:"1px solid #f0f0f0",textAlign:"right",whiteSpace:"nowrap",color:"#888"}}>
+                                {log.duration ? `${log.duration}ms` : log.detail || ''}
+                              </td>
+                            </tr>
+                          );
+                        });
+                      })()}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Легенда */}
+                <div style={{marginTop:"12px",padding:"10px 14px",background:"#f9f9f9",borderRadius:"8px",border:"1px solid #eee"}}>
+                  <div style={{fontSize:"12px",fontWeight:600,marginBottom:"6px",color:"#555"}}>Типы событий:</div>
+                  <div style={{display:"flex",gap:"8px",flexWrap:"wrap",fontSize:"11px",color:"#666"}}>
+                    <span>🟢 <b>connect</b> — подключение/пул готов</span>
+                    <span>🔴 <b>disconnect</b> — пул сброшен</span>
+                    <span>❌ <b>error</b> — ошибки</span>
+                    <span>🔁 <b>retry</b> — автоповтор после обрыва</span>
+                    <span>💓 <b>keepalive</b> — пинг каждые 30с</span>
+                    <span>🐌 <b>query</b> — запросы {">"}2с</span>
+                    <span>🏊 <b>pool</b> — создание/закрытие пула</span>
+                    <span>🏁 <b>init</b> — инициализация таблиц</span>
+                  </div>
+                </div>
+
+                {/* Подсказка */}
+                <div style={{marginTop:"12px",padding:"10px 14px",background:"#e3f2fd",borderRadius:"8px",border:"1px solid #bbdefb",fontSize:"12px",lineHeight:1.6,color:"#1565c0"}}>
+                  <b>Диагностика задержки 10 сек:</b> Откройте логи, обновите страницу в другой вкладке, затем нажмите «Обновить» здесь.
+                  Ищите события <b>error</b> → <b>pool</b> → <b>connect</b> — это покажет цепочку: обрыв старого соединения → создание нового пула → готовность.
+                  Если между <b>error</b> и <b>connect</b> больше нескольких секунд — проблема в скорости TCP-подключения к серверу БД.
+                </div>
+              </div>
+            </div>
+          )}
 
           {tab === "socials" && (
             <div>
