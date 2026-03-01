@@ -1,15 +1,17 @@
 // pages/api/ssl.js
-// Управление SSL-сертификатами: загрузка, удаление, статус.
+// Управление SSL-сертификатами: загрузка, удаление, статус, Let's Encrypt.
 // Сертификаты хранятся в /ssl/ в корне проекта (cert.pem, key.pem, ca.pem).
 
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const { execSync, spawn } = require('child_process');
 
 const SSL_DIR = path.join(process.cwd(), 'ssl');
 const CERT_PATH = path.join(SSL_DIR, 'cert.pem');
 const KEY_PATH = path.join(SSL_DIR, 'key.pem');
 const CA_PATH = path.join(SSL_DIR, 'ca.pem');
+const LE_LOG_PATH = path.join(SSL_DIR, 'letsencrypt.log');
 
 function ensureDir() {
   if (!fs.existsSync(SSL_DIR)) fs.mkdirSync(SSL_DIR, { recursive: true });
@@ -154,6 +156,169 @@ export default async function handler(req, res) {
       try { if (fs.existsSync(f)) fs.unlinkSync(f); } catch {}
     });
     return res.json({ ok: true, message: 'SSL-сертификаты удалены.' });
+  }
+
+  // ─── LETSENCRYPT CHECK ───
+  if (action === 'le_check') {
+    let certbotInstalled = false;
+    let certbotVersion = '';
+    try {
+      certbotVersion = execSync('certbot --version 2>&1', { encoding: 'utf-8', timeout: 5000 }).trim();
+      certbotInstalled = true;
+    } catch {}
+
+    return res.json({
+      ok: true,
+      certbotInstalled,
+      certbotVersion,
+    });
+  }
+
+  // ─── LETSENCRYPT ISSUE ───
+  if (action === 'le_issue') {
+    ensureDir();
+    const { domain, email, method } = req.body;
+    const errors = [];
+
+    if (!domain || !domain.trim()) errors.push('Укажите домен');
+    if (!email || !email.trim()) errors.push('Укажите email для Let\'s Encrypt');
+    if (domain && !/^[a-zA-Z0-9]([a-zA-Z0-9-]*\.)+[a-zA-Z]{2,}$/.test(domain.trim())) {
+      errors.push('Некорректный формат домена');
+    }
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
+      errors.push('Некорректный email');
+    }
+    if (errors.length) return res.json({ ok: false, errors });
+
+    const d = domain.trim();
+    const e = email.trim();
+    const useStandalone = method !== 'webroot';
+    const httpPort = parseInt(process.env.PORT, 10) || 3000;
+
+    // Формируем команду certbot
+    let cmd;
+    if (useStandalone) {
+      // standalone: certbot поднимает свой HTTP-сервер на порту 80
+      cmd = [
+        'certbot', 'certonly', '--standalone',
+        '--non-interactive', '--agree-tos',
+        '--email', e,
+        '-d', d,
+        '--cert-path', CERT_PATH,
+        '--key-path', KEY_PATH,
+        '--fullchain-path', CERT_PATH,
+        '--http-01-port', String(httpPort === 80 ? 80 : 80),
+      ];
+    } else {
+      // webroot: certbot использует существующую папку для HTTP-challenge
+      const webrootPath = path.join(process.cwd(), 'public');
+      cmd = [
+        'certbot', 'certonly', '--webroot',
+        '--non-interactive', '--agree-tos',
+        '--email', e,
+        '-d', d,
+        '--webroot-path', webrootPath,
+      ];
+    }
+
+    // Запускаем certbot
+    try {
+      const result = execSync(cmd.join(' ') + ' 2>&1', {
+        encoding: 'utf-8',
+        timeout: 120000,
+        env: { ...process.env, PATH: process.env.PATH + ':/usr/bin:/usr/local/bin:/snap/bin' },
+      });
+
+      fs.writeFileSync(LE_LOG_PATH, result, 'utf-8');
+
+      // Certbot по умолчанию кладёт сертификаты в /etc/letsencrypt/live/<domain>/
+      // Копируем в нашу ssl/ директорию
+      const liveDir = '/etc/letsencrypt/live/' + d;
+      const liveCert = path.join(liveDir, 'fullchain.pem');
+      const liveKey = path.join(liveDir, 'privkey.pem');
+
+      if (fs.existsSync(liveCert) && fs.existsSync(liveKey)) {
+        fs.copyFileSync(liveCert, CERT_PATH);
+        fs.copyFileSync(liveKey, KEY_PATH);
+        // CA chain is already in fullchain.pem
+        if (fs.existsSync(CA_PATH)) try { fs.unlinkSync(CA_PATH); } catch {}
+
+        const certPem = fs.readFileSync(CERT_PATH, 'utf-8');
+        const certInfo = parseCertInfo(certPem);
+
+        return res.json({
+          ok: true,
+          certInfo,
+          log: result.slice(-500),
+          message: 'Let\'s Encrypt сертификат успешно получен для ' + d + '. Перезапустите сервер.',
+        });
+      }
+
+      // Если certbot использовал --cert-path напрямую
+      if (fs.existsSync(CERT_PATH) && fs.existsSync(KEY_PATH)) {
+        const certPem = fs.readFileSync(CERT_PATH, 'utf-8');
+        const certInfo = parseCertInfo(certPem);
+        return res.json({
+          ok: true,
+          certInfo,
+          log: result.slice(-500),
+          message: 'Let\'s Encrypt сертификат получен для ' + d + '. Перезапустите сервер.',
+        });
+      }
+
+      return res.json({
+        ok: false,
+        errors: ['Certbot завершился, но сертификаты не найдены. Проверьте логи.'],
+        log: result.slice(-1000),
+      });
+
+    } catch (e) {
+      const output = (e.stdout || '') + '\n' + (e.stderr || '') + '\n' + e.message;
+      fs.writeFileSync(LE_LOG_PATH, output, 'utf-8');
+      return res.json({
+        ok: false,
+        errors: ['Ошибка certbot: ' + (e.stderr || e.message || 'неизвестная ошибка').slice(0, 300)],
+        log: output.slice(-1000),
+      });
+    }
+  }
+
+  // ─── LETSENCRYPT RENEW ───
+  if (action === 'le_renew') {
+    ensureDir();
+    const { domain } = req.body;
+    try {
+      const result = execSync('certbot renew --non-interactive 2>&1', {
+        encoding: 'utf-8',
+        timeout: 120000,
+        env: { ...process.env, PATH: process.env.PATH + ':/usr/bin:/usr/local/bin:/snap/bin' },
+      });
+      fs.writeFileSync(LE_LOG_PATH, result, 'utf-8');
+
+      // Перекопируем обновлённые файлы
+      if (domain) {
+        const liveDir = '/etc/letsencrypt/live/' + domain.trim();
+        const liveCert = path.join(liveDir, 'fullchain.pem');
+        const liveKey = path.join(liveDir, 'privkey.pem');
+        if (fs.existsSync(liveCert) && fs.existsSync(liveKey)) {
+          fs.copyFileSync(liveCert, CERT_PATH);
+          fs.copyFileSync(liveKey, KEY_PATH);
+        }
+      }
+
+      return res.json({
+        ok: true,
+        log: result.slice(-500),
+        message: 'Продление сертификата завершено. Перезапустите сервер при необходимости.',
+      });
+    } catch (e) {
+      const output = (e.stdout || '') + '\n' + (e.stderr || '') + '\n' + e.message;
+      return res.json({
+        ok: false,
+        errors: ['Ошибка при продлении: ' + (e.stderr || e.message || '').slice(0, 300)],
+        log: output.slice(-1000),
+      });
+    }
   }
 
   return res.status(400).json({ error: 'Unknown action: ' + action });

@@ -5573,6 +5573,16 @@ function SeoSettingsTab({ appearance, saveAppearance, notify }) {
   const [sslCa, setSslCa] = useState("");
   const [sslExpanded, setSslExpanded] = useState(false);
 
+  /* ── Let's Encrypt state ── */
+  const [leExpanded, setLeExpanded] = useState(false);
+  const [leCheck, setLeCheck] = useState(null);
+  const [leDomain, setLeDomain] = useState("");
+  const [leEmail, setLeEmail] = useState("");
+  const [leMethod, setLeMethod] = useState("standalone");
+  const [leIssuing, setLeIssuing] = useState(false);
+  const [leLog, setLeLog] = useState("");
+  const [leRenewing, setLeRenewing] = useState(false);
+
   const loadSslStatus = async () => {
     try {
       setSslLoading(true);
@@ -5624,6 +5634,50 @@ function SeoSettingsTab({ appearance, saveAppearance, notify }) {
   };
 
   const fmtDate = (s) => { try { return new Date(s).toLocaleDateString("ru-RU", { day:"numeric", month:"long", year:"numeric" }); } catch { return s; } };
+
+  /* ── Let's Encrypt functions ── */
+  const checkCertbot = async () => {
+    try {
+      const r = await fetch('/api/ssl', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'le_check' }) });
+      const data = await r.json();
+      setLeCheck(data);
+    } catch { setLeCheck({ ok: false }); }
+  };
+
+  const issueLe = async () => {
+    if (!leDomain.trim() || !leEmail.trim()) { notify("Укажите домен и email", "err"); return; }
+    setLeIssuing(true); setLeLog("");
+    try {
+      const r = await fetch('/api/ssl', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'le_issue', domain: leDomain.trim(), email: leEmail.trim(), method: leMethod }),
+      });
+      const data = await r.json();
+      if (data.log) setLeLog(data.log);
+      if (data.ok) {
+        notify(data.message || "Сертификат получен ✓");
+        loadSslStatus();
+      } else {
+        (data.errors || []).forEach(e => notify(e, "err"));
+      }
+    } catch (e) { notify("Ошибка: " + e.message, "err"); }
+    finally { setLeIssuing(false); }
+  };
+
+  const renewLe = async () => {
+    setLeRenewing(true); setLeLog("");
+    try {
+      const r = await fetch('/api/ssl', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'le_renew', domain: leDomain.trim() || undefined }),
+      });
+      const data = await r.json();
+      if (data.log) setLeLog(data.log);
+      if (data.ok) { notify(data.message || "Продление выполнено ✓"); loadSslStatus(); }
+      else { (data.errors || []).forEach(e => notify(e, "err")); }
+    } catch (e) { notify("Ошибка: " + e.message, "err"); }
+    finally { setLeRenewing(false); }
+  };
 
   return (
     <div>
@@ -5875,6 +5929,125 @@ function SeoSettingsTab({ appearance, saveAppearance, notify }) {
               2. <strong>Коммерческий</strong> — закажите у провайдера (Comodo, DigiCert, GlobalSign и др.)<br/>
               3. <strong>Self-signed</strong> (для тестов) — <code style={{background:"rgba(0,0,0,0.06)",padding:"1px 5px",borderRadius:"3px",fontSize:"11px"}}>openssl req -x509 -nodes -days 365 -newkey rsa:2048 -keyout key.pem -out cert.pem</code><br/>
               После установки <strong>перезапустите сервер</strong> для активации HTTPS.
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* ═══════════ LET'S ENCRYPT ═══════════ */}
+      <div className="settings-card" style={{marginTop:"24px"}}>
+        <div className="settings-section-title">🛡️ Let's Encrypt — бесплатный SSL</div>
+        <div style={{fontSize:"13px",color:"var(--rd-gray-text)",marginBottom:"20px",lineHeight:"1.7"}}>
+          Автоматически получите бесплатный SSL-сертификат от Let's Encrypt. Требуется: домен, направленный на этот сервер, и установленный certbot.
+        </div>
+
+        {!leExpanded ? (
+          <button className="btn btn-secondary" onClick={() => { setLeExpanded(true); checkCertbot(); }}>
+            🛡️ Настроить Let's Encrypt
+          </button>
+        ) : (
+          <div style={{padding:"20px",background:"#fafbfc",border:"1.5px solid var(--rd-gray-border)",borderRadius:"var(--rd-radius-sm)"}}>
+            {/* Certbot check */}
+            {leCheck === null ? (
+              <div style={{textAlign:"center",padding:"12px",color:"var(--rd-gray-text)",fontSize:"13px"}}>Проверка certbot...</div>
+            ) : !leCheck.certbotInstalled ? (
+              <div style={{padding:"16px",background:"rgba(245,158,11,0.08)",border:"1px solid rgba(245,158,11,0.25)",borderRadius:"var(--rd-radius-sm)",marginBottom:"16px"}}>
+                <div style={{fontWeight:700,fontSize:"14px",color:"#d97706",marginBottom:"8px"}}>⚠ Certbot не найден</div>
+                <div style={{fontSize:"12px",color:"#92400e",lineHeight:"1.7"}}>
+                  Для автоматического получения сертификата установите certbot:<br/>
+                  <strong>Ubuntu/Debian:</strong> <code style={{background:"rgba(0,0,0,0.06)",padding:"1px 5px",borderRadius:"3px",fontSize:"11px"}}>sudo apt install certbot</code><br/>
+                  <strong>CentOS/RHEL:</strong> <code style={{background:"rgba(0,0,0,0.06)",padding:"1px 5px",borderRadius:"3px",fontSize:"11px"}}>sudo yum install certbot</code><br/>
+                  <strong>macOS:</strong> <code style={{background:"rgba(0,0,0,0.06)",padding:"1px 5px",borderRadius:"3px",fontSize:"11px"}}>brew install certbot</code><br/>
+                  <strong>Snap (универсальный):</strong> <code style={{background:"rgba(0,0,0,0.06)",padding:"1px 5px",borderRadius:"3px",fontSize:"11px"}}>sudo snap install --classic certbot</code>
+                </div>
+                <button className="btn btn-secondary" style={{marginTop:"12px"}} onClick={checkCertbot}>🔄 Проверить снова</button>
+              </div>
+            ) : (
+              <div style={{padding:"10px 14px",background:"rgba(5,150,105,0.06)",border:"1px solid rgba(5,150,105,0.2)",borderRadius:"var(--rd-radius-sm)",marginBottom:"16px",fontSize:"12px",color:"var(--rd-green)",fontWeight:600}}>
+                ✅ Certbot установлен: {leCheck.certbotVersion}
+              </div>
+            )}
+
+            {/* Domain */}
+            <div className="form-field">
+              <label className="form-label">Домен *</label>
+              <input
+                className="form-input"
+                placeholder="shop.example.com"
+                value={leDomain}
+                onChange={e => setLeDomain(e.target.value)}
+              />
+              <div style={{fontSize:"11px",color:"var(--rd-gray-text)",marginTop:"4px"}}>
+                Домен должен быть направлен (A-запись) на IP этого сервера
+              </div>
+            </div>
+
+            {/* Email */}
+            <div className="form-field" style={{marginTop:"14px"}}>
+              <label className="form-label">Email для уведомлений *</label>
+              <input
+                className="form-input"
+                type="email"
+                placeholder="admin@example.com"
+                value={leEmail}
+                onChange={e => setLeEmail(e.target.value)}
+              />
+              <div style={{fontSize:"11px",color:"var(--rd-gray-text)",marginTop:"4px"}}>
+                Let's Encrypt отправит предупреждение об истечении сертификата
+              </div>
+            </div>
+
+            {/* Method */}
+            <div className="form-field" style={{marginTop:"14px"}}>
+              <label className="form-label">Метод верификации</label>
+              <div style={{display:"flex",gap:"12px",flexWrap:"wrap"}}>
+                <label style={{display:"flex",alignItems:"center",gap:"6px",cursor:"pointer",padding:"8px 14px",background: leMethod==="standalone" ? "var(--rd-red-light)" : "var(--rd-gray-bg)",border: leMethod==="standalone" ? "1.5px solid rgba(199,22,24,0.3)" : "1.5px solid var(--rd-gray-border)",borderRadius:"var(--rd-radius-sm)",fontSize:"13px",fontWeight:600,transition:"all 0.15s"}}>
+                  <input type="radio" name="le_method" value="standalone" checked={leMethod==="standalone"} onChange={() => setLeMethod("standalone")} style={{accentColor:"var(--rd-red)"}} />
+                  Standalone
+                </label>
+                <label style={{display:"flex",alignItems:"center",gap:"6px",cursor:"pointer",padding:"8px 14px",background: leMethod==="webroot" ? "var(--rd-red-light)" : "var(--rd-gray-bg)",border: leMethod==="webroot" ? "1.5px solid rgba(199,22,24,0.3)" : "1.5px solid var(--rd-gray-border)",borderRadius:"var(--rd-radius-sm)",fontSize:"13px",fontWeight:600,transition:"all 0.15s"}}>
+                  <input type="radio" name="le_method" value="webroot" checked={leMethod==="webroot"} onChange={() => setLeMethod("webroot")} style={{accentColor:"var(--rd-red)"}} />
+                  Webroot
+                </label>
+              </div>
+              <div style={{fontSize:"11px",color:"var(--rd-gray-text)",marginTop:"6px",lineHeight:"1.6"}}>
+                {leMethod === "standalone"
+                  ? "Standalone — certbot поднимет временный HTTP-сервер на порту 80. Требуется, чтобы порт 80 был свободен."
+                  : "Webroot — certbot разместит файл проверки в public/. Сайт должен быть доступен по HTTP на порту 80."
+                }
+              </div>
+            </div>
+
+            {/* Actions */}
+            <div style={{display:"flex",gap:"10px",marginTop:"20px",flexWrap:"wrap",alignItems:"center"}}>
+              <button className="btn btn-primary" onClick={issueLe} disabled={leIssuing || !leDomain.trim() || !leEmail.trim() || (leCheck && !leCheck.certbotInstalled)}>
+                {leIssuing ? "⏳ Получение сертификата..." : "🛡️ Получить сертификат"}
+              </button>
+              {sslStatus && sslStatus.installed && (
+                <button className="btn btn-secondary" onClick={renewLe} disabled={leRenewing}>
+                  {leRenewing ? "⏳ Продление..." : "🔄 Продлить сертификат"}
+                </button>
+              )}
+              <button className="btn btn-ghost" onClick={() => { setLeExpanded(false); setLeLog(""); }}>
+                Отмена
+              </button>
+            </div>
+
+            {/* Log output */}
+            {leLog && (
+              <div style={{marginTop:"16px"}}>
+                <div style={{fontSize:"11px",fontWeight:700,textTransform:"uppercase",letterSpacing:"0.5px",color:"var(--rd-gray-text)",marginBottom:"6px"}}>Лог certbot</div>
+                <pre style={{background:"#1a1a2e",color:"#e0e0e0",padding:"14px",borderRadius:"var(--rd-radius-sm)",fontSize:"11px",lineHeight:"1.6",maxHeight:"250px",overflowY:"auto",whiteSpace:"pre-wrap",wordBreak:"break-all",margin:0}}>{leLog}</pre>
+              </div>
+            )}
+
+            {/* Info note */}
+            <div style={{marginTop:"16px",padding:"12px 14px",background:"rgba(59,130,246,0.06)",border:"1px solid rgba(59,130,246,0.15)",borderRadius:"var(--rd-radius-sm)",fontSize:"12px",lineHeight:"1.7",color:"#475569"}}>
+              <strong>Важно:</strong><br/>
+              • Сертификаты Let's Encrypt действуют <strong>90 дней</strong>. Рекомендуется настроить автопродление через cron:<br/>
+              <code style={{background:"rgba(0,0,0,0.06)",padding:"1px 5px",borderRadius:"3px",fontSize:"11px"}}>0 3 * * * certbot renew --quiet && cp /etc/letsencrypt/live/DOMAIN/fullchain.pem ./ssl/cert.pem && cp /etc/letsencrypt/live/DOMAIN/privkey.pem ./ssl/key.pem</code><br/>
+              • Для standalone-метода порт 80 должен быть свободен на момент выпуска/продления<br/>
+              • Сервер должен быть доступен из интернета по указанному домену
             </div>
           </div>
         )}
