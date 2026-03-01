@@ -32,8 +32,22 @@ function sendCompressed(req, res, payload) {
 const DATA_DIR    = path.join(process.cwd(), 'data');
 const STORE_FILE  = path.join(DATA_DIR, 'store.json');
 const PG_CFG_FILE = path.join(DATA_DIR, 'pg-config.json');
-const PG_ENV_FILE = path.join(DATA_DIR, 'pg-env.json');   // дополнительный файл, переживает деплой
+const PG_ENV_FILE = path.join(DATA_DIR, 'pg-env.json');   // резервная копия, переживает деплой
+const PG_GIT_FILE = path.join(process.cwd(), 'pg.env');   // главный файл — в git, не сбрасывается ✅
 const PG_CFG_KEY  = '__pg_config__';
+
+// Парсит KEY=VALUE файл (pg.env)
+function parseDotEnv(content) {
+  const r = {};
+  for (const line of content.split('\n')) {
+    const t = line.trim();
+    if (!t || t.startsWith('#')) continue;
+    const eq = t.indexOf('=');
+    if (eq < 0) continue;
+    r[t.slice(0, eq).trim()] = t.slice(eq + 1).trim();
+  }
+  return r;
+}
 
 // ── JSON fallback ──────────────────────────────────────────────────────────
 let _lock = Promise.resolve();
@@ -50,7 +64,21 @@ function writeJSON(data) {
 }
 
 // ── Читаем конфиг PG ───────────────────────────────────────────────────────
+// Порядок: pg.env (git) → DATABASE_URL → PG_HOST env → pg-config.json → pg-env.json → store.json
 function readPgConfig() {
+  // 1. pg.env в корне репозитория — главный источник, не сбрасывается при деплоях
+  try {
+    if (fs.existsSync(PG_GIT_FILE)) {
+      const vars = parseDotEnv(fs.readFileSync(PG_GIT_FILE, 'utf8'));
+      if (vars.DATABASE_URL)
+        return { connectionString: vars.DATABASE_URL, ssl: { rejectUnauthorized: false }, source: 'pg_env_file' };
+      if (vars.PG_HOST)
+        return { host: vars.PG_HOST, port: parseInt(vars.PG_PORT) || 5432,
+          database: vars.PG_DATABASE || vars.PG_DB || 'postgres',
+          user: vars.PG_USER, password: vars.PG_PASSWORD,
+          ssl: vars.PG_SSL === 'true', source: 'pg_env_file' };
+    }
+  } catch {}
   if (process.env.DATABASE_URL)
     return { connectionString: process.env.DATABASE_URL, source: 'env_url' };
   if (process.env.PG_HOST)

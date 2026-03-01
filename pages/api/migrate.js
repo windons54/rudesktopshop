@@ -1,24 +1,15 @@
-// pages/api/migrate.js — ручной запуск миграции cm_appearance → cm_images
+// pages/api/migrate.js — запуск миграции cm_appearance → cm_images
 //
-// GET  /api/migrate                        — проверить статус
-// POST /api/migrate  { secret?, force? }   — запустить миграцию
-//                    force=true            — перезапустить даже если cm_images уже есть
+// GET  /api/migrate                 — проверить статус (без изменений в БД)
+// POST /api/migrate  { force? }     — запустить миграцию
+//                    force=true     — перезапустить даже если cm_images уже есть
 //
-// Защита:
-//   - Если задан env MIGRATE_SECRET — требует { secret: "..." } в теле POST
-//   - Иначе доступен только с localhost (127.0.0.1 / ::1)
+// Авторизация: не требуется (как и в остальных API роутах проекта).
+// Миграция идемпотентна — повторный запуск без force ничего не меняет.
 
 import { Pool } from 'pg';
 import { readPgConfig } from '../../lib/pg-config-reader.js';
 import { runMigration } from '../../lib/migration.js';
-
-function isAuthorized(req, body) {
-  const secret = process.env.MIGRATE_SECRET;
-  if (secret) return body?.secret === secret;
-  const ip = (req.headers['x-forwarded-for'] || '').split(',')[0].trim()
-    || req.socket?.remoteAddress || '';
-  return ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1';
-}
 
 export default async function handler(req, res) {
   const pgConfig = readPgConfig();
@@ -42,15 +33,14 @@ export default async function handler(req, res) {
       }
       const imageKeys = Object.keys(imagesObj);
 
-      // Считаем сколько base64 ещё осталось в cm_appearance
       let apObj = {};
       let base64InAppearance = [];
       if (apRow.rows.length) {
         try { apObj = JSON.parse(apRow.rows[0].value); } catch {}
-        if (apObj.logo?.startsWith?.('data:'))              base64InAppearance.push('logo');
-        if (apObj.banner?.image?.startsWith?.('data:'))     base64InAppearance.push('banner.image');
-        if (apObj.currency?.logo?.startsWith?.('data:'))    base64InAppearance.push('currency.logo');
-        if (apObj.seo?.favicon?.startsWith?.('data:'))      base64InAppearance.push('seo.favicon');
+        if (apObj.logo?.startsWith?.('data:'))           base64InAppearance.push('logo');
+        if (apObj.banner?.image?.startsWith?.('data:'))  base64InAppearance.push('banner.image');
+        if (apObj.currency?.logo?.startsWith?.('data:')) base64InAppearance.push('currency.logo');
+        if (apObj.seo?.favicon?.startsWith?.('data:'))   base64InAppearance.push('seo.favicon');
         if (apObj.sectionSettings) {
           for (const s of Object.keys(apObj.sectionSettings)) {
             if (apObj.sectionSettings[s]?.banner?.startsWith?.('data:'))
@@ -59,19 +49,19 @@ export default async function handler(req, res) {
         }
       }
 
-      const status = imgRow.rows.length === 0          ? 'not_started'
-                   : imageKeys.length === 0             ? 'empty_stub'
-                   : base64InAppearance.length > 0      ? 'partial'
-                                                        : 'done';
+      const status = imgRow.rows.length === 0         ? 'not_started'
+                   : imageKeys.length === 0            ? 'empty_stub'
+                   : base64InAppearance.length > 0     ? 'partial'
+                                                       : 'done';
 
       return res.json({
         ok: true,
         status,
-        cm_appearance_kb:      apRow.rows.length  ? Math.round(apRow.rows[0].len  / 1024) : null,
-        cm_images_kb:          imgRow.rows.length ? Math.round(imgRow.rows[0].len / 1024) : null,
-        cm_images_keys:        imageKeys,
-        base64_still_in_appearance: base64InAppearance,
-        needs_migration:       status !== 'done',
+        cm_appearance_kb:             apRow.rows.length  ? Math.round(apRow.rows[0].len  / 1024) : null,
+        cm_images_kb:                 imgRow.rows.length ? Math.round(imgRow.rows[0].len / 1024) : null,
+        cm_images_keys:               imageKeys,
+        base64_still_in_appearance:   base64InAppearance,
+        needs_migration:              status !== 'done',
       });
     } catch (e) {
       return res.status(500).json({ ok: false, error: e.message });
@@ -84,22 +74,15 @@ export default async function handler(req, res) {
     return res.status(405).json({ ok: false, error: 'Method not allowed' });
   }
 
-  if (!isAuthorized(req, req.body)) {
-    return res.status(403).json({
-      ok: false,
-      error: 'Forbidden. Задайте MIGRATE_SECRET env или запустите с localhost.',
-    });
-  }
-
   const force = req.body?.force === true;
   const pool = new Pool({ ...pgConfig, max: 2, connectionTimeoutMillis: 8000 });
   try {
     const result = await runMigration(pool, { force });
 
     // Инвалидируем все кэши
-    if (globalThis._pgCache)        globalThis._pgCache.flush();
-    if (globalThis._allCache)       { globalThis._allCache = null; globalThis._allCacheExpiry = 0; }
-    if (globalThis._dataVersion)    globalThis._dataVersion = Date.now();
+    if (globalThis._pgCache)     globalThis._pgCache.flush();
+    if (globalThis._allCache)    { globalThis._allCache = null; globalThis._allCacheExpiry = 0; }
+    if (globalThis._dataVersion) globalThis._dataVersion = Date.now();
 
     return res.json({ ok: true, ...result });
   } catch (e) {
