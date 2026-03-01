@@ -80,15 +80,19 @@ export default async function handler(req, res) {
         SELECT
           COUNT(*) as key_count,
           SUM(LENGTH(value)) as total_value_bytes,
+          SUM(CASE WHEN key NOT IN ('cm_images', '__pg_config__') THEN LENGTH(value) ELSE 0 END) as getall_bytes,
           pg_size_pretty(pg_database_size(current_database())) as db_size,
           pg_database_size(current_database()) as db_size_bytes
         FROM kv
       `);
       const row = r.rows[0];
+      const getAllBytes = parseInt(row.getall_bytes) || 0;
       dbStats = {
         keyCount:        parseInt(row.key_count),
         totalValueBytes: parseInt(row.total_value_bytes) || 0,
         totalValueKB:    Math.round((parseInt(row.total_value_bytes) || 0) / 1024) + 'KB',
+        getAllBytes:      getAllBytes,
+        getAllKB:         Math.round(getAllBytes / 1024) + 'KB',
         dbSize:          row.db_size,
         dbSizeBytes:     parseInt(row.db_size_bytes),
       };
@@ -176,12 +180,18 @@ export default async function handler(req, res) {
   if (dbPing !== null && dbPing > 500) {
     issues.push({ severity: 'critical', msg: `Критически высокий latency БД: ${dbPing}ms` });
   }
-  if (dbStats && dbStats.totalValueBytes > 500 * 1024) {
-    issues.push({ severity: 'warning', msg: `Большой объём данных в kv: ${dbStats.totalValueKB}. getAll тянет всё за раз` });
-    recommendations.push('Разбейте данные на части или добавьте серверный кэш с TTL > 1s');
+  if (dbStats && dbStats.getAllBytes > 500 * 1024) {
+    issues.push({ severity: 'warning', msg: `getAll отдаёт ${dbStats.getAllKB} (cm_images исключён). Норма < 500KB` });
+    recommendations.push('Разбейте крупные ключи на части или добавьте серверный кэш с TTL > 1s');
+  } else if (dbStats && dbStats.getAllBytes > 0) {
+    issues.push({ severity: 'info', msg: `getAll отдаёт ${dbStats.getAllKB} (cm_images исключён из polling) — OK` });
   }
-  if (dbStats && dbStats.heaviestKeys?.length > 0 && dbStats.heaviestKeys[0].bytes > 100 * 1024) {
-    issues.push({ severity: 'warning', msg: `Самый тяжёлый ключ: ${dbStats.heaviestKeys[0].key} = ${dbStats.heaviestKeys[0].kb}` });
+  // Предупреждаем только если тяжёлый ключ попадает в getAll (не cm_images)
+  if (dbStats && dbStats.heaviestKeys?.length > 0) {
+    const heaviestInGetAll = dbStats.heaviestKeys.find(k => k.key !== 'cm_images' && k.key !== '__pg_config__');
+    if (heaviestInGetAll && heaviestInGetAll.bytes > 300 * 1024) {
+      issues.push({ severity: 'warning', msg: `Тяжёлый ключ в getAll: ${heaviestInGetAll.key} = ${heaviestInGetAll.kb}` });
+    }
   }
   if (processInfo.uptimeMs < 5000) {
     issues.push({ severity: 'info', msg: `Сервер только что запустился (${processInfo.uptime}). Первые запросы всегда медленнее.` });
