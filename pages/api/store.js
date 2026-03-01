@@ -6,25 +6,31 @@ import fs from 'fs';
 import path from 'path';
 import zlib from 'zlib';
 
-// Отправляет JSON с gzip-сжатием если клиент поддерживает (режет 1.9MB → ~200KB)
+// Отправляет JSON с компрессией если браузер объявил поддержку в заголовке запроса.
+// ВАЖНО: мы читаем accept-encoding из HTTP-заголовка запроса (который браузер ставит сам),
+// а не из JS-хедера fetch — чтобы избежать проблем с Safari, который не принимает
+// gzip-ответы когда Accept-Encoding выставлен вручную в fetch().
 function sendCompressed(req, res, payload) {
   const json = JSON.stringify(payload);
-  const acceptEncoding = req.headers?.['accept-encoding'] || '';
-  if (acceptEncoding.includes('gzip')) {
-    const buf = Buffer.from(json, 'utf8');
-    zlib.gzip(buf, { level: 6 }, (err, compressed) => {
-      if (err) {
-        res.setHeader('Content-Type', 'application/json');
-        res.end(json);
-        return;
-      }
-      res.setHeader('Content-Type', 'application/json');
+  // Читаем реальный accept-encoding, выставленный браузером/ОС — не JS
+  const ae = req.headers?.['accept-encoding'] || '';
+  res.setHeader('Vary', 'Accept-Encoding');
+  res.setHeader('Content-Type', 'application/json');
+
+  if (ae.includes('br')) {
+    // Brotli — лучшее сжатие, поддерживается всеми современными браузерами включая Safari 15.4+
+    zlib.brotliCompress(Buffer.from(json, 'utf8'), { params: { [zlib.constants.BROTLI_PARAM_QUALITY]: 4 } }, (err, compressed) => {
+      if (err) { res.end(json); return; }
+      res.setHeader('Content-Encoding', 'br');
+      res.end(compressed);
+    });
+  } else if (ae.includes('gzip')) {
+    zlib.gzip(Buffer.from(json, 'utf8'), { level: 6 }, (err, compressed) => {
+      if (err) { res.end(json); return; }
       res.setHeader('Content-Encoding', 'gzip');
-      res.setHeader('Vary', 'Accept-Encoding');
       res.end(compressed);
     });
   } else {
-    res.setHeader('Content-Type', 'application/json');
     res.end(json);
   }
 }
