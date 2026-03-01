@@ -5627,7 +5627,13 @@ function SeoSettingsTab({ appearance, saveAppearance, notify }) {
 
         <div style={{marginTop:"24px"}}>
           <button className="btn btn-primary" onClick={save}>💾 Сохранить</button>
-        </div>({ appearance, saveAppearance, notify }) {
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CurrencySettingsTab({ appearance, saveAppearance, notify }) {
   
   const curr = appearance.currency || {};
   const [cForm, setCForm] = useState({ name: curr.name || "RuDeCoin", icon: curr.icon || "🪙", logo: curr.logo || "" });
