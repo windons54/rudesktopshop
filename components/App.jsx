@@ -180,6 +180,67 @@ function _restoreImages(ap, images) {
   return out;
 }
 
+// ── Кэш entity-изображений (tasks/products/auctions/lotteries) ──────────────
+const ENTITY_IMAGES_LS_KEY = '_cm_entity_images_cache';
+
+function _loadEntityImagesFromLS() {
+  try {
+    const raw = typeof localStorage !== 'undefined' ? localStorage.getItem(ENTITY_IMAGES_LS_KEY) : null;
+    if (raw) return JSON.parse(raw);
+  } catch {}
+  return { tasks: {}, products: {}, auctions: {}, lotteries: {} };
+}
+
+function _saveEntityImagesToLS(data) {
+  try {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(ENTITY_IMAGES_LS_KEY, JSON.stringify(data));
+    }
+  } catch {}
+}
+
+async function _fetchEntityImages(types = ['tasks', 'products', 'auctions', 'lotteries']) {
+  try {
+    const params = types.map(t => 'type=' + t).join('&');
+    // Грузим все нужные типы одним запросом через type=all
+    const r = await fetch('/api/images?type=all');
+    const data = await r.json();
+    if (data.ok) {
+      const cached = _loadEntityImagesFromLS();
+      for (const t of types) {
+        if (data[t]) cached[t] = data[t];
+      }
+      _saveEntityImagesToLS(cached);
+      return cached;
+    }
+  } catch {}
+  return _loadEntityImagesFromLS();
+}
+
+// Восстанавливает '__stored__' в массиве entity-объектов
+function _restoreEntityImagesInArray(items, imagesMap, field, isArray) {
+  if (!items || !imagesMap || !Object.keys(imagesMap).length) return items;
+  return items.map(item => {
+    if (!item || !item.id) return item;
+    if (isArray) {
+      // products: images[]
+      const imgs = (item.images || []).map(img => {
+        if (typeof img === 'string' && img.startsWith('__stored__:')) {
+          const key = img.slice('__stored__:'.length);
+          return imagesMap[key] || img;
+        }
+        return img;
+      });
+      return JSON.stringify(imgs) !== JSON.stringify(item.images) ? { ...item, images: imgs } : item;
+    } else {
+      if (item[field] === '__stored__') {
+        return { ...item, [field]: imagesMap[item.id] || '' };
+      }
+      return item;
+    }
+  });
+}
+
 // Кэш — синхронный слой, обновляется polling-ом
 const _cache = {};
 let _cacheReady = false;
@@ -636,6 +697,14 @@ function App({ initialData, initialVersion }) {
       .catch(() => {});
 
     // Загружаем изображения в фоне — применяем к appearance если оно уже загружено
+    // Загружаем entity-изображения (tasks/products/auctions/lotteries) в фоне
+    _fetchEntityImages().then(ei => {
+      setTasks(prev => _restoreEntityImagesInArray(prev, ei.tasks || {}, 'image', false));
+      setAuctions(prev => _restoreEntityImagesInArray(prev, ei.auctions || {}, 'image', false));
+      setLotteries(prev => _restoreEntityImagesInArray(prev, ei.lotteries || {}, 'image', false));
+      setCustomProducts(prev => _restoreEntityImagesInArray(prev, ei.products || {}, 'images', true));
+    });
+
     _fetchAndCacheImages().then(images => {
       if (images && Object.keys(images).length > 0) {
         const currentAp = storage.get('cm_appearance');
@@ -838,10 +907,19 @@ function App({ initialData, initialVersion }) {
       if ('cm_categories'       in data) setCustomCategories(data.cm_categories);
       if ('cm_faq'              in data) setFaq(data.cm_faq);
       if ('cm_videos'           in data) setVideos(data.cm_videos);
-      if ('cm_tasks'            in data) setTasks(data.cm_tasks);
+      if ('cm_tasks'            in data) {
+        const _ei = _loadEntityImagesFromLS();
+        setTasks(_restoreEntityImagesInArray(data.cm_tasks, _ei.tasks || {}, 'image', false));
+      }
       if ('cm_task_submissions' in data) setTaskSubmissions(data.cm_task_submissions);
-      if ('cm_auctions'         in data) setAuctions(data.cm_auctions);
-      if ('cm_lotteries'        in data) setLotteries(data.cm_lotteries);
+      if ('cm_auctions'         in data) {
+        const _ei = _loadEntityImagesFromLS();
+        setAuctions(_restoreEntityImagesInArray(data.cm_auctions, _ei.auctions || {}, 'image', false));
+      }
+      if ('cm_lotteries'        in data) {
+        const _ei = _loadEntityImagesFromLS();
+        setLotteries(_restoreEntityImagesInArray(data.cm_lotteries, _ei.lotteries || {}, 'image', false));
+      }
       if ('cm_polls'            in data) setPolls(data.cm_polls);
       if ('cm_deposits'         in data) setDeposits(data.cm_deposits);
       if ('cm_user_deposits'    in data) setUserDeposits(data.cm_user_deposits);
@@ -5895,24 +5973,35 @@ function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbC
     }
   };
 
-  const runImageMigration = async (force = false) => {
+  const runImageMigration = async (target = 'all', force = false) => {
     setMigrationLoading(true);
     try {
       const res = await fetch('/api/migrate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ force }),
+        body: JSON.stringify({ target, force }),
       });
       const data = await res.json();
       setMigrationStatus(data);
-      if (data.ok && !data.skipped) {
-        notify(`✅ Миграция завершена! Перенесено ${data.moved?.length || 0} изображений (${data.savedKB || 0}KB)`, 'ok');
-        loadPgStats();
-      } else if (data.ok && data.skipped && data.reason === 'already_done') {
-        notify('Миграция уже выполнена, изображения на месте', 'ok');
-      } else if (data.ok && data.reason === 'no_images_found') {
-        notify('Изображений в base64 не найдено — возможно уже чисто', 'ok');
-      } else if (!data.ok) {
+      if (data.ok) {
+        // Считаем сколько всего перенесено
+        let totalMoved = 0, totalKB = 0;
+        if (data.appearance && !data.appearance.skipped) { totalMoved += data.appearance.moved?.length || 0; totalKB += data.appearance.savedKB || 0; }
+        if (data.entities) data.entities.forEach(e => { if (!e.skipped) { totalMoved += e.moved || 0; totalKB += e.savedKB || 0; } });
+        if (totalMoved > 0) {
+          notify(`✅ Миграция завершена! Перенесено ${totalMoved} изображений (${totalKB}KB)`, 'ok');
+          loadPgStats();
+          // Обновляем entity-изображения в памяти
+          _fetchEntityImages().then(ei => {
+            setTasks(prev => _restoreEntityImagesInArray(prev, ei.tasks || {}, 'image', false));
+            setAuctions(prev => _restoreEntityImagesInArray(prev, ei.auctions || {}, 'image', false));
+            setLotteries(prev => _restoreEntityImagesInArray(prev, ei.lotteries || {}, 'image', false));
+            setCustomProducts(prev => _restoreEntityImagesInArray(prev, ei.products || {}, 'images', true));
+          });
+        } else {
+          notify('Изображений для переноса не найдено — всё уже чисто', 'ok');
+        }
+      } else {
         notify('Ошибка миграции: ' + data.error, 'err');
       }
     } catch(e) {
@@ -7286,32 +7375,40 @@ function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbC
                       {/* Status block */}
                       {migrationStatus && (
                         <div style={{marginBottom:"14px",padding:"12px 14px",borderRadius:"var(--rd-radius-sm)",border:"1px solid var(--rd-gray-border)",background:"var(--rd-gray-bg)",fontSize:"13px"}}>
-                          {migrationStatus.ok ? (
-                            <div>
-                              <div style={{display:"flex",alignItems:"center",gap:"8px",marginBottom:"6px"}}>
-                                {migrationStatus.status === 'done'
-                                  ? <span style={{color:"#16a34a",fontWeight:600}}>✅ Миграция выполнена</span>
-                                  : migrationStatus.status === 'empty_stub'
-                                  ? <span style={{color:"#d97706",fontWeight:600}}>⚠️ cm_images существует, но пустой — нужна принудительная миграция</span>
-                                  : migrationStatus.status === 'partial'
-                                  ? <span style={{color:"#d97706",fontWeight:600}}>⚠️ Частично — в cm_appearance ещё есть base64</span>
-                                  : migrationStatus.skipped
-                                  ? <span style={{color:"#16a34a",fontWeight:600}}>✅ {migrationStatus.reason === 'already_done' ? 'Уже выполнена, изображения на месте' : 'Пропущено: ' + migrationStatus.reason}</span>
-                                  : migrationStatus.moved?.length > 0
-                                  ? <span style={{color:"#16a34a",fontWeight:600}}>✅ Выполнено: перенесено {migrationStatus.moved.length} изображений ({migrationStatus.savedKB}KB)</span>
-                                  : <span style={{color:"var(--rd-gray-text)"}}>ℹ️ {migrationStatus.reason || 'Статус получен'}</span>}
+                          {migrationStatus.ok ? (() => {
+                            const ik = migrationStatus.imageKeys || {};
+                            const ms = migrationStatus.mainKeySizes || {};
+                            return (
+                              <div>
+                                <div style={{fontWeight:600,marginBottom:"8px",color:"var(--rd-dark)"}}>Статус ключей изображений:</div>
+                                <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(200px,1fr))",gap:"6px"}}>
+                                  {[
+                                    {label:"🖼 Оформление",  imgKey:"cm_images",          mainKey:"cm_appearance"},
+                                    {label:"📋 Задания",     imgKey:"cm_tasks_images",     mainKey:"cm_tasks"},
+                                    {label:"🛍️ Товары",      imgKey:"cm_products_images",  mainKey:"cm_products"},
+                                    {label:"🏷️ Аукционы",   imgKey:"cm_auctions_images",  mainKey:"cm_auctions"},
+                                    {label:"🎰 Лотереи",    imgKey:"cm_lotteries_images", mainKey:"cm_lotteries"},
+                                  ].map(({label,imgKey,mainKey}) => {
+                                    const info = ik[imgKey];
+                                    const mainKB = ms[mainKey];
+                                    const done = info && info.count > 0;
+                                    const empty = info && info.exists && info.count === 0;
+                                    return (
+                                      <div key={imgKey} style={{padding:"8px 10px",borderRadius:"6px",background:done?"rgba(22,163,74,0.07)":empty?"rgba(234,179,8,0.08)":"rgba(199,22,24,0.06)",border:"1px solid "+(done?"rgba(22,163,74,0.2)":empty?"rgba(234,179,8,0.3)":"rgba(199,22,24,0.15)")}}>
+                                        <div style={{fontWeight:600,fontSize:"12px",marginBottom:"3px"}}>{label}</div>
+                                        <div style={{fontSize:"11px",color:"var(--rd-gray-text)"}}>
+                                          {done ? <span style={{color:"#16a34a"}}>✅ {info.count} изобр. ({info.kb}KB)</span>
+                                               : empty ? <span style={{color:"#d97706"}}>⚠️ Пустой ключ</span>
+                                               : <span style={{color:"var(--rd-red)"}}>❌ Не мигрировано</span>}
+                                          {mainKB != null && <span style={{marginLeft:"6px",opacity:0.7}}>| осн.: {mainKB}KB</span>}
+                                        </div>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
                               </div>
-                              <div style={{display:"flex",gap:"24px",flexWrap:"wrap",fontSize:"12px",color:"var(--rd-gray-text)"}}>
-                                {migrationStatus.cm_appearance_kb != null && <span>cm_appearance: <strong>{migrationStatus.cm_appearance_kb}KB</strong></span>}
-                                {migrationStatus.cm_images_kb != null && <span>cm_images: <strong>{migrationStatus.cm_images_kb}KB</strong></span>}
-                                {migrationStatus.cm_images_keys?.length > 0 && <span>Изображения: <strong>{migrationStatus.cm_images_keys.join(', ')}</strong></span>}
-                                {migrationStatus.moved?.length > 0 && <span>Перенесено: <strong>{migrationStatus.moved.join(', ')}</strong></span>}
-                                {migrationStatus.base64_still_in_appearance?.length > 0 && (
-                                  <span style={{color:"#d97706"}}>Ещё в appearance: <strong>{migrationStatus.base64_still_in_appearance.join(', ')}</strong></span>
-                                )}
-                              </div>
-                            </div>
-                          ) : (
+                            );
+                          })() : (
                             <span style={{color:"var(--rd-red)"}}>❌ Ошибка: {migrationStatus.error}</span>
                           )}
                         </div>
@@ -7321,16 +7418,12 @@ function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbC
                         <button className="btn btn-secondary" onClick={checkMigrationStatus} disabled={migrationLoading}>
                           {migrationLoading ? "⏳ Проверка…" : "🔍 Проверить статус"}
                         </button>
-                        <button className="btn btn-primary" onClick={() => runImageMigration(false)} disabled={migrationLoading}
-                          title="Запустить миграцию. Если cm_images уже существует и непустой — пропустит.">
+                        <button className="btn btn-primary" onClick={() => runImageMigration('all', false)} disabled={migrationLoading}>
                           {migrationLoading ? "⏳ Выполняется…" : "🚀 Запустить миграцию"}
                         </button>
-                        {migrationStatus && (migrationStatus.status === 'empty_stub' || migrationStatus.status === 'partial' || (migrationStatus.needs_migration && migrationStatus.cm_images_kb === 0)) && (
-                          <button className="btn btn-danger" onClick={() => { if(window.confirm('Запустить принудительную миграцию? cm_images будет перезаписан.')) runImageMigration(true); }} disabled={migrationLoading}
-                            title="Принудительно перезапустить даже если cm_images уже существует">
-                            ⚡ Принудительно
-                          </button>
-                        )}
+                        <button className="btn btn-ghost" onClick={() => { if(window.confirm('Принудительно перезапустить все миграции? Все *_images ключи будут перезаписаны.')) runImageMigration('all', true); }} disabled={migrationLoading}>
+                          ⚡ Принудительно
+                        </button>
                       </div>
                     </div>
                   )}
