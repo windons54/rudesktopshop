@@ -6,31 +6,25 @@ import fs from 'fs';
 import path from 'path';
 import zlib from 'zlib';
 
-// Отправляет JSON с компрессией если браузер объявил поддержку в заголовке запроса.
-// ВАЖНО: мы читаем accept-encoding из HTTP-заголовка запроса (который браузер ставит сам),
-// а не из JS-хедера fetch — чтобы избежать проблем с Safari, который не принимает
-// gzip-ответы когда Accept-Encoding выставлен вручную в fetch().
+// Отправляет JSON с gzip-сжатием если клиент поддерживает (режет 1.9MB → ~200KB)
 function sendCompressed(req, res, payload) {
   const json = JSON.stringify(payload);
-  // Читаем реальный accept-encoding, выставленный браузером/ОС — не JS
-  const ae = req.headers?.['accept-encoding'] || '';
-  res.setHeader('Vary', 'Accept-Encoding');
-  res.setHeader('Content-Type', 'application/json');
-
-  if (ae.includes('br')) {
-    // Brotli — лучшее сжатие, поддерживается всеми современными браузерами включая Safari 15.4+
-    zlib.brotliCompress(Buffer.from(json, 'utf8'), { params: { [zlib.constants.BROTLI_PARAM_QUALITY]: 4 } }, (err, compressed) => {
-      if (err) { res.end(json); return; }
-      res.setHeader('Content-Encoding', 'br');
-      res.end(compressed);
-    });
-  } else if (ae.includes('gzip')) {
-    zlib.gzip(Buffer.from(json, 'utf8'), { level: 6 }, (err, compressed) => {
-      if (err) { res.end(json); return; }
+  const acceptEncoding = req.headers?.['accept-encoding'] || '';
+  if (acceptEncoding.includes('gzip')) {
+    const buf = Buffer.from(json, 'utf8');
+    zlib.gzip(buf, { level: 6 }, (err, compressed) => {
+      if (err) {
+        res.setHeader('Content-Type', 'application/json');
+        res.end(json);
+        return;
+      }
+      res.setHeader('Content-Type', 'application/json');
       res.setHeader('Content-Encoding', 'gzip');
+      res.setHeader('Vary', 'Accept-Encoding');
       res.end(compressed);
     });
   } else {
+    res.setHeader('Content-Type', 'application/json');
     res.end(json);
   }
 }
@@ -38,22 +32,8 @@ function sendCompressed(req, res, payload) {
 const DATA_DIR    = path.join(process.cwd(), 'data');
 const STORE_FILE  = path.join(DATA_DIR, 'store.json');
 const PG_CFG_FILE = path.join(DATA_DIR, 'pg-config.json');
-const PG_ENV_FILE = path.join(DATA_DIR, 'pg-env.json');   // резервная копия, переживает деплой
-const PG_GIT_FILE = path.join(process.cwd(), 'pg.env');   // главный файл — в git, не сбрасывается ✅
+const PG_ENV_FILE = path.join(DATA_DIR, 'pg-env.json');   // дополнительный файл, переживает деплой
 const PG_CFG_KEY  = '__pg_config__';
-
-// Парсит KEY=VALUE файл (pg.env)
-function parseDotEnv(content) {
-  const r = {};
-  for (const line of content.split('\n')) {
-    const t = line.trim();
-    if (!t || t.startsWith('#')) continue;
-    const eq = t.indexOf('=');
-    if (eq < 0) continue;
-    r[t.slice(0, eq).trim()] = t.slice(eq + 1).trim();
-  }
-  return r;
-}
 
 // ── JSON fallback ──────────────────────────────────────────────────────────
 let _lock = Promise.resolve();
@@ -70,21 +50,7 @@ function writeJSON(data) {
 }
 
 // ── Читаем конфиг PG ───────────────────────────────────────────────────────
-// Порядок: pg.env (git) → DATABASE_URL → PG_HOST env → pg-config.json → pg-env.json → store.json
 function readPgConfig() {
-  // 1. pg.env в корне репозитория — главный источник, не сбрасывается при деплоях
-  try {
-    if (fs.existsSync(PG_GIT_FILE)) {
-      const vars = parseDotEnv(fs.readFileSync(PG_GIT_FILE, 'utf8'));
-      if (vars.DATABASE_URL)
-        return { connectionString: vars.DATABASE_URL, ssl: { rejectUnauthorized: false }, source: 'pg_env_file' };
-      if (vars.PG_HOST)
-        return { host: vars.PG_HOST, port: parseInt(vars.PG_PORT) || 5432,
-          database: vars.PG_DATABASE || vars.PG_DB || 'postgres',
-          user: vars.PG_USER, password: vars.PG_PASSWORD,
-          ssl: vars.PG_SSL === 'true', source: 'pg_env_file' };
-    }
-  } catch {}
   if (process.env.DATABASE_URL)
     return { connectionString: process.env.DATABASE_URL, source: 'env_url' };
   if (process.env.PG_HOST)
@@ -331,58 +297,6 @@ const pgKv = {
     return r.rows.length ? deserialize(r.rows[0].value) : null;
   },
   async set(pool, key, value) {
-    // Для entity-ключей автоматически вырезаем base64 в отдельный *_images ключ
-    const ENTITY_KEYS = { cm_tasks: 'image', cm_auctions: 'image', cm_lotteries: 'image' };
-    const PRODUCT_KEY = 'cm_products';
-
-    if ((key in ENTITY_KEYS || key === PRODUCT_KEY) && Array.isArray(value)) {
-      const field = ENTITY_KEYS[key] || 'images';
-      const imagesKey = key + '_images';
-      const existing = await pool.query('SELECT value FROM kv WHERE key=$1', [imagesKey]);
-      const imagesMap = existing.rows.length ? JSON.parse(existing.rows[0].value || '{}') : {};
-      let imagesChanged = false;
-
-      const slim = value.map(item => {
-        if (!item || !item.id) return item;
-        if (key === PRODUCT_KEY) {
-          // products: массив images[]
-          const newImgs = [];
-          let changed = false;
-          (item.images || (item.image ? [item.image] : [])).forEach((img, idx) => {
-            if (typeof img === 'string' && img.startsWith('data:')) {
-              imagesMap[item.id + '_' + idx] = img;
-              newImgs.push('__stored__:' + item.id + '_' + idx);
-              changed = true; imagesChanged = true;
-            } else { newImgs.push(img); }
-          });
-          return changed ? { ...item, images: newImgs } : item;
-        } else {
-          // tasks/auctions/lotteries: одно поле image
-          if (typeof item[field] === 'string' && item[field].startsWith('data:')) {
-            imagesMap[item.id] = item[field];
-            imagesChanged = true;
-            return { ...item, [field]: '__stored__' };
-          }
-          return item;
-        }
-      });
-
-      if (imagesChanged) {
-        await pool.query(
-          `INSERT INTO kv(key,value,updated_at) VALUES($1,$2,NOW()) ON CONFLICT(key) DO UPDATE SET value=$2, updated_at=NOW()`,
-          [imagesKey, JSON.stringify(imagesMap)]
-        );
-      }
-
-      await pool.query(
-        `INSERT INTO kv(key,value,updated_at) VALUES($1,$2,NOW())
-         ON CONFLICT(key) DO UPDATE SET value=$2, updated_at=NOW()`,
-        [key, serialize(slim)]
-      );
-      bumpVersion();
-      return;
-    }
-
     await pool.query(
       `INSERT INTO kv(key,value,updated_at) VALUES($1,$2,NOW())
        ON CONFLICT(key) DO UPDATE SET value=$2, updated_at=NOW()`,
@@ -395,29 +309,19 @@ const pgKv = {
     bumpVersion();
   },
   async getAll(pool) {
-    // Исключаем cm_images (714KB изображений) — клиент грузит их отдельно через /api/images
-    // и кэширует в localStorage. Включение в getAll = +714KB на каждый polling-запрос.
-    const r = await pool.query(
-      `SELECT key,value FROM kv WHERE key!=$1 AND RIGHT(key, 7) != '_images' ORDER BY key`,
-      [PG_CFG_KEY]
-    );
+    const r = await pool.query(`SELECT key,value FROM kv WHERE key!=$1 ORDER BY key`, [PG_CFG_KEY]);
     const out = {};
     r.rows.forEach(({ key, value }) => {
       const parsed = deserialize(value);
-      // Страховка: если base64 ещё не вынесен миграцией — вырезаем на лету
+      // ОПТИМИЗАЦИЯ: вырезаем base64-картинки из cm_appearance при getAll.
+      // Они хранятся отдельно в cm_images и загружаются клиентом один раз через localStorage.
+      // Это режет cm_appearance с ~715KB до ~5KB.
       if (key === 'cm_appearance' && parsed && typeof parsed === 'object') {
         const slim = { ...parsed };
-        if (slim.logo?.startsWith?.('data:'))           slim.logo = '__stored__';
-        if (slim.banner?.image?.startsWith?.('data:'))  slim.banner = { ...slim.banner, image: '__stored__' };
-        if (slim.currency?.logo?.startsWith?.('data:')) slim.currency = { ...slim.currency, logo: '__stored__' };
-        if (slim.seo?.favicon?.startsWith?.('data:'))   slim.seo = { ...slim.seo, favicon: '__stored__' };
-        if (slim.sectionSettings) {
-          const ss = { ...slim.sectionSettings };
-          for (const s of Object.keys(ss)) {
-            if (ss[s]?.banner?.startsWith?.('data:')) ss[s] = { ...ss[s], banner: '__stored__' };
-          }
-          slim.sectionSettings = ss;
-        }
+        if (slim.logo && slim.logo.startsWith('data:')) slim.logo = '__stored__';
+        if (slim.banner && slim.banner.image && slim.banner.image.startsWith('data:')) slim.banner = { ...slim.banner, image: '__stored__' };
+        if (slim.currency && slim.currency.logo && slim.currency.logo.startsWith('data:')) slim.currency = { ...slim.currency, logo: '__stored__' };
+        if (slim.seo && slim.seo.favicon && slim.seo.favicon.startsWith('data:')) slim.seo = { ...slim.seo, favicon: '__stored__' };
         out[key] = slim;
       } else {
         out[key] = parsed;

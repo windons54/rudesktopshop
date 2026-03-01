@@ -114,7 +114,7 @@ function deduplicatedFetch(action, body = {}) {
 async function _apiCall(action, body = {}) {
   const res = await fetch('/api/store', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', 'Accept-Encoding': 'gzip' },
     body: JSON.stringify({ action, ...body }),
     keepalive: action === 'version',
   });
@@ -178,67 +178,6 @@ function _restoreImages(ap, images) {
     if (ssChanged) out.sectionSettings = ss;
   }
   return out;
-}
-
-// ── Кэш entity-изображений (tasks/products/auctions/lotteries) ──────────────
-const ENTITY_IMAGES_LS_KEY = '_cm_entity_images_cache';
-
-function _loadEntityImagesFromLS() {
-  try {
-    const raw = typeof localStorage !== 'undefined' ? localStorage.getItem(ENTITY_IMAGES_LS_KEY) : null;
-    if (raw) return JSON.parse(raw);
-  } catch {}
-  return { tasks: {}, products: {}, auctions: {}, lotteries: {} };
-}
-
-function _saveEntityImagesToLS(data) {
-  try {
-    if (typeof localStorage !== 'undefined') {
-      localStorage.setItem(ENTITY_IMAGES_LS_KEY, JSON.stringify(data));
-    }
-  } catch {}
-}
-
-async function _fetchEntityImages(types = ['tasks', 'products', 'auctions', 'lotteries']) {
-  try {
-    const params = types.map(t => 'type=' + t).join('&');
-    // Грузим все нужные типы одним запросом через type=all
-    const r = await fetch('/api/images?type=all');
-    const data = await r.json();
-    if (data.ok) {
-      const cached = _loadEntityImagesFromLS();
-      for (const t of types) {
-        if (data[t]) cached[t] = data[t];
-      }
-      _saveEntityImagesToLS(cached);
-      return cached;
-    }
-  } catch {}
-  return _loadEntityImagesFromLS();
-}
-
-// Восстанавливает '__stored__' в массиве entity-объектов
-function _restoreEntityImagesInArray(items, imagesMap, field, isArray) {
-  if (!items || !imagesMap || !Object.keys(imagesMap).length) return items;
-  return items.map(item => {
-    if (!item || !item.id) return item;
-    if (isArray) {
-      // products: images[]
-      const imgs = (item.images || []).map(img => {
-        if (typeof img === 'string' && img.startsWith('__stored__:')) {
-          const key = img.slice('__stored__:'.length);
-          return imagesMap[key] || img;
-        }
-        return img;
-      });
-      return JSON.stringify(imgs) !== JSON.stringify(item.images) ? { ...item, images: imgs } : item;
-    } else {
-      if (item[field] === '__stored__') {
-        return { ...item, [field]: imagesMap[item.id] || '' };
-      }
-      return item;
-    }
-  });
 }
 
 // Кэш — синхронный слой, обновляется polling-ом
@@ -697,14 +636,6 @@ function App({ initialData, initialVersion }) {
       .catch(() => {});
 
     // Загружаем изображения в фоне — применяем к appearance если оно уже загружено
-    // Загружаем entity-изображения (tasks/products/auctions/lotteries) в фоне
-    _fetchEntityImages().then(ei => {
-      setTasks(prev => _restoreEntityImagesInArray(prev, ei.tasks || {}, 'image', false));
-      setAuctions(prev => _restoreEntityImagesInArray(prev, ei.auctions || {}, 'image', false));
-      setLotteries(prev => _restoreEntityImagesInArray(prev, ei.lotteries || {}, 'image', false));
-      setCustomProducts(prev => _restoreEntityImagesInArray(prev, ei.products || {}, 'images', true));
-    });
-
     _fetchAndCacheImages().then(images => {
       if (images && Object.keys(images).length > 0) {
         const currentAp = storage.get('cm_appearance');
@@ -907,19 +838,10 @@ function App({ initialData, initialVersion }) {
       if ('cm_categories'       in data) setCustomCategories(data.cm_categories);
       if ('cm_faq'              in data) setFaq(data.cm_faq);
       if ('cm_videos'           in data) setVideos(data.cm_videos);
-      if ('cm_tasks'            in data) {
-        const _ei = _loadEntityImagesFromLS();
-        setTasks(_restoreEntityImagesInArray(data.cm_tasks, _ei.tasks || {}, 'image', false));
-      }
+      if ('cm_tasks'            in data) setTasks(data.cm_tasks);
       if ('cm_task_submissions' in data) setTaskSubmissions(data.cm_task_submissions);
-      if ('cm_auctions'         in data) {
-        const _ei = _loadEntityImagesFromLS();
-        setAuctions(_restoreEntityImagesInArray(data.cm_auctions, _ei.auctions || {}, 'image', false));
-      }
-      if ('cm_lotteries'        in data) {
-        const _ei = _loadEntityImagesFromLS();
-        setLotteries(_restoreEntityImagesInArray(data.cm_lotteries, _ei.lotteries || {}, 'image', false));
-      }
+      if ('cm_auctions'         in data) setAuctions(data.cm_auctions);
+      if ('cm_lotteries'        in data) setLotteries(data.cm_lotteries);
       if ('cm_polls'            in data) setPolls(data.cm_polls);
       if ('cm_deposits'         in data) setDeposits(data.cm_deposits);
       if ('cm_user_deposits'    in data) setUserDeposits(data.cm_user_deposits);
@@ -956,7 +878,7 @@ function App({ initialData, initialVersion }) {
     const fetchAll = async () => {
       const res = await fetch('/api/store', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'Accept-Encoding': 'gzip' },
         // Передаём текущую версию — сервер вернёт notModified:true если данные не изменились
         body: JSON.stringify({ action: 'getAll', clientVersion: _lastKnownVersion }),
       });
@@ -5545,7 +5467,7 @@ function BannerSettingsTab({ appearance, saveAppearance, notify }) {
 }
 
 function SeoSettingsTab({ appearance, saveAppearance, notify }) {
-
+  
   const seo = appearance.seo || {};
   const [form, setForm] = useState({ title: seo.title || "", description: seo.description || "", favicon: seo.favicon || "" });
 
@@ -5562,121 +5484,6 @@ function SeoSettingsTab({ appearance, saveAppearance, notify }) {
       setForm(f => ({ ...f, favicon: compressed }));
     };
     reader.readAsDataURL(file); e.target.value = "";
-  };
-
-  /* ── SSL state ── */
-  const [sslStatus, setSslStatus] = useState(null);
-  const [sslLoading, setSslLoading] = useState(true);
-  const [sslUploading, setSslUploading] = useState(false);
-  const [sslCert, setSslCert] = useState("");
-  const [sslKey, setSslKey] = useState("");
-  const [sslCa, setSslCa] = useState("");
-  const [sslExpanded, setSslExpanded] = useState(false);
-
-  /* ── Let's Encrypt state ── */
-  const [leExpanded, setLeExpanded] = useState(false);
-  const [leCheck, setLeCheck] = useState(null);
-  const [leDomain, setLeDomain] = useState("");
-  const [leEmail, setLeEmail] = useState("");
-  const [leMethod, setLeMethod] = useState("standalone");
-  const [leIssuing, setLeIssuing] = useState(false);
-  const [leLog, setLeLog] = useState("");
-  const [leRenewing, setLeRenewing] = useState(false);
-
-  const loadSslStatus = async () => {
-    try {
-      setSslLoading(true);
-      const r = await fetch('/api/ssl', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'status' }) });
-      const data = await r.json();
-      setSslStatus(data);
-    } catch { setSslStatus(null); }
-    finally { setSslLoading(false); }
-  };
-
-  useEffect(() => { loadSslStatus(); }, []);
-
-  const handleSslFileRead = (setter) => (e) => {
-    const file = e.target.files[0]; if (!file) return;
-    const reader = new FileReader();
-    reader.onload = ev => setter(ev.target.result);
-    reader.readAsText(file); e.target.value = "";
-  };
-
-  const uploadSsl = async () => {
-    if (!sslCert.trim() || !sslKey.trim()) { notify("Укажите сертификат и приватный ключ", "err"); return; }
-    setSslUploading(true);
-    try {
-      const r = await fetch('/api/ssl', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'upload', cert: sslCert, key: sslKey, ca: sslCa || undefined }),
-      });
-      const data = await r.json();
-      if (data.ok) {
-        notify(data.message || "SSL-сертификат установлен ✓");
-        setSslCert(""); setSslKey(""); setSslCa("");
-        setSslExpanded(false);
-        loadSslStatus();
-      } else {
-        (data.errors || []).forEach(e => notify(e, "err"));
-      }
-    } catch (e) { notify("Ошибка загрузки SSL: " + e.message, "err"); }
-    finally { setSslUploading(false); }
-  };
-
-  const deleteSsl = async () => {
-    if (!confirm("Удалить SSL-сертификат? HTTPS будет деактивирован после перезапуска.")) return;
-    try {
-      const r = await fetch('/api/ssl', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'delete' }) });
-      const data = await r.json();
-      if (data.ok) { notify("SSL-сертификат удалён"); loadSslStatus(); }
-    } catch (e) { notify("Ошибка: " + e.message, "err"); }
-  };
-
-  const fmtDate = (s) => { try { return new Date(s).toLocaleDateString("ru-RU", { day:"numeric", month:"long", year:"numeric" }); } catch { return s; } };
-
-  /* ── Let's Encrypt functions ── */
-  const checkCertbot = async () => {
-    try {
-      const r = await fetch('/api/ssl', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'le_check' }) });
-      const data = await r.json();
-      setLeCheck(data);
-    } catch { setLeCheck({ ok: false }); }
-  };
-
-  const issueLe = async () => {
-    if (!leDomain.trim() || !leEmail.trim()) { notify("Укажите домен и email", "err"); return; }
-    setLeIssuing(true); setLeLog("");
-    try {
-      const r = await fetch('/api/ssl', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'le_issue', domain: leDomain.trim(), email: leEmail.trim(), method: leMethod }),
-      });
-      const data = await r.json();
-      if (data.log) setLeLog(data.log);
-      if (data.ok) {
-        notify(data.message || "Сертификат получен ✓");
-        loadSslStatus();
-      } else {
-        (data.errors || []).forEach(e => notify(e, "err"));
-      }
-    } catch (e) { notify("Ошибка: " + e.message, "err"); }
-    finally { setLeIssuing(false); }
-  };
-
-  const renewLe = async () => {
-    setLeRenewing(true); setLeLog("");
-    try {
-      const r = await fetch('/api/ssl', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'le_renew', domain: leDomain.trim() || undefined }),
-      });
-      const data = await r.json();
-      if (data.log) setLeLog(data.log);
-      if (data.ok) { notify(data.message || "Продление выполнено ✓"); loadSslStatus(); }
-      else { (data.errors || []).forEach(e => notify(e, "err")); }
-    } catch (e) { notify("Ошибка: " + e.message, "err"); }
-    finally { setLeRenewing(false); }
   };
 
   return (
@@ -5764,293 +5571,6 @@ function SeoSettingsTab({ appearance, saveAppearance, notify }) {
         <div style={{marginTop:"24px"}}>
           <button className="btn btn-primary" onClick={save}>💾 Сохранить</button>
         </div>
-      </div>
-
-      {/* ═══════════ SSL CERTIFICATE ═══════════ */}
-      <div className="settings-card" style={{marginTop:"24px"}}>
-        <div className="settings-section-title">🔒 SSL-сертификат</div>
-        <div style={{fontSize:"13px",color:"var(--rd-gray-text)",marginBottom:"20px",lineHeight:"1.7"}}>
-          Подключите SSL-сертификат для работы сайта по HTTPS. Загрузите файлы сертификата и приватного ключа в формате PEM.
-        </div>
-
-        {/* Status */}
-        {sslLoading ? (
-          <div style={{padding:"20px",textAlign:"center",color:"var(--rd-gray-text)",fontSize:"13px"}}>Загрузка статуса SSL...</div>
-        ) : sslStatus && sslStatus.installed ? (
-          <div style={{padding:"16px",background:"linear-gradient(135deg, rgba(5,150,105,0.06) 0%, rgba(5,150,105,0.02) 100%)",border:"1.5px solid rgba(5,150,105,0.25)",borderRadius:"var(--rd-radius-sm)",marginBottom:"20px"}}>
-            <div style={{display:"flex",alignItems:"center",gap:"10px",marginBottom:"12px"}}>
-              <div style={{width:"32px",height:"32px",borderRadius:"50%",background:"rgba(5,150,105,0.12)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:"16px",flexShrink:0}}>
-                {sslStatus.expired ? "⚠️" : "✅"}
-              </div>
-              <div>
-                <div style={{fontWeight:700,fontSize:"14px",color: sslStatus.expired ? "#d97706" : "var(--rd-green)"}}>
-                  {sslStatus.expired ? "Сертификат истёк" : "SSL-сертификат установлен"}
-                </div>
-                {sslStatus.httpsActive && <div style={{fontSize:"12px",color:"var(--rd-green)",fontWeight:600,marginTop:"2px"}}>HTTPS активен</div>}
-              </div>
-            </div>
-
-            {sslStatus.certInfo && !sslStatus.certInfo.error && (
-              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"8px 20px",fontSize:"12px",lineHeight:"1.8"}}>
-                <div>
-                  <span style={{color:"var(--rd-gray-text)"}}>Субъект: </span>
-                  <span style={{fontWeight:600,color:"var(--rd-dark)"}}>{(sslStatus.certInfo.subject || "").replace(/CN=/g,"").split("\n")[0]}</span>
-                </div>
-                <div>
-                  <span style={{color:"var(--rd-gray-text)"}}>Издатель: </span>
-                  <span style={{fontWeight:600,color:"var(--rd-dark)"}}>{(sslStatus.certInfo.issuer || "").replace(/CN=/g,"").split("\n")[0]}</span>
-                </div>
-                <div>
-                  <span style={{color:"var(--rd-gray-text)"}}>Действует с: </span>
-                  <span style={{fontWeight:600,color:"var(--rd-dark)"}}>{fmtDate(sslStatus.certInfo.validFrom)}</span>
-                </div>
-                <div>
-                  <span style={{color:"var(--rd-gray-text)"}}>Истекает: </span>
-                  <span style={{fontWeight:600,color: sslStatus.expired ? "#dc2626" : "var(--rd-dark)"}}>{fmtDate(sslStatus.certInfo.validTo)}</span>
-                </div>
-                {!sslStatus.matched && (
-                  <div style={{gridColumn:"1 / -1",color:"#dc2626",fontWeight:700}}>
-                    ⚠ Сертификат и ключ не совпадают!
-                  </div>
-                )}
-              </div>
-            )}
-
-            <div style={{display:"flex",gap:"10px",marginTop:"16px",flexWrap:"wrap"}}>
-              <button className="btn btn-secondary" onClick={() => setSslExpanded(e => !e)}>
-                {sslExpanded ? "✕ Отмена" : "🔄 Заменить сертификат"}
-              </button>
-              <button className="btn btn-ghost" onClick={deleteSsl} style={{color:"var(--rd-red)"}}>
-                🗑 Удалить сертификат
-              </button>
-            </div>
-          </div>
-        ) : (
-          <div style={{padding:"16px",background:"var(--rd-gray-bg)",border:"1.5px dashed var(--rd-gray-border)",borderRadius:"var(--rd-radius-sm)",marginBottom:"20px",textAlign:"center"}}>
-            <div style={{fontSize:"28px",marginBottom:"8px"}}>🔓</div>
-            <div style={{fontWeight:700,fontSize:"14px",color:"var(--rd-dark)",marginBottom:"4px"}}>SSL не подключён</div>
-            <div style={{fontSize:"12px",color:"var(--rd-gray-text)",marginBottom:"12px"}}>Сайт работает по HTTP. Загрузите сертификат для активации HTTPS.</div>
-            {!sslExpanded && (
-              <button className="btn btn-primary" onClick={() => setSslExpanded(true)}>
-                🔒 Подключить SSL
-              </button>
-            )}
-          </div>
-        )}
-
-        {/* Upload form */}
-        {sslExpanded && (
-          <div style={{padding:"20px",background:"#fafbfc",border:"1.5px solid var(--rd-gray-border)",borderRadius:"var(--rd-radius-sm)"}}>
-            <div style={{fontSize:"13px",fontWeight:700,color:"var(--rd-dark)",marginBottom:"16px"}}>Загрузка SSL-сертификата</div>
-
-            {/* Certificate */}
-            <div className="form-field">
-              <label className="form-label">Сертификат (cert.pem) *</label>
-              <div style={{display:"flex",gap:"8px",alignItems:"flex-start",marginBottom:"6px"}}>
-                <label className="btn btn-secondary" style={{cursor:"pointer",position:"relative",flexShrink:0}}>
-                  📄 Выбрать файл
-                  <input type="file" accept=".pem,.crt,.cer,.cert" style={{position:"absolute",inset:0,opacity:0,cursor:"pointer"}} onChange={handleSslFileRead(setSslCert)} />
-                </label>
-                {sslCert && <span style={{fontSize:"12px",color:"var(--rd-green)",fontWeight:600,paddingTop:"8px"}}>✓ Загружен ({sslCert.length} символов)</span>}
-              </div>
-              <textarea
-                className="form-input"
-                placeholder={"-----BEGIN CERTIFICATE-----\nMIID...\n-----END CERTIFICATE-----"}
-                value={sslCert}
-                onChange={e => setSslCert(e.target.value)}
-                rows={4}
-                style={{resize:"vertical",minHeight:"80px",fontFamily:"monospace",fontSize:"11px"}}
-              />
-              <div style={{fontSize:"11px",color:"var(--rd-gray-text)",marginTop:"4px"}}>
-                Файл .pem, .crt или .cer — основной сертификат, можно с цепочкой (chain)
-              </div>
-            </div>
-
-            {/* Private Key */}
-            <div className="form-field" style={{marginTop:"16px"}}>
-              <label className="form-label">Приватный ключ (key.pem) *</label>
-              <div style={{display:"flex",gap:"8px",alignItems:"flex-start",marginBottom:"6px"}}>
-                <label className="btn btn-secondary" style={{cursor:"pointer",position:"relative",flexShrink:0}}>
-                  🔑 Выбрать файл
-                  <input type="file" accept=".pem,.key" style={{position:"absolute",inset:0,opacity:0,cursor:"pointer"}} onChange={handleSslFileRead(setSslKey)} />
-                </label>
-                {sslKey && <span style={{fontSize:"12px",color:"var(--rd-green)",fontWeight:600,paddingTop:"8px"}}>✓ Загружен ({sslKey.length} символов)</span>}
-              </div>
-              <textarea
-                className="form-input"
-                placeholder={"-----BEGIN PRIVATE KEY-----\nMIIE...\n-----END PRIVATE KEY-----"}
-                value={sslKey}
-                onChange={e => setSslKey(e.target.value)}
-                rows={4}
-                style={{resize:"vertical",minHeight:"80px",fontFamily:"monospace",fontSize:"11px"}}
-              />
-              <div style={{fontSize:"11px",color:"var(--rd-gray-text)",marginTop:"4px"}}>
-                Файл .pem или .key — приватный ключ (RSA / ECDSA)
-              </div>
-            </div>
-
-            {/* CA Chain (optional) */}
-            <div className="form-field" style={{marginTop:"16px"}}>
-              <label className="form-label">CA-цепочка (ca.pem) — необязательно</label>
-              <div style={{display:"flex",gap:"8px",alignItems:"flex-start",marginBottom:"6px"}}>
-                <label className="btn btn-secondary" style={{cursor:"pointer",position:"relative",flexShrink:0}}>
-                  📎 Выбрать файл
-                  <input type="file" accept=".pem,.crt,.cer,.ca-bundle" style={{position:"absolute",inset:0,opacity:0,cursor:"pointer"}} onChange={handleSslFileRead(setSslCa)} />
-                </label>
-                {sslCa && <span style={{fontSize:"12px",color:"var(--rd-green)",fontWeight:600,paddingTop:"8px"}}>✓ Загружен ({sslCa.length} символов)</span>}
-              </div>
-              <textarea
-                className="form-input"
-                placeholder={"-----BEGIN CERTIFICATE-----\n(промежуточные сертификаты)\n-----END CERTIFICATE-----"}
-                value={sslCa}
-                onChange={e => setSslCa(e.target.value)}
-                rows={3}
-                style={{resize:"vertical",minHeight:"60px",fontFamily:"monospace",fontSize:"11px"}}
-              />
-              <div style={{fontSize:"11px",color:"var(--rd-gray-text)",marginTop:"4px"}}>
-                Промежуточные сертификаты удостоверяющего центра (необязательно, если уже включены в cert.pem)
-              </div>
-            </div>
-
-            {/* Upload actions */}
-            <div style={{display:"flex",gap:"10px",marginTop:"20px",flexWrap:"wrap",alignItems:"center"}}>
-              <button className="btn btn-primary" onClick={uploadSsl} disabled={sslUploading || !sslCert.trim() || !sslKey.trim()}>
-                {sslUploading ? "⏳ Проверка и установка..." : "🔒 Установить сертификат"}
-              </button>
-              <button className="btn btn-ghost" onClick={() => { setSslExpanded(false); setSslCert(""); setSslKey(""); setSslCa(""); }}>
-                Отмена
-              </button>
-            </div>
-
-            {/* Help note */}
-            <div style={{marginTop:"16px",padding:"12px 14px",background:"rgba(59,130,246,0.06)",border:"1px solid rgba(59,130,246,0.15)",borderRadius:"var(--rd-radius-sm)",fontSize:"12px",lineHeight:"1.7",color:"#475569"}}>
-              <strong>Как получить SSL-сертификат:</strong><br/>
-              1. <strong>Let's Encrypt</strong> (бесплатно) — используйте certbot: <code style={{background:"rgba(0,0,0,0.06)",padding:"1px 5px",borderRadius:"3px",fontSize:"11px"}}>certbot certonly --standalone -d yourdomain.com</code><br/>
-              2. <strong>Коммерческий</strong> — закажите у провайдера (Comodo, DigiCert, GlobalSign и др.)<br/>
-              3. <strong>Self-signed</strong> (для тестов) — <code style={{background:"rgba(0,0,0,0.06)",padding:"1px 5px",borderRadius:"3px",fontSize:"11px"}}>openssl req -x509 -nodes -days 365 -newkey rsa:2048 -keyout key.pem -out cert.pem</code><br/>
-              После установки <strong>перезапустите сервер</strong> для активации HTTPS.
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* ═══════════ LET'S ENCRYPT ═══════════ */}
-      <div className="settings-card" style={{marginTop:"24px"}}>
-        <div className="settings-section-title">🛡️ Let's Encrypt — бесплатный SSL</div>
-        <div style={{fontSize:"13px",color:"var(--rd-gray-text)",marginBottom:"20px",lineHeight:"1.7"}}>
-          Автоматически получите бесплатный SSL-сертификат от Let's Encrypt. Требуется: домен, направленный на этот сервер, и установленный certbot.
-        </div>
-
-        {!leExpanded ? (
-          <button className="btn btn-secondary" onClick={() => { setLeExpanded(true); checkCertbot(); }}>
-            🛡️ Настроить Let's Encrypt
-          </button>
-        ) : (
-          <div style={{padding:"20px",background:"#fafbfc",border:"1.5px solid var(--rd-gray-border)",borderRadius:"var(--rd-radius-sm)"}}>
-            {/* Certbot check */}
-            {leCheck === null ? (
-              <div style={{textAlign:"center",padding:"12px",color:"var(--rd-gray-text)",fontSize:"13px"}}>Проверка certbot...</div>
-            ) : !leCheck.certbotInstalled ? (
-              <div style={{padding:"16px",background:"rgba(245,158,11,0.08)",border:"1px solid rgba(245,158,11,0.25)",borderRadius:"var(--rd-radius-sm)",marginBottom:"16px"}}>
-                <div style={{fontWeight:700,fontSize:"14px",color:"#d97706",marginBottom:"8px"}}>⚠ Certbot не найден</div>
-                <div style={{fontSize:"12px",color:"#92400e",lineHeight:"1.7"}}>
-                  Для автоматического получения сертификата установите certbot:<br/>
-                  <strong>Ubuntu/Debian:</strong> <code style={{background:"rgba(0,0,0,0.06)",padding:"1px 5px",borderRadius:"3px",fontSize:"11px"}}>sudo apt install certbot</code><br/>
-                  <strong>CentOS/RHEL:</strong> <code style={{background:"rgba(0,0,0,0.06)",padding:"1px 5px",borderRadius:"3px",fontSize:"11px"}}>sudo yum install certbot</code><br/>
-                  <strong>macOS:</strong> <code style={{background:"rgba(0,0,0,0.06)",padding:"1px 5px",borderRadius:"3px",fontSize:"11px"}}>brew install certbot</code><br/>
-                  <strong>Snap (универсальный):</strong> <code style={{background:"rgba(0,0,0,0.06)",padding:"1px 5px",borderRadius:"3px",fontSize:"11px"}}>sudo snap install --classic certbot</code>
-                </div>
-                <button className="btn btn-secondary" style={{marginTop:"12px"}} onClick={checkCertbot}>🔄 Проверить снова</button>
-              </div>
-            ) : (
-              <div style={{padding:"10px 14px",background:"rgba(5,150,105,0.06)",border:"1px solid rgba(5,150,105,0.2)",borderRadius:"var(--rd-radius-sm)",marginBottom:"16px",fontSize:"12px",color:"var(--rd-green)",fontWeight:600}}>
-                ✅ Certbot установлен: {leCheck.certbotVersion}
-              </div>
-            )}
-
-            {/* Domain */}
-            <div className="form-field">
-              <label className="form-label">Домен *</label>
-              <input
-                className="form-input"
-                placeholder="shop.example.com"
-                value={leDomain}
-                onChange={e => setLeDomain(e.target.value)}
-              />
-              <div style={{fontSize:"11px",color:"var(--rd-gray-text)",marginTop:"4px"}}>
-                Домен должен быть направлен (A-запись) на IP этого сервера
-              </div>
-            </div>
-
-            {/* Email */}
-            <div className="form-field" style={{marginTop:"14px"}}>
-              <label className="form-label">Email для уведомлений *</label>
-              <input
-                className="form-input"
-                type="email"
-                placeholder="admin@example.com"
-                value={leEmail}
-                onChange={e => setLeEmail(e.target.value)}
-              />
-              <div style={{fontSize:"11px",color:"var(--rd-gray-text)",marginTop:"4px"}}>
-                Let's Encrypt отправит предупреждение об истечении сертификата
-              </div>
-            </div>
-
-            {/* Method */}
-            <div className="form-field" style={{marginTop:"14px"}}>
-              <label className="form-label">Метод верификации</label>
-              <div style={{display:"flex",gap:"12px",flexWrap:"wrap"}}>
-                <label style={{display:"flex",alignItems:"center",gap:"6px",cursor:"pointer",padding:"8px 14px",background: leMethod==="standalone" ? "var(--rd-red-light)" : "var(--rd-gray-bg)",border: leMethod==="standalone" ? "1.5px solid rgba(199,22,24,0.3)" : "1.5px solid var(--rd-gray-border)",borderRadius:"var(--rd-radius-sm)",fontSize:"13px",fontWeight:600,transition:"all 0.15s"}}>
-                  <input type="radio" name="le_method" value="standalone" checked={leMethod==="standalone"} onChange={() => setLeMethod("standalone")} style={{accentColor:"var(--rd-red)"}} />
-                  Standalone
-                </label>
-                <label style={{display:"flex",alignItems:"center",gap:"6px",cursor:"pointer",padding:"8px 14px",background: leMethod==="webroot" ? "var(--rd-red-light)" : "var(--rd-gray-bg)",border: leMethod==="webroot" ? "1.5px solid rgba(199,22,24,0.3)" : "1.5px solid var(--rd-gray-border)",borderRadius:"var(--rd-radius-sm)",fontSize:"13px",fontWeight:600,transition:"all 0.15s"}}>
-                  <input type="radio" name="le_method" value="webroot" checked={leMethod==="webroot"} onChange={() => setLeMethod("webroot")} style={{accentColor:"var(--rd-red)"}} />
-                  Webroot
-                </label>
-              </div>
-              <div style={{fontSize:"11px",color:"var(--rd-gray-text)",marginTop:"6px",lineHeight:"1.6"}}>
-                {leMethod === "standalone"
-                  ? "Standalone — certbot поднимет временный HTTP-сервер на порту 80. Требуется, чтобы порт 80 был свободен."
-                  : "Webroot — certbot разместит файл проверки в public/. Сайт должен быть доступен по HTTP на порту 80."
-                }
-              </div>
-            </div>
-
-            {/* Actions */}
-            <div style={{display:"flex",gap:"10px",marginTop:"20px",flexWrap:"wrap",alignItems:"center"}}>
-              <button className="btn btn-primary" onClick={issueLe} disabled={leIssuing || !leDomain.trim() || !leEmail.trim() || (leCheck && !leCheck.certbotInstalled)}>
-                {leIssuing ? "⏳ Получение сертификата..." : "🛡️ Получить сертификат"}
-              </button>
-              {sslStatus && sslStatus.installed && (
-                <button className="btn btn-secondary" onClick={renewLe} disabled={leRenewing}>
-                  {leRenewing ? "⏳ Продление..." : "🔄 Продлить сертификат"}
-                </button>
-              )}
-              <button className="btn btn-ghost" onClick={() => { setLeExpanded(false); setLeLog(""); }}>
-                Отмена
-              </button>
-            </div>
-
-            {/* Log output */}
-            {leLog && (
-              <div style={{marginTop:"16px"}}>
-                <div style={{fontSize:"11px",fontWeight:700,textTransform:"uppercase",letterSpacing:"0.5px",color:"var(--rd-gray-text)",marginBottom:"6px"}}>Лог certbot</div>
-                <pre style={{background:"#1a1a2e",color:"#e0e0e0",padding:"14px",borderRadius:"var(--rd-radius-sm)",fontSize:"11px",lineHeight:"1.6",maxHeight:"250px",overflowY:"auto",whiteSpace:"pre-wrap",wordBreak:"break-all",margin:0}}>{leLog}</pre>
-              </div>
-            )}
-
-            {/* Info note */}
-            <div style={{marginTop:"16px",padding:"12px 14px",background:"rgba(59,130,246,0.06)",border:"1px solid rgba(59,130,246,0.15)",borderRadius:"var(--rd-radius-sm)",fontSize:"12px",lineHeight:"1.7",color:"#475569"}}>
-              <strong>Важно:</strong><br/>
-              • Сертификаты Let's Encrypt действуют <strong>90 дней</strong>. Рекомендуется настроить автопродление через cron:<br/>
-              <code style={{background:"rgba(0,0,0,0.06)",padding:"1px 5px",borderRadius:"3px",fontSize:"11px"}}>0 3 * * * certbot renew --quiet && cp /etc/letsencrypt/live/DOMAIN/fullchain.pem ./ssl/cert.pem && cp /etc/letsencrypt/live/DOMAIN/privkey.pem ./ssl/key.pem</code><br/>
-              • Для standalone-метода порт 80 должен быть свободен на момент выпуска/продления<br/>
-              • Сервер должен быть доступен из интернета по указанному домену
-            </div>
-          </div>
-        )}
       </div>
     </div>
   );
@@ -6201,8 +5721,6 @@ function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbC
   const [pgSqlError, setPgSqlError] = useState("");
   const [pgStats, setPgStats] = useState(null);
   const [pgStatsLoading, setPgStatsLoading] = useState(false);
-  const [migrationStatus, setMigrationStatus] = useState(null);
-  const [migrationLoading, setMigrationLoading] = useState(false);
   const [dbSubTab, setDbSubTab] = useState(() => {
     if (typeof window === 'undefined') return 'postgres';
     const disabled = localStorage.getItem('__sqlite_disabled__') === '1';
@@ -6360,57 +5878,6 @@ function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbC
       }
     } catch(err) { notify("Ошибка: " + err.message, "err"); }
     setPgStatsLoading(false);
-  };
-
-  const checkMigrationStatus = async () => {
-    setMigrationLoading(true);
-    try {
-      const res = await fetch('/api/migrate');
-      const data = await res.json();
-      setMigrationStatus(data);
-    } catch(e) {
-      setMigrationStatus({ ok: false, error: e.message });
-    } finally {
-      setMigrationLoading(false);
-    }
-  };
-
-  const runImageMigration = async (target = 'all', force = false) => {
-    setMigrationLoading(true);
-    try {
-      const res = await fetch('/api/migrate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ target, force }),
-      });
-      const data = await res.json();
-      setMigrationStatus(data);
-      if (data.ok) {
-        // Считаем сколько всего перенесено
-        let totalMoved = 0, totalKB = 0;
-        if (data.appearance && !data.appearance.skipped) { totalMoved += data.appearance.moved?.length || 0; totalKB += data.appearance.savedKB || 0; }
-        if (data.entities) data.entities.forEach(e => { if (!e.skipped) { totalMoved += e.moved || 0; totalKB += e.savedKB || 0; } });
-        if (totalMoved > 0) {
-          notify(`✅ Миграция завершена! Перенесено ${totalMoved} изображений (${totalKB}KB)`, 'ok');
-          loadPgStats();
-          // Обновляем entity-изображения в памяти
-          _fetchEntityImages().then(ei => {
-            setTasks(prev => _restoreEntityImagesInArray(prev, ei.tasks || {}, 'image', false));
-            setAuctions(prev => _restoreEntityImagesInArray(prev, ei.auctions || {}, 'image', false));
-            setLotteries(prev => _restoreEntityImagesInArray(prev, ei.lotteries || {}, 'image', false));
-            setCustomProducts(prev => _restoreEntityImagesInArray(prev, ei.products || {}, 'images', true));
-          });
-        } else {
-          notify('Изображений для переноса не найдено — всё уже чисто', 'ok');
-        }
-      } else {
-        notify('Ошибка миграции: ' + data.error, 'err');
-      }
-    } catch(e) {
-      notify('Ошибка: ' + e.message, 'err');
-    } finally {
-      setMigrationLoading(false);
-    }
   };
 
   const runPgSql = async () => {
@@ -7761,71 +7228,6 @@ function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbC
                       )}
                       <div style={{marginTop:"14px"}}>
                         <button className="btn btn-secondary" onClick={loadPgStats} disabled={pgStatsLoading}>{pgStatsLoading ? "⏳ Загрузка…" : "🔄 Загрузить статистику"}</button>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Migration Tool */}
-                  {isPgActive && (
-                    <div className="settings-card">
-                      <div className="settings-section-title">🔄 Миграция изображений</div>
-                      <div style={{fontSize:"13px",color:"var(--rd-gray-text)",marginBottom:"12px"}}>
-                        Переносит base64-изображения из <code style={{background:"var(--rd-gray-bg)",padding:"2px 6px",borderRadius:"4px",fontFamily:"monospace",fontSize:"11px"}}>cm_appearance</code> в отдельный ключ <code style={{background:"var(--rd-gray-bg)",padding:"2px 6px",borderRadius:"4px",fontFamily:"monospace",fontSize:"11px"}}>cm_images</code>.
-                        После миграции размер <code style={{background:"var(--rd-gray-bg)",padding:"2px 6px",borderRadius:"4px",fontFamily:"monospace",fontSize:"11px"}}>cm_appearance</code> уменьшится с ~715KB до ~10KB, что ускорит загрузку данных.
-                      </div>
-
-                      {/* Status block */}
-                      {migrationStatus && (
-                        <div style={{marginBottom:"14px",padding:"12px 14px",borderRadius:"var(--rd-radius-sm)",border:"1px solid var(--rd-gray-border)",background:"var(--rd-gray-bg)",fontSize:"13px"}}>
-                          {migrationStatus.ok ? (() => {
-                            const ik = migrationStatus.imageKeys || {};
-                            const ms = migrationStatus.mainKeySizes || {};
-                            return (
-                              <div>
-                                <div style={{fontWeight:600,marginBottom:"8px",color:"var(--rd-dark)"}}>Статус ключей изображений:</div>
-                                <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(200px,1fr))",gap:"6px"}}>
-                                  {[
-                                    {label:"🖼 Оформление",  imgKey:"cm_images",          mainKey:"cm_appearance"},
-                                    {label:"📋 Задания",     imgKey:"cm_tasks_images",     mainKey:"cm_tasks"},
-                                    {label:"🛍️ Товары",      imgKey:"cm_products_images",  mainKey:"cm_products"},
-                                    {label:"🏷️ Аукционы",   imgKey:"cm_auctions_images",  mainKey:"cm_auctions"},
-                                    {label:"🎰 Лотереи",    imgKey:"cm_lotteries_images", mainKey:"cm_lotteries"},
-                                  ].map(({label,imgKey,mainKey}) => {
-                                    const info = ik[imgKey];
-                                    const mainKB = ms[mainKey];
-                                    const done = info && info.count > 0;
-                                    const empty = info && info.exists && info.count === 0;
-                                    return (
-                                      <div key={imgKey} style={{padding:"8px 10px",borderRadius:"6px",background:done?"rgba(22,163,74,0.07)":empty?"rgba(234,179,8,0.08)":"rgba(199,22,24,0.06)",border:"1px solid "+(done?"rgba(22,163,74,0.2)":empty?"rgba(234,179,8,0.3)":"rgba(199,22,24,0.15)")}}>
-                                        <div style={{fontWeight:600,fontSize:"12px",marginBottom:"3px"}}>{label}</div>
-                                        <div style={{fontSize:"11px",color:"var(--rd-gray-text)"}}>
-                                          {done ? <span style={{color:"#16a34a"}}>✅ {info.count} изобр. ({info.kb}KB)</span>
-                                               : empty ? <span style={{color:"#d97706"}}>⚠️ Пустой ключ</span>
-                                               : <span style={{color:"var(--rd-red)"}}>❌ Не мигрировано</span>}
-                                          {mainKB != null && <span style={{marginLeft:"6px",opacity:0.7}}>| осн.: {mainKB}KB</span>}
-                                        </div>
-                                      </div>
-                                    );
-                                  })}
-                                </div>
-                              </div>
-                            );
-                          })() : (
-                            <span style={{color:"var(--rd-red)"}}>❌ Ошибка: {migrationStatus.error}</span>
-                          )}
-                        </div>
-                      )}
-
-                      <div style={{display:"flex",gap:"10px",flexWrap:"wrap"}}>
-                        <button className="btn btn-secondary" onClick={checkMigrationStatus} disabled={migrationLoading}>
-                          {migrationLoading ? "⏳ Проверка…" : "🔍 Проверить статус"}
-                        </button>
-                        <button className="btn btn-primary" onClick={() => runImageMigration('all', false)} disabled={migrationLoading}>
-                          {migrationLoading ? "⏳ Выполняется…" : "🚀 Запустить миграцию"}
-                        </button>
-                        <button className="btn btn-ghost" onClick={() => { if(window.confirm('Принудительно перезапустить все миграции? Все *_images ключи будут перезаписаны.')) runImageMigration('all', true); }} disabled={migrationLoading}>
-                          ⚡ Принудительно
-                        </button>
                       </div>
                     </div>
                   )}

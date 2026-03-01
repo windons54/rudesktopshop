@@ -24,14 +24,13 @@ RUN npm run build
 RUN mkdir -p data
 VOLUME ["/app/data"]
 
-# Директория для SSL-сертификатов
+# Директория для SSL-сертификатов (используется внешним прокси, например nginx)
 RUN mkdir -p ssl
 VOLUME ["/app/ssl"]
 
-EXPOSE 3000 443
+EXPOSE 3000
 
 ENV PORT=3000
-ENV PORT_HTTPS=443
 ENV HOSTNAME="0.0.0.0"
 
 CMD ["npm", "start"]
