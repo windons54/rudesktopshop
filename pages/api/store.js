@@ -398,7 +398,7 @@ const pgKv = {
     // Исключаем cm_images (714KB изображений) — клиент грузит их отдельно через /api/images
     // и кэширует в localStorage. Включение в getAll = +714KB на каждый polling-запрос.
     const r = await pool.query(
-      `SELECT key,value FROM kv WHERE key!=$1 AND key NOT LIKE '%\_images' ORDER BY key`,
+      `SELECT key,value FROM kv WHERE key!=$1 AND RIGHT(key, 7) != '_images' ORDER BY key`,
       [PG_CFG_KEY]
     );
     const out = {};

@@ -80,7 +80,7 @@ export default async function handler(req, res) {
         SELECT
           COUNT(*) as key_count,
           SUM(LENGTH(value)) as total_value_bytes,
-          SUM(CASE WHEN key NOT IN ('cm_images', '__pg_config__') THEN LENGTH(value) ELSE 0 END) as getall_bytes,
+          SUM(CASE WHEN RIGHT(key, 7) != '_images' AND key != '__pg_config__' THEN LENGTH(value) ELSE 0 END) as getall_bytes,
           pg_size_pretty(pg_database_size(current_database())) as db_size,
           pg_database_size(current_database()) as db_size_bytes
         FROM kv
@@ -188,7 +188,7 @@ export default async function handler(req, res) {
   }
   // Предупреждаем только если тяжёлый ключ попадает в getAll (не cm_images)
   if (dbStats && dbStats.heaviestKeys?.length > 0) {
-    const heaviestInGetAll = dbStats.heaviestKeys.find(k => k.key !== 'cm_images' && k.key !== '__pg_config__');
+    const heaviestInGetAll = dbStats.heaviestKeys.find(k => !k.key.endsWith('_images') && k.key !== '__pg_config__');
     if (heaviestInGetAll && heaviestInGetAll.bytes > 300 * 1024) {
       issues.push({ severity: 'warning', msg: `Тяжёлый ключ в getAll: ${heaviestInGetAll.key} = ${heaviestInGetAll.kb}` });
     }
