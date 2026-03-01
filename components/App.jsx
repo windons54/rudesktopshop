@@ -665,11 +665,15 @@ function App({ initialData, initialVersion }) {
         if (savedSession && savedSession.user) {
           setCurrentUser(savedSession.user);
         }
-        // ИСПРАВЛЕНИЕ: НЕ устанавливаем dataReady=true сразу с пустыми данными —
+        // НЕ устанавливаем dataReady=true сразу с пустыми данными —
         // это приводило к «сломанному» интерфейсу (авторизация есть, данных нет).
         // _applyServerData из polling установит dataReady=true когда данные реально загрузятся.
-        // Fallback: если за 10 секунд polling так и не загрузил данные — показываем интерфейс.
-        setTimeout(() => setDataReady(true), 10000);
+        //
+        // Fallback: если за 3 секунды polling так и не загрузил данные — показываем интерфейс.
+        // 3с выбрано потому что recoverFromPgUnavailable уже делает 15 попыток × 300мс = 4.5с.
+        // Обычно данные появляются за 1-2 попытки (300-600мс). Если не появились за 3с —
+        // значит БД действительно недоступна и лучше показать UI чем держать пустой экран.
+        setTimeout(() => setDataReady(true), 3000);
         return;
       }
 

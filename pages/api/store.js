@@ -451,10 +451,12 @@ const pgKv = {
     bumpVersion();
   },
   async getAll(pool) {
-    // Исключаем cm_images (714KB изображений) — клиент грузит их отдельно через /api/images
-    // и кэширует в localStorage. Включение в getAll = +714KB на каждый polling-запрос.
+    // Исключаем тяжёлые ключи с изображениями из polling-запроса:
+    //   cm_images          — 714KB, грузится через /api/images, кэшируется в localStorage
+    //   cm_auctions_images — 235KB, клиент не использует этот ключ напрямую (данные embedded в cm_auctions)
+    // Без исключения: +949KB на каждый getAll = значительная задержка на слабом соединении.
     const r = await pool.query(
-      `SELECT key,value FROM kv WHERE key!=$1 AND key!='cm_images' ORDER BY key`,
+      `SELECT key,value FROM kv WHERE key!=$1 AND key!='cm_images' AND key!='cm_auctions_images' ORDER BY key`,
       [PG_CFG_KEY]
     );
     const out = {};
