@@ -5721,6 +5721,8 @@ function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbC
   const [pgSqlError, setPgSqlError] = useState("");
   const [pgStats, setPgStats] = useState(null);
   const [pgStatsLoading, setPgStatsLoading] = useState(false);
+  const [migrationStatus, setMigrationStatus] = useState(null);
+  const [migrationLoading, setMigrationLoading] = useState(false);
   const [dbSubTab, setDbSubTab] = useState(() => {
     if (typeof window === 'undefined') return 'postgres';
     const disabled = localStorage.getItem('__sqlite_disabled__') === '1';
@@ -5878,6 +5880,46 @@ function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbC
       }
     } catch(err) { notify("Ошибка: " + err.message, "err"); }
     setPgStatsLoading(false);
+  };
+
+  const checkMigrationStatus = async () => {
+    setMigrationLoading(true);
+    try {
+      const res = await fetch('/api/migrate');
+      const data = await res.json();
+      setMigrationStatus(data);
+    } catch(e) {
+      setMigrationStatus({ ok: false, error: e.message });
+    } finally {
+      setMigrationLoading(false);
+    }
+  };
+
+  const runImageMigration = async (force = false) => {
+    setMigrationLoading(true);
+    try {
+      const res = await fetch('/api/migrate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ force }),
+      });
+      const data = await res.json();
+      setMigrationStatus(data);
+      if (data.ok && !data.skipped) {
+        notify(`✅ Миграция завершена! Перенесено ${data.moved?.length || 0} изображений (${data.savedKB || 0}KB)`, 'ok');
+        loadPgStats();
+      } else if (data.ok && data.skipped && data.reason === 'already_done') {
+        notify('Миграция уже выполнена, изображения на месте', 'ok');
+      } else if (data.ok && data.reason === 'no_images_found') {
+        notify('Изображений в base64 не найдено — возможно уже чисто', 'ok');
+      } else if (!data.ok) {
+        notify('Ошибка миграции: ' + data.error, 'err');
+      }
+    } catch(e) {
+      notify('Ошибка: ' + e.message, 'err');
+    } finally {
+      setMigrationLoading(false);
+    }
   };
 
   const runPgSql = async () => {
@@ -7228,6 +7270,67 @@ function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbC
                       )}
                       <div style={{marginTop:"14px"}}>
                         <button className="btn btn-secondary" onClick={loadPgStats} disabled={pgStatsLoading}>{pgStatsLoading ? "⏳ Загрузка…" : "🔄 Загрузить статистику"}</button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Migration Tool */}
+                  {isPgActive && (
+                    <div className="settings-card">
+                      <div className="settings-section-title">🔄 Миграция изображений</div>
+                      <div style={{fontSize:"13px",color:"var(--rd-gray-text)",marginBottom:"12px"}}>
+                        Переносит base64-изображения из <code style={{background:"var(--rd-gray-bg)",padding:"2px 6px",borderRadius:"4px",fontFamily:"monospace",fontSize:"11px"}}>cm_appearance</code> в отдельный ключ <code style={{background:"var(--rd-gray-bg)",padding:"2px 6px",borderRadius:"4px",fontFamily:"monospace",fontSize:"11px"}}>cm_images</code>.
+                        После миграции размер <code style={{background:"var(--rd-gray-bg)",padding:"2px 6px",borderRadius:"4px",fontFamily:"monospace",fontSize:"11px"}}>cm_appearance</code> уменьшится с ~715KB до ~10KB, что ускорит загрузку данных.
+                      </div>
+
+                      {/* Status block */}
+                      {migrationStatus && (
+                        <div style={{marginBottom:"14px",padding:"12px 14px",borderRadius:"var(--rd-radius-sm)",border:"1px solid var(--rd-gray-border)",background:"var(--rd-gray-bg)",fontSize:"13px"}}>
+                          {migrationStatus.ok ? (
+                            <div>
+                              <div style={{display:"flex",alignItems:"center",gap:"8px",marginBottom:"6px"}}>
+                                {migrationStatus.status === 'done'
+                                  ? <span style={{color:"#16a34a",fontWeight:600}}>✅ Миграция выполнена</span>
+                                  : migrationStatus.status === 'empty_stub'
+                                  ? <span style={{color:"#d97706",fontWeight:600}}>⚠️ cm_images существует, но пустой — нужна принудительная миграция</span>
+                                  : migrationStatus.status === 'partial'
+                                  ? <span style={{color:"#d97706",fontWeight:600}}>⚠️ Частично — в cm_appearance ещё есть base64</span>
+                                  : migrationStatus.skipped
+                                  ? <span style={{color:"#16a34a",fontWeight:600}}>✅ {migrationStatus.reason === 'already_done' ? 'Уже выполнена, изображения на месте' : 'Пропущено: ' + migrationStatus.reason}</span>
+                                  : migrationStatus.moved?.length > 0
+                                  ? <span style={{color:"#16a34a",fontWeight:600}}>✅ Выполнено: перенесено {migrationStatus.moved.length} изображений ({migrationStatus.savedKB}KB)</span>
+                                  : <span style={{color:"var(--rd-gray-text)"}}>ℹ️ {migrationStatus.reason || 'Статус получен'}</span>}
+                              </div>
+                              <div style={{display:"flex",gap:"24px",flexWrap:"wrap",fontSize:"12px",color:"var(--rd-gray-text)"}}>
+                                {migrationStatus.cm_appearance_kb != null && <span>cm_appearance: <strong>{migrationStatus.cm_appearance_kb}KB</strong></span>}
+                                {migrationStatus.cm_images_kb != null && <span>cm_images: <strong>{migrationStatus.cm_images_kb}KB</strong></span>}
+                                {migrationStatus.cm_images_keys?.length > 0 && <span>Изображения: <strong>{migrationStatus.cm_images_keys.join(', ')}</strong></span>}
+                                {migrationStatus.moved?.length > 0 && <span>Перенесено: <strong>{migrationStatus.moved.join(', ')}</strong></span>}
+                                {migrationStatus.base64_still_in_appearance?.length > 0 && (
+                                  <span style={{color:"#d97706"}}>Ещё в appearance: <strong>{migrationStatus.base64_still_in_appearance.join(', ')}</strong></span>
+                                )}
+                              </div>
+                            </div>
+                          ) : (
+                            <span style={{color:"var(--rd-red)"}}>❌ Ошибка: {migrationStatus.error}</span>
+                          )}
+                        </div>
+                      )}
+
+                      <div style={{display:"flex",gap:"10px",flexWrap:"wrap"}}>
+                        <button className="btn btn-secondary" onClick={checkMigrationStatus} disabled={migrationLoading}>
+                          {migrationLoading ? "⏳ Проверка…" : "🔍 Проверить статус"}
+                        </button>
+                        <button className="btn btn-primary" onClick={() => runImageMigration(false)} disabled={migrationLoading}
+                          title="Запустить миграцию. Если cm_images уже существует и непустой — пропустит.">
+                          {migrationLoading ? "⏳ Выполняется…" : "🚀 Запустить миграцию"}
+                        </button>
+                        {migrationStatus && (migrationStatus.status === 'empty_stub' || migrationStatus.status === 'partial' || (migrationStatus.needs_migration && migrationStatus.cm_images_kb === 0)) && (
+                          <button className="btn btn-danger" onClick={() => { if(window.confirm('Запустить принудительную миграцию? cm_images будет перезаписан.')) runImageMigration(true); }} disabled={migrationLoading}
+                            title="Принудительно перезапустить даже если cm_images уже существует">
+                            ⚡ Принудительно
+                          </button>
+                        )}
                       </div>
                     </div>
                   )}
