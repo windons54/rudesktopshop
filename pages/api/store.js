@@ -331,58 +331,6 @@ const pgKv = {
     return r.rows.length ? deserialize(r.rows[0].value) : null;
   },
   async set(pool, key, value) {
-    // Для entity-ключей автоматически вырезаем base64 в отдельный *_images ключ
-    const ENTITY_KEYS = { cm_tasks: 'image', cm_auctions: 'image', cm_lotteries: 'image' };
-    const PRODUCT_KEY = 'cm_products';
-
-    if ((key in ENTITY_KEYS || key === PRODUCT_KEY) && Array.isArray(value)) {
-      const field = ENTITY_KEYS[key] || 'images';
-      const imagesKey = key + '_images';
-      const existing = await pool.query('SELECT value FROM kv WHERE key=$1', [imagesKey]);
-      const imagesMap = existing.rows.length ? JSON.parse(existing.rows[0].value || '{}') : {};
-      let imagesChanged = false;
-
-      const slim = value.map(item => {
-        if (!item || !item.id) return item;
-        if (key === PRODUCT_KEY) {
-          // products: массив images[]
-          const newImgs = [];
-          let changed = false;
-          (item.images || (item.image ? [item.image] : [])).forEach((img, idx) => {
-            if (typeof img === 'string' && img.startsWith('data:')) {
-              imagesMap[item.id + '_' + idx] = img;
-              newImgs.push('__stored__:' + item.id + '_' + idx);
-              changed = true; imagesChanged = true;
-            } else { newImgs.push(img); }
-          });
-          return changed ? { ...item, images: newImgs } : item;
-        } else {
-          // tasks/auctions/lotteries: одно поле image
-          if (typeof item[field] === 'string' && item[field].startsWith('data:')) {
-            imagesMap[item.id] = item[field];
-            imagesChanged = true;
-            return { ...item, [field]: '__stored__' };
-          }
-          return item;
-        }
-      });
-
-      if (imagesChanged) {
-        await pool.query(
-          `INSERT INTO kv(key,value,updated_at) VALUES($1,$2,NOW()) ON CONFLICT(key) DO UPDATE SET value=$2, updated_at=NOW()`,
-          [imagesKey, JSON.stringify(imagesMap)]
-        );
-      }
-
-      await pool.query(
-        `INSERT INTO kv(key,value,updated_at) VALUES($1,$2,NOW())
-         ON CONFLICT(key) DO UPDATE SET value=$2, updated_at=NOW()`,
-        [key, serialize(slim)]
-      );
-      bumpVersion();
-      return;
-    }
-
     await pool.query(
       `INSERT INTO kv(key,value,updated_at) VALUES($1,$2,NOW())
        ON CONFLICT(key) DO UPDATE SET value=$2, updated_at=NOW()`,
@@ -398,7 +346,7 @@ const pgKv = {
     // Исключаем cm_images (714KB изображений) — клиент грузит их отдельно через /api/images
     // и кэширует в localStorage. Включение в getAll = +714KB на каждый polling-запрос.
     const r = await pool.query(
-      `SELECT key,value FROM kv WHERE key!=$1 AND RIGHT(key, 7) != '_images' ORDER BY key`,
+      `SELECT key,value FROM kv WHERE key!=$1 AND key!='cm_images' ORDER BY key`,
       [PG_CFG_KEY]
     );
     const out = {};
