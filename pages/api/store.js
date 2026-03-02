@@ -228,6 +228,8 @@ async function queryWithRetry(queryFn, maxRetries = 1) {
         g._pgReady = false;
         g._pgInitPromise = null;
         g._pgLastError = null; // Сбрасываем cooldown чтобы retry прошёл сразу
+        // Пауза 1s перед retry — даём время БД восстановить соединение
+        await new Promise(r => setTimeout(r, 1000));
         // Даём время на создание нового пула
         const retryPool = await getPool();
         if (!retryPool) {
@@ -268,9 +270,9 @@ async function getPool() {
 
   // Cooldown после ошибки: не пытаемся переподключиться чаще раза в 3 секунды
   const now = Date.now();
-  // Cooldown 1s — минимальная пауза между попытками переподключения.
-  // Раньше было 10s — слишком долго для пользователя ждущего загрузки страницы.
-  if (g._pgLastError && g._pgPoolKey === cfgKey && (now - g._pgLastError) < 1000) {
+  // Cooldown 10s — минимальная пауза между попытками переподключения.
+  // Раньше было 1s — слишком часто, создавало цикл «подключается/отключается» при нестабильной БД.
+  if (g._pgLastError && g._pgPoolKey === cfgKey && (now - g._pgLastError) < 10000) {
     return null;
   }
 
@@ -322,7 +324,10 @@ async function getPool() {
         // pg автоматически удалит сломанный клиент из пула и создаст новый.
         // Мы только логируем. Обнуляем пул лишь при фатальных ошибках (ECONNREFUSED и т.п.)
         pgLog('error', `Ошибка idle-клиента: ${err.message}`, { detail: err.code || '' });
-        const fatal = err.code === 'ECONNREFUSED' || err.code === 'ENOTFOUND' || err.message?.includes('Connection terminated unexpectedly');
+        // ИСПРАВЛЕНИЕ: сбрасываем пул только при ECONNREFUSED/ENOTFOUND (сервер реально недоступен).
+        // Connection terminated / idle timeout — это нормально для облачных БД, pg сам пересоздаст
+        // соединение. Раньше эти ошибки сбрасывали пул → цикл «появляется/пропадает» каждые 1-10s.
+        const fatal = err.code === 'ECONNREFUSED' || err.code === 'ENOTFOUND';
         if (fatal && g._pgPool === newPool) {
           pgLog('disconnect', 'Фатальная ошибка idle — пул сброшен', { detail: err.message });
           g._pgReady = false;
@@ -364,6 +369,7 @@ async function getPool() {
         } catch (e) {
           pgLog('error', `Фоновая проверка не прошла: ${e.message}`, { detail: e.code || '' });
           // НЕ сбрасываем пул здесь — это вызывало цикл «появляется/пропадает» раз в секунду.
+          // "Connection terminated" и подобные ошибки idle-соединений — это нормально для облачных PG.
           // Если соединение реально мертво, это выяснится при первом реальном запросе
           // и queryWithRetry пересоздаст пул корректно.
         }

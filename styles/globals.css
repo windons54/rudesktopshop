@@ -2128,8 +2128,8 @@ input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; }
   .rd-burger { display: flex !important; }
   .rd-mobile-nav { display: block; }
   .rd-header-inner { height: 54px; }
-  .rd-logo { max-height: 54px; }
-  .rd-logo img { max-height: 36px; height: auto; width: auto; }
+  .rd-logo { max-height: 64px; }
+  .rd-logo img { max-height: 48px; height: auto; width: auto; }
   .rd-header-right { gap: 6px; flex-shrink: 0; }
   .balance-pill { font-size: 12px; padding: 5px 10px; gap: 4px; }
   .container { padding: 0 12px; }
