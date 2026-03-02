@@ -208,7 +208,10 @@ function isConnectionError(err) {
          msg.includes('terminating connection due to idle') ||
          msg.includes('server closed the connection unexpectedly') ||
          msg.includes('socket hang up') ||
-         msg.includes('read econnreset');
+         msg.includes('read econnreset') ||
+         msg.includes('ssl connection has been closed') ||
+         msg.includes('ssl routines') ||
+         msg.includes('ssl error');
 }
 
 async function queryWithRetry(queryFn, maxRetries = 1) {
@@ -228,8 +231,8 @@ async function queryWithRetry(queryFn, maxRetries = 1) {
         g._pgReady = false;
         g._pgInitPromise = null;
         g._pgLastError = null; // Сбрасываем cooldown чтобы retry прошёл сразу
-        // Пауза 1s перед retry — даём время БД восстановить соединение
-        await new Promise(r => setTimeout(r, 1000));
+        // Пауза 2s перед retry — даём время на восстановление соединения
+        await new Promise(r => setTimeout(r, 2000));
         // Даём время на создание нового пула
         const retryPool = await getPool();
         if (!retryPool) {
@@ -270,9 +273,10 @@ async function getPool() {
 
   // Cooldown после ошибки: не пытаемся переподключиться чаще раза в 3 секунды
   const now = Date.now();
-  // Cooldown 10s — минимальная пауза между попытками переподключения.
-  // Раньше было 1s — слишком часто, создавало цикл «подключается/отключается» при нестабильной БД.
-  if (g._pgLastError && g._pgPoolKey === cfgKey && (now - g._pgLastError) < 10000) {
+  // Cooldown 15s — минимальная пауза между попытками переподключения.
+  // Короткий cooldown (1s) при HTTPS/SSL-окружении создавал бесконечный цикл:
+  // соединение падало → cooldown 1s → новая попытка → снова падала → и так по кругу.
+  if (g._pgLastError && g._pgPoolKey === cfgKey && (now - g._pgLastError) < 15000) {
     return null;
   }
 
@@ -287,31 +291,29 @@ async function getPool() {
       const { Pool } = await import('pg');
       if (g._pgPool) { pgLog('pool', 'Закрываем старый пул'); try { await g._pgPool.end(); } catch {} g._pgPool = null; }
 
-      // ИСПРАВЛЕНИЕ: idleTimeoutMillis увеличен с 30s до 600s (10 минут).
-      // При 30s пул закрывал все соединения в период бездействия, и при обновлении
-      // страницы требовалось заново устанавливать TCP-соединение с БД — отсюда
-      // задержка 3-5 секунд. С 10 минутами соединение остаётся живым между визитами.
-      // min:1 — одно соединение всегда готово, исключает холодный старт первого запроса.
+      // min:1 УБРАН намеренно — он заставляет пул немедленно создавать соединение
+      // и постоянно поддерживать его живым. При любой ошибке подключения (SSL,
+      // сеть, таймаут) pg-pool мгновенно пытается пересоздать соединение → бесконечный
+      // цикл "появляется/пропадает" в логах. Без min соединения создаются лениво
+      // (только при реальных запросах) и не порождают цикл.
+      const sslOpts = poolCfg.connectionString
+        ? { rejectUnauthorized: false }
+        : (poolCfg.ssl ? { rejectUnauthorized: false } : false);
+
+      const baseOpts = {
+        max: 5,
+        connectionTimeoutMillis: 8000,
+        idleTimeoutMillis: 600000,
+        allowExitOnIdle: false,
+        keepAlive: true,
+        keepAliveInitialDelayMillis: 10000,
+      };
+
       const opts = poolCfg.connectionString
-        ? { connectionString: poolCfg.connectionString,
-            ssl: { rejectUnauthorized: false },
-            max: 20,
-            min: 1,
-            connectionTimeoutMillis: 5000,
-            idleTimeoutMillis: 600000,
-            allowExitOnIdle: false,
-            keepAlive: true,
-            keepAliveInitialDelayMillis: 10000 }
-        : { host: poolCfg.host, port: poolCfg.port || 5432,
+        ? { ...baseOpts, connectionString: poolCfg.connectionString, ssl: sslOpts }
+        : { ...baseOpts, host: poolCfg.host, port: poolCfg.port || 5432,
             database: poolCfg.database, user: poolCfg.user, password: poolCfg.password,
-            ssl: poolCfg.ssl ? { rejectUnauthorized: false } : false,
-            max: 20,
-            min: 1,
-            connectionTimeoutMillis: 5000,
-            idleTimeoutMillis: 600000,
-            allowExitOnIdle: false,
-            keepAlive: true,
-            keepAliveInitialDelayMillis: 10000 };
+            ssl: sslOpts };
 
       newPool = new Pool(opts);
 
@@ -320,16 +322,15 @@ async function getPool() {
       // с БД (например, когда облачный PostgreSQL закрывает idle-подключения),
       // что может привести к падению сервера.
       newPool.on('error', (err) => {
-        // Ошибки отдельных idle-соединений не должны уничтожать весь пул —
-        // pg автоматически удалит сломанный клиент из пула и создаст новый.
-        // Мы только логируем. Обнуляем пул лишь при фатальных ошибках (ECONNREFUSED и т.п.)
         pgLog('error', `Ошибка idle-клиента: ${err.message}`, { detail: err.code || '' });
-        // ИСПРАВЛЕНИЕ: сбрасываем пул только при ECONNREFUSED/ENOTFOUND (сервер реально недоступен).
-        // Connection terminated / idle timeout — это нормально для облачных БД, pg сам пересоздаст
-        // соединение. Раньше эти ошибки сбрасывали пул → цикл «появляется/пропадает» каждые 1-10s.
+        // Сбрасываем пул ТОЛЬКО при ECONNREFUSED/ENOTFOUND — сервер реально недоступен.
+        // Все остальные ошибки (Connection terminated, SSL closed, idle timeout) — норма
+        // для облачных PostgreSQL, pg-pool сам пересоздаёт упавший клиент без нашего вмешательства.
+        // Раньше здесь было "Connection terminated unexpectedly" → сброс пула → немедленный
+        // retry → снова та же ошибка → бесконечный цикл "connect/disconnect" в логах.
         const fatal = err.code === 'ECONNREFUSED' || err.code === 'ENOTFOUND';
         if (fatal && g._pgPool === newPool) {
-          pgLog('disconnect', 'Фатальная ошибка idle — пул сброшен', { detail: err.message });
+          pgLog('disconnect', 'Фатальная ошибка — пул сброшен', { detail: err.message });
           g._pgReady = false;
           g._pgPool = null;
           g._pgLastError = Date.now();
@@ -369,7 +370,6 @@ async function getPool() {
         } catch (e) {
           pgLog('error', `Фоновая проверка не прошла: ${e.message}`, { detail: e.code || '' });
           // НЕ сбрасываем пул здесь — это вызывало цикл «появляется/пропадает» раз в секунду.
-          // "Connection terminated" и подобные ошибки idle-соединений — это нормально для облачных PG.
           // Если соединение реально мертво, это выяснится при первом реальном запросе
           // и queryWithRetry пересоздаст пул корректно.
         }
