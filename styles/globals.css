@@ -99,7 +99,7 @@ body {
 
 /* ======= NAVBAR ======= */
 .rd-header {
-  background: rgba(255,255,255,0.85);
+  background: rgba(255,255,255,0.65);
   backdrop-filter: blur(var(--rd-blur));
   -webkit-backdrop-filter: blur(var(--rd-blur));
   border-bottom: 1px solid rgba(229,231,235,0.6);
@@ -121,7 +121,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  height: 80px;
+  height: 56px;
   gap: 16px;
   min-width: 0;
   overflow: visible;
@@ -132,12 +132,12 @@ body {
   align-items: center;
   text-decoration: none;
   flex-shrink: 0;
-  max-height: 80px;
+  max-height: 56px;
   overflow: hidden;
   margin-left: 0;
 }
 .rd-logo img {
-  max-height: 72px;
+  max-height: 50px;
   height: auto;
   width: auto;
 }
@@ -2407,7 +2407,7 @@ input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; }
 .rd-mobile-nav {
   display: none;
   position: fixed;
-  top: 80px;
+  top: 56px;
   left: 0;
   right: 0;
   background: rgba(255,255,255,0.98);
