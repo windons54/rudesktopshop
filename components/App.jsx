@@ -598,7 +598,7 @@ function App({ initialData, initialVersion }) {
     if (appearance.currency && appearance.currency.logo) return <img src={appearance.currency.logo} alt="" style={{width:"16px",height:"16px",objectFit:"contain",verticalAlign:"middle"}} />;
     return <span>{(appearance.currency && appearance.currency.icon) ? appearance.currency.icon : "🪙"}</span>;
   };
-  const [appearance, setAppearance] = useState({ logo: null, theme: "default", headerBg: "", footerBg: "", pageBg: "", accentColor: "", shopTextColor: "", socials: { telegram: "", max: "", vk: "", rutube: "", vkvideo: "" }, birthdayBonus: 100, birthdayEnabled: true, integrations: { tgEnabled: false, tgBotToken: "", tgChatId: "", maxEnabled: false, maxBotToken: "", maxChatId: "" }, currency: { name: "RuDeCoin", icon: "🪙", logo: "" }, seo: { title: "", description: "", favicon: "", useHttps: false }, registrationEnabled: true, bitrix24: { enabled: false, clientId: "", clientSecret: "", portalUrl: "" }, features: { auction: true, lottery: true, voting: true, bank: true, tasks: true }, sectionSettings: { auction: { title: "Аукцион", description: "Делайте ставки и выигрывайте эксклюзивные товары", banner: "" }, lottery: { title: "Лотерея", description: "Участвуйте в розыгрышах и выигрывайте призы", banner: "" }, voting: { title: "Голосования", description: "Участвуйте в опросах и влияйте на решения", banner: "" }, bank: { title: "Банк", description: "Управляйте своими депозитами и получайте проценты", banner: "" }, tasks: { title: "Задания за монеты", description: "Выполняйте задания и получайте корпоративные монеты", banner: "" } } });
+  const [appearance, setAppearance] = useState({ logo: null, theme: "default", headerBg: "", footerBg: "", pageBg: "", accentColor: "", shopTextColor: "", socials: { telegram: "", max: "", vk: "", rutube: "", vkvideo: "" }, birthdayBonus: 100, birthdayEnabled: true, integrations: { tgEnabled: false, tgBotToken: "", tgChatId: "", maxEnabled: false, maxBotToken: "", maxChatId: "" }, currency: { name: "RuDeCoin", icon: "🪙", logo: "" }, seo: { title: "", description: "", favicon: "" }, registrationEnabled: true, bitrix24: { enabled: false, clientId: "", clientSecret: "", portalUrl: "" }, features: { auction: true, lottery: true, voting: true, bank: true, tasks: true }, sectionSettings: { auction: { title: "Аукцион", description: "Делайте ставки и выигрывайте эксклюзивные товары", banner: "" }, lottery: { title: "Лотерея", description: "Участвуйте в розыгрышах и выигрывайте призы", banner: "" }, voting: { title: "Голосования", description: "Участвуйте в опросах и влияйте на решения", banner: "" }, bank: { title: "Банк", description: "Управляйте своими депозитами и получайте проценты", banner: "" }, tasks: { title: "Задания за монеты", description: "Выполняйте задания и получайте корпоративные монеты", banner: "" } } });
   const [currentUser, setCurrentUser] = useState(() => {
     // Восстанавливаем сессию МГНОВЕННО при монтировании — не ждём загрузки БД.
     // Это предотвращает кратковременный выброс из аккаунта при обновлении страницы.
@@ -1068,18 +1068,6 @@ function App({ initialData, initialVersion }) {
   function applySeo(seo) {
     if (!seo) return;
     if (seo.title) document.title = seo.title;
-    // HTTPS / HTTP redirect
-    if (typeof window !== 'undefined') {
-      const isHttps = window.location.protocol === 'https:';
-      if (seo.useHttps && !isHttps) {
-        window.location.replace(window.location.href.replace(/^http:/, 'https:'));
-        return;
-      }
-      if (seo.useHttps === false && isHttps) {
-        window.location.replace(window.location.href.replace(/^https:/, 'http:'));
-        return;
-      }
-    }
     // Meta description
     let metaDesc = document.querySelector('meta[name="description"]');
     if (!metaDesc) { metaDesc = document.createElement('meta'); metaDesc.name = 'description'; document.head.appendChild(metaDesc); }
@@ -5495,7 +5483,7 @@ function BannerSettingsTab({ appearance, saveAppearance, notify }) {
 function SeoSettingsTab({ appearance, saveAppearance, notify }) {
   
   const seo = appearance.seo || {};
-  const [form, setForm] = useState({ title: seo.title || "", description: seo.description || "", favicon: seo.favicon || "", useHttps: seo.useHttps || false });
+  const [form, setForm] = useState({ title: seo.title || "", description: seo.description || "", favicon: seo.favicon || "" });
 
   const save = () => {
     saveAppearance({ ...appearance, seo: { ...form } });
@@ -5593,37 +5581,6 @@ function SeoSettingsTab({ appearance, saveAppearance, notify }) {
             </div>
           </div>
         )}
-
-        {/* HTTPS */}
-        <div className="form-field" style={{marginTop:"20px"}}>
-          <label style={{display:"flex",alignItems:"flex-start",gap:"12px",cursor:"pointer",userSelect:"none"}}>
-            <div style={{position:"relative",flexShrink:0,marginTop:"1px"}}>
-              <input
-                type="checkbox"
-                checked={form.useHttps}
-                onChange={e => setForm(f => ({ ...f, useHttps: e.target.checked }))}
-                style={{position:"absolute",opacity:0,width:0,height:0}}
-              />
-              <div onClick={() => setForm(f => ({ ...f, useHttps: !f.useHttps }))} style={{
-                width:"20px", height:"20px", borderRadius:"5px", border:"2px solid",
-                borderColor: form.useHttps ? "var(--rd-accent, #6366f1)" : "var(--rd-gray-border)",
-                background: form.useHttps ? "var(--rd-accent, #6366f1)" : "transparent",
-                display:"flex", alignItems:"center", justifyContent:"center",
-                transition:"all 0.15s", cursor:"pointer"
-              }}>
-                {form.useHttps && <svg width="11" height="9" viewBox="0 0 11 9" fill="none"><path d="M1 4L4 7.5L10 1" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>}
-              </div>
-            </div>
-            <div>
-              <div style={{fontSize:"14px",fontWeight:600,color:"var(--rd-text)"}}>Использовать HTTPS протокол</div>
-              <div style={{fontSize:"12px",color:"var(--rd-gray-text)",marginTop:"3px",lineHeight:"1.5"}}>
-                {form.useHttps
-                  ? "🔒 Сайт работает по HTTPS. При открытии по HTTP будет автоматический редирект."
-                  : "🔓 Сайт работает по HTTP. Включите для безопасного соединения."}
-              </div>
-            </div>
-          </label>
-        </div>
 
         <div style={{marginTop:"24px"}}>
           <button className="btn btn-primary" onClick={save}>💾 Сохранить</button>
