@@ -5774,7 +5774,7 @@ function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbC
   // Автообновление логов когда вкладка открыта
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
-    if (tab !== 'logs') return;
+    if (tab !== 'database') return;
     fetchPgLogs();
     if (!pgLogsAutoRefresh) return;
     const iv = setInterval(fetchPgLogs, 3000);
@@ -6112,7 +6112,6 @@ function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbC
     { id: "currency",   icon: "🪙", label: "Валюта" },
     { id: "seo",        icon: "🔍", label: "SEO" },
     { id: "database",   icon: "🗄️", label: "База данных" },
-    { id: "logs",       icon: "📋", label: "Логи БД" },
     { id: "socials",    icon: "🌐", label: "Соц. сети" },
     { id: "faq",        icon: "❓", label: "Вопрос / Ответ" },
     { id: "tasks",      icon: "🎯", label: "Задания" },
@@ -6123,6 +6122,7 @@ function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbC
     { id: "sections",   icon: "📑", label: "Настройки разделов" },
     { id: "shop",       icon: "🛍️", label: "Управление магазином" },
     { id: "integrations", icon: "🔗", label: "Интеграции" },
+    { id: "docs",       icon: "📖", label: "Документация" },
   ] : [
     { id: "profile", icon: "👤", label: "Профиль" },
   ];
@@ -6501,156 +6501,6 @@ function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbC
           )}
 
 
-          {tab === "logs" && (
-            <div>
-              <div className="settings-card">
-                <div className="settings-section-title">📋 Логи подключения к БД</div>
-                <p style={{fontSize:"13px",color:"var(--rd-gray-text)",marginBottom:"16px",lineHeight:1.6}}>
-                  Журнал событий подключения к PostgreSQL: создание пула, keepalive-пинги, обрывы, retry, ошибки.
-                  Помогает понять задержки при загрузке данных после обновления страницы.
-                </p>
-
-                {/* Статус пула */}
-                <div style={{display:"flex",gap:"12px",flexWrap:"wrap",marginBottom:"16px"}}>
-                  <div style={{padding:"10px 16px",borderRadius:"10px",background:pgLogsPoolStatus?.ready?"#e8f5e9":"#fbe9e7",border:"1px solid",borderColor:pgLogsPoolStatus?.ready?"#a5d6a7":"#ef9a9a",fontSize:"13px"}}>
-                    <b>Пул:</b> {pgLogsPoolStatus?.ready ? "✅ Готов" : "❌ Не готов"}
-                    {pgLogsPoolStatus?.hasPool && <span style={{marginLeft:"8px",color:"#666"}}>
-                      (всего: {pgLogsPoolStatus.totalCount}, idle: {pgLogsPoolStatus.idleCount}, ожидает: {pgLogsPoolStatus.waitingCount})
-                    </span>}
-                  </div>
-                  <div style={{padding:"10px 16px",borderRadius:"10px",background:"#f5f5f5",border:"1px solid #e0e0e0",fontSize:"13px"}}>
-                    <b>Uptime:</b> {Math.floor(pgLogsUptime / 3600)}ч {Math.floor((pgLogsUptime % 3600) / 60)}м {Math.floor(pgLogsUptime % 60)}с
-                  </div>
-                  <div style={{padding:"10px 16px",borderRadius:"10px",background:"#f5f5f5",border:"1px solid #e0e0e0",fontSize:"13px"}}>
-                    <b>Память:</b> {pgLogsMemory} MB
-                  </div>
-                </div>
-
-                {/* Управление */}
-                <div style={{display:"flex",gap:"8px",flexWrap:"wrap",marginBottom:"16px",alignItems:"center"}}>
-                  <button className="btn" onClick={fetchPgLogs} disabled={pgLogsLoading}
-                    style={{fontSize:"13px"}}>
-                    {pgLogsLoading ? "⏳ Загрузка…" : "🔄 Обновить"}
-                  </button>
-                  <label style={{display:"flex",alignItems:"center",gap:"6px",fontSize:"13px",cursor:"pointer"}}>
-                    <input type="checkbox" checked={pgLogsAutoRefresh}
-                      onChange={(e) => setPgLogsAutoRefresh(e.target.checked)} />
-                    Автообновление (3 сек)
-                  </label>
-                  <span style={{marginLeft:"auto",fontSize:"12px",color:"#999"}}>
-                    Записей: {pgLogs.length} / 200
-                  </span>
-                </div>
-
-                {/* Фильтры */}
-                <div style={{display:"flex",gap:"4px",flexWrap:"wrap",marginBottom:"12px"}}>
-                  {[
-                    ['all', '📋 Все'],
-                    ['error', '❌ Ошибки'],
-                    ['connect', '🟢 Подключения'],
-                    ['disconnect', '🔴 Отключения'],
-                    ['retry', '🔁 Retry'],
-                    ['keepalive', '💓 Keepalive'],
-                    ['query', '🐌 Медленные'],
-                    ['pool', '🏊 Пул'],
-                  ].map(([id, label]) => (
-                    <button key={id} onClick={() => setPgLogsFilter(id)}
-                      style={{
-                        padding:"4px 10px",fontSize:"12px",borderRadius:"6px",cursor:"pointer",
-                        border:"1px solid",
-                        borderColor: pgLogsFilter === id ? "var(--rd-red)" : "#ddd",
-                        background: pgLogsFilter === id ? "var(--rd-red)" : "#fff",
-                        color: pgLogsFilter === id ? "#fff" : "#333",
-                      }}>
-                      {label}
-                    </button>
-                  ))}
-                </div>
-
-                {/* Таблица логов */}
-                <div style={{maxHeight:"500px",overflow:"auto",border:"1px solid #e0e0e0",borderRadius:"8px",background:"#fafafa"}}>
-                  <table style={{width:"100%",borderCollapse:"collapse",fontSize:"12px",fontFamily:"monospace"}}>
-                    <thead>
-                      <tr style={{position:"sticky",top:0,background:"#f0f0f0",zIndex:1}}>
-                        <th style={{padding:"6px 10px",textAlign:"left",borderBottom:"1px solid #ddd",whiteSpace:"nowrap"}}>Время</th>
-                        <th style={{padding:"6px 10px",textAlign:"left",borderBottom:"1px solid #ddd",whiteSpace:"nowrap"}}>Тип</th>
-                        <th style={{padding:"6px 10px",textAlign:"left",borderBottom:"1px solid #ddd"}}>Сообщение</th>
-                        <th style={{padding:"6px 10px",textAlign:"right",borderBottom:"1px solid #ddd",whiteSpace:"nowrap"}}>Детали</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {(() => {
-                        const filtered = pgLogsFilter === 'all'
-                          ? pgLogs
-                          : pgLogs.filter(l => l.type === pgLogsFilter);
-                        if (filtered.length === 0) {
-                          return (
-                            <tr><td colSpan={4} style={{padding:"20px",textAlign:"center",color:"#999"}}>
-                              {pgLogs.length === 0 ? "Логов пока нет. Нажмите «Обновить» или включите автообновление." : "Нет записей с таким фильтром."}
-                            </td></tr>
-                          );
-                        }
-                        return [...filtered].reverse().map((log, i) => {
-                          const typeColors = {
-                            connect: '#2e7d32', disconnect: '#c62828', error: '#c62828',
-                            retry: '#e65100', keepalive: '#1565c0', query: '#f9a825',
-                            pool: '#6a1b9a', init: '#00695c',
-                          };
-                          const typeBg = {
-                            error: '#fff3f0', disconnect: '#fff3f0', retry: '#fff8e1',
-                          };
-                          const ts = log.ts ? new Date(log.ts) : null;
-                          const timeStr = ts ? ts.toLocaleTimeString('ru-RU', {hour:'2-digit',minute:'2-digit',second:'2-digit'}) : '—';
-                          const dateStr = ts ? ts.toLocaleDateString('ru-RU', {day:'2-digit',month:'2-digit'}) : '';
-                          return (
-                            <tr key={i} style={{background: typeBg[log.type] || (i%2===0?"#fff":"#fafafa")}}>
-                              <td style={{padding:"5px 10px",borderBottom:"1px solid #f0f0f0",whiteSpace:"nowrap",color:"#666"}}>
-                                <span style={{fontSize:"10px",color:"#aaa"}}>{dateStr} </span>{timeStr}
-                              </td>
-                              <td style={{padding:"5px 10px",borderBottom:"1px solid #f0f0f0",whiteSpace:"nowrap"}}>
-                                <span style={{
-                                  display:"inline-block",padding:"1px 6px",borderRadius:"4px",fontSize:"11px",fontWeight:600,
-                                  color:"#fff",background: typeColors[log.type] || '#757575',
-                                }}>{log.type}</span>
-                              </td>
-                              <td style={{padding:"5px 10px",borderBottom:"1px solid #f0f0f0",wordBreak:"break-word"}}>
-                                {log.message}
-                              </td>
-                              <td style={{padding:"5px 10px",borderBottom:"1px solid #f0f0f0",textAlign:"right",whiteSpace:"nowrap",color:"#888"}}>
-                                {log.duration ? `${log.duration}ms` : log.detail || ''}
-                              </td>
-                            </tr>
-                          );
-                        });
-                      })()}
-                    </tbody>
-                  </table>
-                </div>
-
-                {/* Легенда */}
-                <div style={{marginTop:"12px",padding:"10px 14px",background:"#f9f9f9",borderRadius:"8px",border:"1px solid #eee"}}>
-                  <div style={{fontSize:"12px",fontWeight:600,marginBottom:"6px",color:"#555"}}>Типы событий:</div>
-                  <div style={{display:"flex",gap:"8px",flexWrap:"wrap",fontSize:"11px",color:"#666"}}>
-                    <span>🟢 <b>connect</b> — подключение/пул готов</span>
-                    <span>🔴 <b>disconnect</b> — пул сброшен</span>
-                    <span>❌ <b>error</b> — ошибки</span>
-                    <span>🔁 <b>retry</b> — автоповтор после обрыва</span>
-                    <span>💓 <b>keepalive</b> — пинг каждые 30с</span>
-                    <span>🐌 <b>query</b> — запросы {">"}2с</span>
-                    <span>🏊 <b>pool</b> — создание/закрытие пула</span>
-                    <span>🏁 <b>init</b> — инициализация таблиц</span>
-                  </div>
-                </div>
-
-                {/* Подсказка */}
-                <div style={{marginTop:"12px",padding:"10px 14px",background:"#e3f2fd",borderRadius:"8px",border:"1px solid #bbdefb",fontSize:"12px",lineHeight:1.6,color:"#1565c0"}}>
-                  <b>Диагностика задержки 10 сек:</b> Откройте логи, обновите страницу в другой вкладке, затем нажмите «Обновить» здесь.
-                  Ищите события <b>error</b> → <b>pool</b> → <b>connect</b> — это покажет цепочку: обрыв старого соединения → создание нового пула → готовность.
-                  Если между <b>error</b> и <b>connect</b> больше нескольких секунд — проблема в скорости TCP-подключения к серверу БД.
-                </div>
-              </div>
-            </div>
-          )}
 
           {tab === "socials" && (
             <div>
@@ -7613,6 +7463,569 @@ function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbC
                 </div>
               )}
 
+              {/* ══ Логи подключения к БД ══ */}
+              <div className="settings-card" style={{marginTop:"20px"}}>
+                <div className="settings-section-title">📋 Логи подключения к БД</div>
+                <p style={{fontSize:"13px",color:"var(--rd-gray-text)",marginBottom:"16px",lineHeight:1.6}}>
+                  Журнал событий подключения к PostgreSQL: создание пула, keepalive-пинги, обрывы, retry, ошибки.
+                </p>
+                <div style={{display:"flex",gap:"12px",flexWrap:"wrap",marginBottom:"16px"}}>
+                  <div style={{padding:"10px 16px",borderRadius:"10px",background:pgLogsPoolStatus?.ready?"#e8f5e9":"#fbe9e7",border:"1px solid",borderColor:pgLogsPoolStatus?.ready?"#a5d6a7":"#ef9a9a",fontSize:"13px"}}>
+                    <b>Пул:</b> {pgLogsPoolStatus?.ready ? "✅ Готов" : "❌ Не готов"}
+                    {pgLogsPoolStatus?.hasPool && <span style={{marginLeft:"8px",color:"#666"}}>(всего: {pgLogsPoolStatus.totalCount}, idle: {pgLogsPoolStatus.idleCount}, ожидает: {pgLogsPoolStatus.waitingCount})</span>}
+                  </div>
+                  <div style={{padding:"10px 16px",borderRadius:"10px",background:"#f5f5f5",border:"1px solid #e0e0e0",fontSize:"13px"}}>
+                    <b>Uptime:</b> {Math.floor(pgLogsUptime/3600)}ч {Math.floor((pgLogsUptime%3600)/60)}м {Math.floor(pgLogsUptime%60)}с
+                  </div>
+                  <div style={{padding:"10px 16px",borderRadius:"10px",background:"#f5f5f5",border:"1px solid #e0e0e0",fontSize:"13px"}}>
+                    <b>Память:</b> {pgLogsMemory} MB
+                  </div>
+                </div>
+                <div style={{display:"flex",gap:"8px",flexWrap:"wrap",marginBottom:"16px",alignItems:"center"}}>
+                  <button className="btn" onClick={fetchPgLogs} disabled={pgLogsLoading} style={{fontSize:"13px"}}>
+                    {pgLogsLoading ? "⏳ Загрузка…" : "🔄 Обновить"}
+                  </button>
+                  <label style={{display:"flex",alignItems:"center",gap:"6px",fontSize:"13px",cursor:"pointer"}}>
+                    <input type="checkbox" checked={pgLogsAutoRefresh} onChange={(e) => setPgLogsAutoRefresh(e.target.checked)} />
+                    Автообновление (3 сек)
+                  </label>
+                  <span style={{marginLeft:"auto",fontSize:"12px",color:"#999"}}>Записей: {pgLogs.length} / 200</span>
+                </div>
+                <div style={{display:"flex",gap:"4px",flexWrap:"wrap",marginBottom:"12px"}}>
+                  {[['all','📋 Все'],['error','❌ Ошибки'],['connect','🟢 Подключения'],['disconnect','🔴 Отключения'],['retry','🔁 Retry'],['keepalive','💓 Keepalive'],['query','🐌 Медленные'],['pool','🏊 Пул']].map(([id,label]) => (
+                    <button key={id} onClick={() => setPgLogsFilter(id)} style={{padding:"4px 10px",fontSize:"12px",borderRadius:"6px",cursor:"pointer",border:"1px solid",borderColor:pgLogsFilter===id?"var(--rd-red)":"#ddd",background:pgLogsFilter===id?"var(--rd-red)":"#fff",color:pgLogsFilter===id?"#fff":"#333"}}>{label}</button>
+                  ))}
+                </div>
+                <div style={{maxHeight:"400px",overflow:"auto",border:"1px solid #e0e0e0",borderRadius:"8px",background:"#fafafa"}}>
+                  <table style={{width:"100%",borderCollapse:"collapse",fontSize:"12px",fontFamily:"monospace"}}>
+                    <thead>
+                      <tr style={{position:"sticky",top:0,background:"#f0f0f0",zIndex:1}}>
+                        <th style={{padding:"6px 10px",textAlign:"left",borderBottom:"1px solid #ddd",whiteSpace:"nowrap"}}>Время</th>
+                        <th style={{padding:"6px 10px",textAlign:"left",borderBottom:"1px solid #ddd",whiteSpace:"nowrap"}}>Тип</th>
+                        <th style={{padding:"6px 10px",textAlign:"left",borderBottom:"1px solid #ddd"}}>Сообщение</th>
+                        <th style={{padding:"6px 10px",textAlign:"right",borderBottom:"1px solid #ddd",whiteSpace:"nowrap"}}>Детали</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(() => {
+                        const filtered = pgLogsFilter==='all' ? pgLogs : pgLogs.filter(l => l.type===pgLogsFilter);
+                        if (filtered.length===0) return <tr><td colSpan={4} style={{padding:"20px",textAlign:"center",color:"#999"}}>{pgLogs.length===0?"Логов пока нет. Нажмите «Обновить».":"Нет записей с таким фильтром."}</td></tr>;
+                        const typeColors={connect:'#2e7d32',disconnect:'#c62828',error:'#c62828',retry:'#e65100',keepalive:'#1565c0',query:'#f9a825',pool:'#6a1b9a',init:'#00695c'};
+                        const typeBg={error:'#fff3f0',disconnect:'#fff3f0',retry:'#fff8e1'};
+                        return [...filtered].reverse().map((log,i) => {
+                          const ts=log.ts?new Date(log.ts):null;
+                          return (
+                            <tr key={i} style={{background:typeBg[log.type]||(i%2===0?"#fff":"#fafafa")}}>
+                              <td style={{padding:"5px 10px",borderBottom:"1px solid #f0f0f0",whiteSpace:"nowrap",color:"#666"}}><span style={{fontSize:"10px",color:"#aaa"}}>{ts?ts.toLocaleDateString('ru-RU',{day:'2-digit',month:'2-digit'}):''} </span>{ts?ts.toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit',second:'2-digit'}):'—'}</td>
+                              <td style={{padding:"5px 10px",borderBottom:"1px solid #f0f0f0",whiteSpace:"nowrap"}}><span style={{display:"inline-block",padding:"1px 6px",borderRadius:"4px",fontSize:"11px",fontWeight:600,color:"#fff",background:typeColors[log.type]||'#757575'}}>{log.type}</span></td>
+                              <td style={{padding:"5px 10px",borderBottom:"1px solid #f0f0f0",wordBreak:"break-word"}}>{log.message}</td>
+                              <td style={{padding:"5px 10px",borderBottom:"1px solid #f0f0f0",textAlign:"right",whiteSpace:"nowrap",color:"#888"}}>{log.duration?`${log.duration}ms`:log.detail||''}</td>
+                            </tr>
+                          );
+                        });
+                      })()}
+                    </tbody>
+                  </table>
+                </div>
+                <div style={{marginTop:"10px",display:"flex",gap:"8px",flexWrap:"wrap",fontSize:"11px",color:"#666"}}>
+                  <span>🟢 <b>connect</b> — пул готов</span><span>🔴 <b>disconnect</b> — пул сброшен</span><span>❌ <b>error</b> — ошибки</span><span>🔁 <b>retry</b> — автоповтор</span><span>💓 <b>keepalive</b> — пинг 30с</span><span>🐌 <b>query</b> — {">"} 2с</span><span>🏊 <b>pool</b> — пул</span><span>🏁 <b>init</b> — таблицы</span>
+                </div>
+              </div>
+
+            </div>
+          )}
+
+          {tab === "docs" && (
+            <div>
+              <div className="settings-card">
+                <div className="settings-section-title">📖 Документация проекта</div>
+                <p style={{fontSize:"13px",color:"var(--rd-gray-text)",marginBottom:"24px",lineHeight:1.7}}>
+                  Полное руководство по настройке, управлению и разработке корпоративного магазина RuDesktop.
+                </p>
+
+                {/* Навигация по разделам */}
+                {(() => {
+                  const [docsSection, setDocsSection] = React.useState("overview");
+                  const docsSections = [
+                    {id:"overview", icon:"🏠", label:"Обзор"},
+                    {id:"start",    icon:"🚀", label:"Быстрый старт"},
+                    {id:"admin",    icon:"⚙️", label:"Администрирование"},
+                    {id:"database", icon:"🗄️", label:"База данных"},
+                    {id:"appearance",icon:"🎨", label:"Внешний вид"},
+                    {id:"modules",  icon:"🧩", label:"Модули"},
+                    {id:"users",    icon:"👥", label:"Пользователи"},
+                    {id:"api",      icon:"🔌", label:"API"},
+                    {id:"deploy",   icon:"🐳", label:"Развёртывание"},
+                    {id:"faq",      icon:"❓", label:"Частые вопросы"},
+                  ];
+
+                  const sectionStyle = {marginBottom:"20px"};
+                  const h2 = {fontSize:"18px",fontWeight:700,color:"var(--rd-text)",marginBottom:"12px",paddingBottom:"8px",borderBottom:"2px solid var(--rd-gray-border)"};
+                  const h3 = {fontSize:"14px",fontWeight:700,color:"var(--rd-text)",marginBottom:"8px",marginTop:"16px"};
+                  const p = {fontSize:"13px",color:"var(--rd-gray-text)",lineHeight:1.8,marginBottom:"10px"};
+                  const code = {background:"#1a1a1a",color:"#86efac",padding:"8px 14px",borderRadius:"8px",fontSize:"12px",fontFamily:"monospace",display:"block",marginBottom:"10px",overflowX:"auto",whiteSpace:"pre"};
+                  const inlineCode = {background:"rgba(0,0,0,0.07)",color:"#c62828",padding:"1px 6px",borderRadius:"4px",fontSize:"12px",fontFamily:"monospace"};
+                  const tip = {background:"#e8f5e9",border:"1px solid #a5d6a7",borderRadius:"8px",padding:"12px 16px",fontSize:"13px",lineHeight:1.7,marginBottom:"12px",color:"#1b5e20"};
+                  const warn = {background:"#fff8e1",border:"1px solid #ffe082",borderRadius:"8px",padding:"12px 16px",fontSize:"13px",lineHeight:1.7,marginBottom:"12px",color:"#5d4037"};
+                  const danger = {background:"#fff3f0",border:"1px solid #ef9a9a",borderRadius:"8px",padding:"12px 16px",fontSize:"13px",lineHeight:1.7,marginBottom:"12px",color:"#b71c1c"};
+                  const table = {width:"100%",borderCollapse:"collapse",fontSize:"13px",marginBottom:"12px"};
+                  const th = {padding:"8px 12px",textAlign:"left",background:"#f5f5f5",borderBottom:"2px solid #e0e0e0",fontWeight:700,color:"#333"};
+                  const td = {padding:"8px 12px",borderBottom:"1px solid #f0f0f0",color:"#444",verticalAlign:"top"};
+
+                  return (
+                    <div>
+                      {/* Навбар разделов */}
+                      <div style={{display:"flex",gap:"4px",flexWrap:"wrap",marginBottom:"24px",padding:"4px",background:"#f5f5f5",borderRadius:"10px"}}>
+                        {docsSections.map(s => (
+                          <button key={s.id} onClick={() => setDocsSection(s.id)} style={{padding:"7px 14px",fontSize:"12px",fontWeight:docsSection===s.id?700:500,borderRadius:"7px",border:"none",cursor:"pointer",background:docsSection===s.id?"#fff":"transparent",color:docsSection===s.id?"var(--rd-red)":"#555",boxShadow:docsSection===s.id?"0 1px 4px rgba(0,0,0,0.12)":"none",transition:"all 0.15s",whiteSpace:"nowrap"}}>
+                            {s.icon} {s.label}
+                          </button>
+                        ))}
+                      </div>
+
+                      {/* ── Обзор ── */}
+                      {docsSection === "overview" && (
+                        <div style={sectionStyle}>
+                          <div style={h2}>🏠 Обзор проекта</div>
+                          <p style={p}><strong>RuDesktop Corp Merch</strong> — корпоративный магазин с внутренней валютой. Сотрудники получают монеты за активность и тратят их на товары и услуги компании.</p>
+                          <div style={h3}>Технологический стек</div>
+                          <table style={table}>
+                            <thead><tr><th style={th}>Компонент</th><th style={th}>Технология</th><th style={th}>Назначение</th></tr></thead>
+                            <tbody>
+                              {[
+                                ["Frontend","Next.js 14 + React 18","SPA с SSR"],
+                                ["Стили","CSS (globals.css)","Кастомная дизайн-система"],
+                                ["База данных","PostgreSQL + pg Pool","Основное хранилище"],
+                                ["Fallback БД","SQLite (sql.js/WASM)","Работа без сервера"],
+                                ["Файловый fallback","JSON (data/store.json)","Резерв при недоступности БД"],
+                                ["Деплой","Docker + docker-compose","Контейнеризация"],
+                              ].map(([a,b,c],i) => <tr key={i}><td style={td}><code style={inlineCode}>{a}</code></td><td style={td}>{b}</td><td style={td}>{c}</td></tr>)}
+                            </tbody>
+                          </table>
+                          <div style={h3}>Ключевые возможности</div>
+                          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(220px,1fr))",gap:"10px",marginBottom:"16px"}}>
+                            {[
+                              ["🛍️","Магазин товаров","Каталог с категориями, корзина, заказы"],
+                              ["🪙","Внутренняя валюта","Начисление, списание, история переводов"],
+                              ["🏦","Банк (вклады)","Депозиты с процентами и сроками"],
+                              ["🔨","Аукцион","Ставки в реальном времени"],
+                              ["🎰","Лотерея","Розыгрыши среди участников"],
+                              ["🗳️","Голосования","Опросы с вознаграждением"],
+                              ["🎯","Задания","Выдача монет за выполнение"],
+                              ["👥","Пользователи","Роли, балансы, дни рождения"],
+                              ["📊","Трудодни","Автоначисление по дате найма"],
+                              ["🔗","Интеграции","Telegram-бот, MAX, Bitrix24"],
+                            ].map(([icon,title,desc]) => (
+                              <div key={title} style={{padding:"12px",borderRadius:"8px",border:"1px solid var(--rd-gray-border)",background:"#fafafa"}}>
+                                <div style={{fontSize:"20px",marginBottom:"4px"}}>{icon}</div>
+                                <div style={{fontSize:"13px",fontWeight:700,marginBottom:"4px"}}>{title}</div>
+                                <div style={{fontSize:"12px",color:"#666"}}>{desc}</div>
+                              </div>
+                            ))}
+                          </div>
+                          <div style={h3}>Структура проекта</div>
+                          <code style={code}>{`project/
+├── components/
+│   └── App.jsx          # Главный компонент (весь фронтенд)
+├── pages/
+│   ├── index.js         # Точка входа с SSR (getServerSideProps)
+│   └── api/
+│       ├── store.js     # Основной API: CRUD, PG пул, кэш
+│       ├── images.js    # Раздача изображений из cm_images
+│       ├── telegram.js  # Прокси для Telegram Bot API
+│       └── ...
+├── lib/
+│   ├── pg-config-reader.js  # Чтение конфига PG (5 источников)
+│   ├── server-init.js       # Инициализация при старте сервера
+│   ├── migration.js         # Миграция base64 → cm_images
+│   └── pg-cache.js          # TTL-кэш для PG запросов
+├── styles/
+│   └── globals.css      # Вся стилизация
+├── public/fonts/        # Шрифты Stolzl
+├── Dockerfile
+├── docker-compose.yml
+└── pg.env               # Конфиг БД (в git)`}</code>
+                        </div>
+                      )}
+
+                      {/* ── Быстрый старт ── */}
+                      {docsSection === "start" && (
+                        <div style={sectionStyle}>
+                          <div style={h2}>🚀 Быстрый старт</div>
+                          <div style={h3}>Вариант 1 — Docker (рекомендуется)</div>
+                          <code style={code}>{`# Клонировать репозиторий
+git clone <repo-url> && cd project
+
+# Запустить с PostgreSQL
+docker-compose up -d
+
+# Сайт доступен на http://localhost:3000`}</code>
+                          <div style={tip}>💡 Docker автоматически поднимет PostgreSQL и подключит его к приложению. Данные сохраняются в volume <code style={inlineCode}>pgdata</code>.</div>
+
+                          <div style={h3}>Вариант 2 — Локально (Node.js)</div>
+                          <code style={code}>{`npm install
+npm run dev      # разработка (порт 3000)
+npm run build && npm start  # production`}</code>
+
+                          <div style={h3}>Первый вход</div>
+                          <p style={p}>По умолчанию создаётся администратор с логином <code style={inlineCode}>admin</code> и паролем <code style={inlineCode}>admin</code>. Смените пароль сразу после первого входа в разделе <strong>Настройки → Профиль</strong>.</p>
+                          <div style={danger}>⚠️ Обязательно смените пароль администратора перед запуском в production!</div>
+
+                          <div style={h3}>Подключение PostgreSQL</div>
+                          <p style={p}>Перейдите в <strong>Настройки → База данных → PostgreSQL</strong> и укажите параметры подключения, либо заполните файл <code style={inlineCode}>pg.env</code> в корне проекта:</p>
+                          <code style={code}>{`# Вариант А — строка подключения
+DATABASE_URL=postgresql://user:password@host:5432/dbname
+
+# Вариант Б — отдельные параметры
+PG_HOST=localhost
+PG_PORT=5432
+PG_DATABASE=corpmerch
+PG_USER=postgres
+PG_PASSWORD=your_password
+PG_SSL=false`}</code>
+                        </div>
+                      )}
+
+                      {/* ── Администрирование ── */}
+                      {docsSection === "admin" && (
+                        <div style={sectionStyle}>
+                          <div style={h2}>⚙️ Администрирование</div>
+                          <p style={p}>Панель администратора доступна через кнопку <strong>Настройки</strong> в шапке сайта. Доступна только пользователям с ролью <code style={inlineCode}>admin</code>.</p>
+
+                          <div style={h3}>Разделы настроек</div>
+                          <table style={table}>
+                            <thead><tr><th style={th}>Раздел</th><th style={th}>Описание</th></tr></thead>
+                            <tbody>
+                              {[
+                                ["👤 Профиль","Смена имени и пароля текущего пользователя"],
+                                ["⚙️ Общее","Название сайта, режим регистрации, включение/отключение разделов"],
+                                ["🎨 Внешний вид","Тема, цвета, логотип, фон хедера и футера"],
+                                ["🖼️ Баннер","Баннер на главной странице с кнопкой CTA"],
+                                ["🎬 Видео","Встроенный видеоплеер (YouTube, RuTube, VK Видео, MAX)"],
+                                ["👥 Пользователи","Создание, редактирование, начисление/списание монет"],
+                                ["🪙 Валюта","Название, иконка, логотип внутренней валюты; трудодни; дни рождения"],
+                                ["🔍 SEO","Title страницы, description, favicon"],
+                                ["🗄️ База данных","Настройка PostgreSQL, SQLite, логи подключения"],
+                                ["🌐 Соц. сети","Ссылки на Telegram, ВКонтакте, Rutube, VK Видео"],
+                                ["❓ FAQ","Вопросы и ответы для сотрудников"],
+                                ["🎯 Задания","Создание заданий с вознаграждением в монетах"],
+                                ["🔨 Аукцион","Управление лотами аукциона"],
+                                ["🎰 Лотерея","Создание и проведение розыгрышей"],
+                                ["🗳️ Голосование","Опросы с вариантами ответов и наградами"],
+                                ["🏦 Банк","Типы вкладов: срок, ставка"],
+                                ["📑 Разделы","Заголовки, описания и баннеры разделов"],
+                                ["🛍️ Магазин","Товары, категории, заказы, импорт/экспорт"],
+                                ["🔗 Интеграции","Telegram-бот, MAX, Bitrix24"],
+                              ].map(([a,b],i) => <tr key={i}><td style={td}><strong>{a}</strong></td><td style={td}>{b}</td></tr>)}
+                            </tbody>
+                          </table>
+
+                          <div style={h3}>Управление магазином</div>
+                          <p style={p}>В разделе <strong>Управление магазином</strong> доступны вкладки: <strong>Товары</strong> (добавление с фото, ценой в монетах, размерами), <strong>Категории</strong>, <strong>Заказы</strong> (с историей), <strong>Импорт/Экспорт</strong> (CSV/JSON).</p>
+
+                          <div style={h3}>Начисление монет</div>
+                          <p style={p}>Монеты можно выдавать тремя способами:</p>
+                          <p style={p}>1. <strong>Вручную</strong> — в разделе Пользователи, индивидуально каждому.</p>
+                          <p style={p}>2. <strong>Массово</strong> — в разделе Валюта → Начисление, всем или группе сотрудников.</p>
+                          <p style={p}>3. <strong>Автоматически</strong> — Трудодни (по дате найма) и Дни рождения (раз в год).</p>
+                        </div>
+                      )}
+
+                      {/* ── База данных ── */}
+                      {docsSection === "database" && (
+                        <div style={sectionStyle}>
+                          <div style={h2}>🗄️ База данных</div>
+                          <p style={p}>Проект поддерживает три уровня хранения данных с автоматическим fallback:</p>
+                          <div style={{display:"flex",gap:"10px",marginBottom:"16px",flexWrap:"wrap"}}>
+                            {[
+                              ["1️⃣","PostgreSQL","Основное хранилище. Рекомендуется для production.","#e8f5e9","#a5d6a7"],
+                              ["2️⃣","SQLite (WASM)","Браузерная БД. Работает без сервера, но данные только в одном браузере.","#fff8e1","#ffe082"],
+                              ["3️⃣","JSON-файл","data/store.json. Резерв при недоступности обеих БД.","#f3e5f5","#ce93d8"],
+                            ].map(([n,title,desc,bg,border]) => (
+                              <div key={title} style={{flex:"1",minWidth:"180px",padding:"14px",borderRadius:"10px",background:bg,border:`1px solid ${border}`}}>
+                                <div style={{fontSize:"20px",marginBottom:"6px"}}>{n} {title}</div>
+                                <div style={{fontSize:"12px",color:"#555"}}>{desc}</div>
+                              </div>
+                            ))}
+                          </div>
+
+                          <div style={h3}>Порядок чтения конфига PostgreSQL</div>
+                          <p style={p}>Система ищет конфигурацию в следующем порядке (первый найденный — используется):</p>
+                          <table style={table}>
+                            <thead><tr><th style={th}>Приоритет</th><th style={th}>Источник</th><th style={th}>Описание</th></tr></thead>
+                            <tbody>
+                              {[
+                                ["1","pg.env (в корне)","Файл в git. Не сбрасывается при деплоях. ✅ Рекомендуется."],
+                                ["2","DATABASE_URL (env)","Переменная окружения. Подходит для Heroku/Railway/Render."],
+                                ["3","PG_HOST (env)","Отдельные PG_* переменные окружения."],
+                                ["4","data/pg-config.json","Создаётся при сохранении через UI. Может не пережить деплой."],
+                                ["5","data/pg-env.json","Резервная копия pg-config.json."],
+                              ].map(([a,b,c],i) => <tr key={i}><td style={{...td,fontWeight:700,color:"var(--rd-red)"}}>{a}</td><td style={td}><code style={inlineCode}>{b}</code></td><td style={td}>{c}</td></tr>)}
+                            </tbody>
+                          </table>
+
+                          <div style={h3}>Структура таблицы kv</div>
+                          <code style={code}>{`CREATE TABLE kv (
+  key        TEXT PRIMARY KEY,
+  value      TEXT NOT NULL,  -- JSON строка
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);`}</code>
+                          <p style={p}>Все данные хранятся в единой таблице ключ-значение. Ключи:</p>
+                          <table style={table}>
+                            <thead><tr><th style={th}>Ключ</th><th style={th}>Содержимое</th></tr></thead>
+                            <tbody>
+                              {[
+                                ["cm_appearance","Настройки внешнего вида (без изображений)"],
+                                ["cm_images","Изображения в base64 (логотип, баннеры, favicon)"],
+                                ["cm_users","Все пользователи с балансами и паролями"],
+                                ["cm_products","Товары магазина"],
+                                ["cm_orders","Заказы пользователей"],
+                                ["cm_categories","Категории товаров"],
+                                ["cm_transfers","История переводов монет"],
+                                ["cm_deposits","Типы банковских вкладов"],
+                                ["cm_user_deposits","Активные и завершённые вклады пользователей"],
+                                ["cm_auctions","Лоты аукциона"],
+                                ["cm_lotteries","Лотереи"],
+                                ["cm_polls","Голосования"],
+                                ["cm_tasks","Задания"],
+                                ["cm_task_submissions","Заявки на задания"],
+                                ["cm_faq","Вопросы и ответы"],
+                                ["cm_videos","Настройки видеораздела"],
+                                ["cm_workday_grant","Дата последнего начисления трудодней"],
+                                ["cm_birthday_grant","Год последнего начисления ДР бонусов"],
+                              ].map(([a,b],i) => <tr key={i}><td style={td}><code style={inlineCode}>{a}</code></td><td style={td}>{b}</td></tr>)}
+                            </tbody>
+                          </table>
+
+                          <div style={tip}>💡 Ключ <code style={inlineCode}>cm_images</code> исключён из polling-запросов — он весит ~700 КБ и загружается отдельно через <code style={inlineCode}>/api/images</code>.</div>
+                        </div>
+                      )}
+
+                      {/* ── Внешний вид ── */}
+                      {docsSection === "appearance" && (
+                        <div style={sectionStyle}>
+                          <div style={h2}>🎨 Внешний вид</div>
+                          <div style={h3}>Темы оформления</div>
+                          <p style={p}>Выберите базовую тему в <strong>Настройки → Внешний вид</strong>. Доступны светлая и тёмная тема. После выбора темы можно настроить акцентный цвет, фон хедера/футера и цвет текста на карточках товаров.</p>
+                          <div style={h3}>Логотип</div>
+                          <p style={p}>Загружается в SVG, PNG или JPG. Максимальный размер: 2 МБ. Изображение автоматически сжимается. На десктопе высота логотипа — до 72px, на мобильных — до 48px.</p>
+                          <div style={h3}>CSS-переменные темы</div>
+                          <code style={code}>{`--rd-bg           /* фон страницы */
+--rd-surface      /* фон карточек */
+--rd-text         /* основной текст */
+--rd-gray-text    /* вспомогательный текст */
+--rd-gray-border  /* границы */
+--rd-accent       /* акцентный цвет (кнопки, ссылки) */
+--rd-red          /* фирменный красный */
+--rd-header-bg    /* фон шапки */
+--rd-footer-bg    /* фон подвала */`}</code>
+                          <div style={h3}>Размеры хедера</div>
+                          <table style={table}>
+                            <thead><tr><th style={th}>Устройство</th><th style={th}>Высота хедера</th><th style={th}>Высота логотипа</th></tr></thead>
+                            <tbody>
+                              <tr><td style={td}>Десктоп ({">"} 768px)</td><td style={td}>80px</td><td style={td}>до 72px</td></tr>
+                              <tr><td style={td}>Мобильные (≤ 768px)</td><td style={td}>54px</td><td style={td}>до 48px</td></tr>
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+
+                      {/* ── Модули ── */}
+                      {docsSection === "modules" && (
+                        <div style={sectionStyle}>
+                          <div style={h2}>🧩 Модули</div>
+                          <p style={p}>Каждый модуль можно включить или отключить в <strong>Настройки → Общее → Разделы</strong>. Отключённые разделы скрываются из навигации.</p>
+
+                          {[
+                            {icon:"🔨",title:"Аукцион",desc:"Администратор создаёт лоты с начальной ценой и сроком. Пользователи делают ставки. При завершении система автоматически определяет победителя с достаточным балансом (в обратном порядке ставок). Деньги списываются только у победителя."},
+                            {icon:"🎰",title:"Лотерея",desc:"Администратор создаёт розыгрыш с призом в монетах и ценой билета. Пользователи покупают билеты. Победитель выбирается случайно в момент завершения. Приз зачисляется автоматически."},
+                            {icon:"🗳️",title:"Голосования",desc:"Создание опросов с вариантами ответов. За участие можно установить вознаграждение в монетах. Результаты отображаются в виде процентов после голосования."},
+                            {icon:"🎯",title:"Задания",desc:"Администратор создаёт задания с описанием и суммой вознаграждения. Пользователь нажимает «Выполнить» и описывает результат. Администратор подтверждает или отклоняет — монеты зачисляются автоматически."},
+                            {icon:"🏦",title:"Банк",desc:"Администратор задаёт типы вкладов: название, срок в днях, процентная ставка. Пользователь размещает монеты на вклад. По истечении срока монеты + проценты автоматически возвращаются на баланс."},
+                          ].map(m => (
+                            <div key={m.title} style={{marginBottom:"16px",padding:"16px",borderRadius:"10px",border:"1px solid var(--rd-gray-border)",background:"#fafafa"}}>
+                              <div style={{fontSize:"16px",fontWeight:700,marginBottom:"8px"}}>{m.icon} {m.title}</div>
+                              <p style={{...p,marginBottom:0}}>{m.desc}</p>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {/* ── Пользователи ── */}
+                      {docsSection === "users" && (
+                        <div style={sectionStyle}>
+                          <div style={h2}>👥 Пользователи</div>
+                          <div style={h3}>Роли</div>
+                          <table style={table}>
+                            <thead><tr><th style={th}>Роль</th><th style={th}>Возможности</th></tr></thead>
+                            <tbody>
+                              <tr><td style={td}><code style={inlineCode}>admin</code></td><td style={td}>Полный доступ ко всем настройкам, управление пользователями, товарами, всеми модулями</td></tr>
+                              <tr><td style={td}><code style={inlineCode}>user</code></td><td style={td}>Покупки, ставки, голосование, задания, вклады, просмотр своего баланса и истории</td></tr>
+                            </tbody>
+                          </table>
+                          <div style={h3}>Структура пользователя</div>
+                          <code style={code}>{`{
+  "username": "ivanov",       // логин (уникальный)
+  "name": "Иван Иванов",      // отображаемое имя
+  "password": "hashed...",    // bcrypt хэш
+  "role": "user",             // admin | user
+  "balance": 1500,            // монет на балансе
+  "birthdate": "1990-05-15",  // для ДР-бонусов
+  "employmentDate": "2022-01-10", // для трудодней
+  "activationDate": "2022-01-10", // дата первого входа
+  "createdAt": "2022-01-10"
+}`}</code>
+                          <div style={h3}>Автоначисление монет</div>
+                          <p style={p}><strong>Трудодни:</strong> Ежедневно система начисляет монеты всем активным сотрудникам. Сумма настраивается в <strong>Валюта → Трудодни</strong>. Можно выбрать точку отсчёта: дата найма, дата активации или произвольная дата.</p>
+                          <p style={p}><strong>День рождения:</strong> Один раз в год в день рождения пользователь получает бонус. Включается в <strong>Валюта → День рождения</strong>.</p>
+                          <div style={h3}>Регистрация</div>
+                          <p style={p}>В <strong>Настройки → Общее</strong> можно разрешить или запретить самостоятельную регистрацию. Если регистрация отключена — новых пользователей создаёт только администратор.</p>
+                        </div>
+                      )}
+
+                      {/* ── API ── */}
+                      {docsSection === "api" && (
+                        <div style={sectionStyle}>
+                          <div style={h2}>🔌 API</div>
+                          <p style={p}>Все операции с данными идут через единый endpoint <code style={inlineCode}>POST /api/store</code>. Тело запроса — JSON с полем <code style={inlineCode}>action</code>.</p>
+
+                          <div style={h3}>Основные действия</div>
+                          <table style={table}>
+                            <thead><tr><th style={th}>action</th><th style={th}>Параметры</th><th style={th}>Описание</th></tr></thead>
+                            <tbody>
+                              {[
+                                ["getAll","clientVersion?","Получить все ключи кроме cm_images. Поддерживает ETag-кэш."],
+                                ["get","key","Получить значение по ключу"],
+                                ["set","key, value","Сохранить значение"],
+                                ["delete","key","Удалить ключ"],
+                                ["setMany","data: {key: value}","Сохранить несколько ключей в транзакции"],
+                                ["version","—","Получить текущую версию данных (для polling)"],
+                                ["pg_save","config","Сохранить конфиг PostgreSQL"],
+                                ["pg_get","—","Получить текущий конфиг PostgreSQL"],
+                                ["pg_test","config","Протестировать подключение к PostgreSQL"],
+                                ["pg_logs","—","Получить логи подключения к БД"],
+                                ["pg_diag","—","Полная диагностика (ключи, размеры, состояние)"],
+                                ["daily_grants","—","Начислить трудодни и ДР-бонусы (вызывается автоматически)"],
+                                ["migrate","data?","Мигрировать данные из JSON в PostgreSQL"],
+                              ].map(([a,b,c],i) => <tr key={i}><td style={td}><code style={inlineCode}>{a}</code></td><td style={td}><code style={inlineCode}>{b}</code></td><td style={td}>{c}</td></tr>)}
+                            </tbody>
+                          </table>
+
+                          <div style={h3}>Дополнительные endpoints</div>
+                          <table style={table}>
+                            <thead><tr><th style={th}>URL</th><th style={th}>Метод</th><th style={th}>Описание</th></tr></thead>
+                            <tbody>
+                              {[
+                                ["/api/images","GET","Отдаёт cm_images (логотип, баннеры). Кэш 1 час."],
+                                ["/api/telegram","POST","Прокси для Telegram Bot API (sendMessage)"],
+                                ["/api/health","GET","Проверка работоспособности сервера"],
+                                ["/api/migrate","POST","Миграция cm_appearance → cm_images"],
+                                ["/api/diag","GET","Диагностическая страница"],
+                              ].map(([a,b,c],i) => <tr key={i}><td style={td}><code style={inlineCode}>{a}</code></td><td style={td}><code style={inlineCode}>{b}</code></td><td style={td}>{c}</td></tr>)}
+                            </tbody>
+                          </table>
+
+                          <div style={h3}>Polling (синхронизация)</div>
+                          <p style={p}>Клиент каждые 3 секунды запрашивает <code style={inlineCode}>{"action: 'version'"}</code>. Если версия изменилась — делает полный <code style={inlineCode}>getAll</code>. Версия инкрементируется при каждом <code style={inlineCode}>set</code>/<code style={inlineCode}>delete</code>/<code style={inlineCode}>setMany</code>. Это обеспечивает синхронизацию между всеми открытыми вкладками.</p>
+                        </div>
+                      )}
+
+                      {/* ── Развёртывание ── */}
+                      {docsSection === "deploy" && (
+                        <div style={sectionStyle}>
+                          <div style={h2}>🐳 Развёртывание</div>
+                          <div style={h3}>Docker Compose (рекомендуется)</div>
+                          <code style={code}>{`version: '3.8'
+services:
+  app:
+    build: .
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./data:/app/data
+    environment:
+      - DATABASE_URL=postgresql://postgres:password@db:5432/corpmerch
+    depends_on:
+      - db
+
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: corpmerch
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+volumes:
+  pgdata:`}</code>
+
+                          <div style={h3}>Nginx (reverse proxy)</div>
+                          <code style={code}>{`server {
+    listen 80;
+    server_name your-domain.ru;
+
+    location / {
+        proxy_pass http://localhost:3000;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_cache_bypass $http_upgrade;
+    }
+}`}</code>
+                          <div style={warn}>⚠️ Не включайте в приложении опцию "Использовать HTTPS" — этим должен управлять nginx или облачный провайдер, а не само приложение.</div>
+
+                          <div style={h3}>Переменные окружения</div>
+                          <table style={table}>
+                            <thead><tr><th style={th}>Переменная</th><th style={th}>Описание</th></tr></thead>
+                            <tbody>
+                              {[
+                                ["DATABASE_URL","Строка подключения PostgreSQL (приоритет 2)"],
+                                ["PG_HOST","Хост PostgreSQL"],
+                                ["PG_PORT","Порт (по умолчанию 5432)"],
+                                ["PG_DATABASE","Имя базы данных"],
+                                ["PG_USER","Пользователь"],
+                                ["PG_PASSWORD","Пароль"],
+                                ["PG_SSL","true/false — использовать SSL"],
+                                ["PORT","Порт Next.js (по умолчанию 3000)"],
+                                ["NODE_ENV","production / development"],
+                                ["NEXT_TELEMETRY_DISABLED","1 — отключить телеметрию Next.js"],
+                              ].map(([a,b],i) => <tr key={i}><td style={td}><code style={inlineCode}>{a}</code></td><td style={td}>{b}</td></tr>)}
+                            </tbody>
+                          </table>
+
+                          <div style={h3}>Важно: персистентность данных</div>
+                          <p style={p}>Примонтируйте директорию <code style={inlineCode}>/app/data</code> как volume. Там хранятся конфиг БД и JSON-резерв. Без volume эти файлы будут сброшены при каждом деплое.</p>
+                        </div>
+                      )}
+
+                      {/* ── FAQ ── */}
+                      {docsSection === "faq" && (
+                        <div style={sectionStyle}>
+                          <div style={h2}>❓ Частые вопросы</div>
+                          {[
+                            {q:"Сайт грузится, но данные не появляются",a:"Откройте Настройки → База данных → Логи БД. Если пул не готов — проверьте параметры подключения PostgreSQL. Если PG не настроен, данные хранятся в SQLite (в браузере) или JSON-файле."},
+                            {q:"После деплоя конфиг БД сбросился",a:"Используйте файл pg.env в корне репозитория — он коммитится в git и не сбрасывается. Также примонтируйте /app/data как Docker volume для сохранения pg-config.json."},
+                            {q:"Логотип не отображается",a:"Изображение хранится в cm_images и загружается через /api/images. Убедитесь, что PostgreSQL доступен и миграция выполнена (Настройки → База данных → Миграция)."},
+                            {q:"Пользователи не видят изменения друг друга",a:"Данные синхронизируются через polling каждые 3 секунды. Если синхронизации нет — проверьте, что все клиенты подключены к одному PostgreSQL, а не к SQLite."},
+                            {q:"Как сбросить пароль администратора?",a:"Через прямой запрос к БД: UPDATE kv SET value = '{\"admin\":{\"role\":\"admin\",\"password\":\"новый_bcrypt_хэш\",...}}' WHERE key = 'cm_users'. Или создайте нового пользователя с ролью admin через JSON-файл data/store.json."},
+                            {q:"Можно ли использовать без PostgreSQL?",a:"Да. Без настройки PostgreSQL данные сохраняются в SQLite (IndexedDB браузера) или JSON-файле на сервере. Но SQLite работает только в одном браузере — другие пользователи не увидят изменения."},
+                            {q:"Как отключить регистрацию?",a:"Настройки → Общее → снять галочку «Разрешить регистрацию». После этого новых пользователей может создавать только администратор."},
+                            {q:"Где хранятся загруженные изображения?",a:"Все изображения (логотип, баннеры, favicon) хранятся в PostgreSQL в ключе cm_images в base64. Они не занимают места на диске и не теряются при деплое."},
+                          ].map((item,i) => (
+                            <div key={i} style={{marginBottom:"12px",borderRadius:"10px",border:"1px solid var(--rd-gray-border)",overflow:"hidden"}}>
+                              <div style={{padding:"12px 16px",fontWeight:700,fontSize:"13px",background:"#f9f9f9",borderBottom:"1px solid var(--rd-gray-border)"}}>🔹 {item.q}</div>
+                              <div style={{padding:"12px 16px",fontSize:"13px",lineHeight:1.7,color:"var(--rd-gray-text)"}}>{item.a}</div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
+              </div>
             </div>
           )}
 
