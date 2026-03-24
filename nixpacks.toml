@@ -1,0 +1,15 @@
+[variables]
+NODE_ENV = "production"
+NEXT_TELEMETRY_DISABLED = "1"
+
+[phases.setup]
+aptPkgs = ["curl"]
+
+[phases.install]
+cmds = ["npm install"]
+
+[phases.build]
+cmds = ["npm run build"]
+
+[start]
+cmd = "npm start"
