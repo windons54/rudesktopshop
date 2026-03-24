@@ -185,6 +185,19 @@ const CONNECTION_ERRORS = new Set([
   'ECONNRESET', 'ECONNREFUSED', 'EPIPE', 'ETIMEDOUT', 'ENOTFOUND',
   'CONNECTION_ENDED', 'CONNECTION_DESTROYED',
 ]);
+const PG_DISABLE_MS = 5 * 60 * 1000;
+
+function markPgUnavailable(err, cfgKey = null) {
+  g._pgLastError = Date.now();
+  g._pgDisabledUntil = Date.now() + PG_DISABLE_MS;
+  g._pgDisabledKey = cfgKey || g._pgPoolKey || null;
+  g._pgDisabledReason = err?.code || err?.message || 'unknown';
+  g._pgReady = false;
+  if (g._pgPool) {
+    try { g._pgPool.end(); } catch {}
+    g._pgPool = null;
+  }
+}
 
 function isConnectionError(err) {
   if (!err) return false;
@@ -215,11 +228,11 @@ async function queryWithRetry(queryFn, maxRetries = 1) {
       if (attempt < maxRetries && isConnectionError(err)) {
         pgLog('retry', `Обрыв соединения, пересоздаём пул`, { detail: err.code || err.message });
         // Сбрасываем пул чтобы getPool() создал новый
-        if (g._pgPool) { try { g._pgPool.end(); } catch {} }
-        g._pgPool = null;
-        g._pgReady = false;
+        markPgUnavailable(err);
         g._pgInitPromise = null;
         g._pgLastError = null; // Сбрасываем cooldown чтобы retry прошёл сразу
+        g._pgDisabledUntil = 0; // Для одного retry разрешаем немедленную пересборку пула
+        g._pgDisabledKey = null;
         // Пауза 2s перед retry — даём время на восстановление соединения
         await new Promise(r => setTimeout(r, 2000));
         // Даём время на создание нового пула
@@ -249,6 +262,13 @@ async function getPool() {
 
   const { source, ...poolCfg } = cfg;
   const cfgKey = JSON.stringify(poolCfg);
+  const now = Date.now();
+
+  if (g._pgDisabledKey && g._pgDisabledKey !== cfgKey) {
+    g._pgDisabledKey = null;
+    g._pgDisabledUntil = 0;
+    g._pgDisabledReason = null;
+  }
 
   // Переиспользуем существующий пул если конфиг не изменился
   if (g._pgPool && g._pgPoolKey === cfgKey && g._pgReady) {
@@ -261,11 +281,13 @@ async function getPool() {
   }
 
   // Cooldown после ошибки: не пытаемся переподключиться чаще раза в 3 секунды
-  const now = Date.now();
   // Cooldown 15s — минимальная пауза между попытками переподключения.
   // Короткий cooldown (1s) при HTTPS/SSL-окружении создавал бесконечный цикл:
   // соединение падало → cooldown 1s → новая попытка → снова падала → и так по кругу.
   if (g._pgLastError && g._pgPoolKey === cfgKey && (now - g._pgLastError) < 15000) {
+    return null;
+  }
+  if (g._pgDisabledUntil && g._pgDisabledKey === cfgKey && now < g._pgDisabledUntil) {
     return null;
   }
 
@@ -320,9 +342,7 @@ async function getPool() {
         const fatal = err.code === 'ECONNREFUSED' || err.code === 'ENOTFOUND';
         if (fatal && g._pgPool === newPool) {
           pgLog('disconnect', 'Фатальная ошибка — пул сброшен', { detail: err.message });
-          g._pgReady = false;
-          g._pgPool = null;
-          g._pgLastError = Date.now();
+          markPgUnavailable(err, cfgKey);
         }
       });
 
@@ -358,6 +378,9 @@ async function getPool() {
           }
         } catch (e) {
           pgLog('error', `Фоновая проверка не прошла: ${e.message}`, { detail: e.code || '' });
+          if (isConnectionError(e)) {
+            markPgUnavailable(e, cfgKey);
+          }
           // НЕ сбрасываем пул здесь — это вызывало цикл «появляется/пропадает» раз в секунду.
           // Если соединение реально мертво, это выяснится при первом реальном запросе
           // и queryWithRetry пересоздаст пул корректно.
@@ -371,10 +394,13 @@ async function getPool() {
       pgLog('error', `Ошибка инициализации пула: ${e.message}`, { detail: e.code || '' });
       // ИСПРАВЛЕНИЕ: закрываем pool при ошибке чтобы не было утечки соединений
       if (newPool) { try { newPool.end(); } catch {} }
-      g._pgPool = null;
-      g._pgReady = false;
+      if (isConnectionError(e)) markPgUnavailable(e, cfgKey);
+      else {
+        g._pgPool = null;
+        g._pgReady = false;
+        g._pgLastError = Date.now();
+      }
       g._pgInitPromise = null;
-      g._pgLastError = Date.now();
       return null;
     }
   })();
@@ -408,6 +434,9 @@ if (!g._pgKeepaliveTimer) {
       pgLog('keepalive', `Пинг OK (${ms}ms)`, { duration: ms });
     } catch (err) {
       pgLog('error', `Keepalive пинг не прошёл: ${err.message}`, { detail: err.code || '' });
+      if (isConnectionError(err)) {
+        markPgUnavailable(err);
+      }
       // Не сбрасываем пул — следующий реальный запрос через queryWithRetry сам пересоздаст
     }
   }, KEEPALIVE_INTERVAL);
@@ -549,6 +578,54 @@ async function persistPgConfig(cfg) {
       console.warn('[Store] Не удалось сохранить конфиг в kv:', e.message);
     }
   }
+}
+
+function respondFromJsonFallback(action, res, { key, value, data, intentional_delete } = {}) {
+  if (action === 'get') {
+    const raw = readJSON();
+    const s = ensureStoreDefaults(raw);
+    const result = key === 'cm_users' ? ensureDefaultUsers(s[key]) : (s[key] !== undefined ? s[key] : null);
+    if (!raw.cm_users?.admin) writeJSON(s);
+    return res.json({ ok: true, value: result, pg_unavailable: true, degraded_storage: true });
+  }
+  if (action === 'getAll') {
+    const raw = readJSON();
+    const s = ensureStoreDefaults(raw);
+    if (!raw.cm_users?.admin) writeJSON(s);
+    return res.json({ ok: true, data: s, version: g._dataVersion, pg_unavailable: true, degraded_storage: true });
+  }
+  if (action === 'set') {
+    return lock(() => {
+      const s = ensureStoreDefaults(readJSON());
+      s[key] = key === 'cm_users' ? ensureDefaultUsers(value) : value;
+      writeJSON(s);
+      bumpVersion();
+    }).then(() => res.json({ ok: true, pg_unavailable: true, degraded_storage: true }));
+  }
+  if (action === 'delete') {
+    return lock(() => {
+      const s = ensureStoreDefaults(readJSON());
+      if (key === 'cm_users' && intentional_delete && s.cm_users?.[intentional_delete]) {
+        delete s.cm_users[intentional_delete];
+      } else {
+        delete s[key];
+      }
+      writeJSON(ensureStoreDefaults(s));
+      bumpVersion();
+    }).then(() => res.json({ ok: true, pg_unavailable: true, degraded_storage: true }));
+  }
+  if (action === 'setMany') {
+    return lock(() => {
+      const s = ensureStoreDefaults(readJSON());
+      Object.assign(s, data || {});
+      writeJSON(ensureStoreDefaults(s));
+      bumpVersion();
+    }).then(() => res.json({ ok: true, pg_unavailable: true, degraded_storage: true }));
+  }
+  if (action === 'version') {
+    return res.json({ ok: true, version: g._dataVersion, pg_unavailable: true, degraded_storage: true });
+  }
+  return null;
 }
 
 // ── Handler ────────────────────────────────────────────────────────────────
@@ -830,15 +907,12 @@ export default async function handler(req, res) {
         return res.json({ ok: true });
       }
     } else {
-      // PG настроен но недоступен — сообщаем клиенту чтобы он не перезаписывал состояние
+      // PG настроен но недоступен — продолжаем работать через JSON fallback
       const pgCfgExists = !!readPgConfig();
       if (pgCfgExists) {
         pgLog('error', `Пул недоступен при запросе action=${action}`, { detail: 'pg_unavailable' });
-        if (action === 'getAll') return res.json({ ok: false, pg_unavailable: true, error: 'PostgreSQL временно недоступен' });
-        if (action === 'version') return res.json({ ok: true, version: g._dataVersion, pg_unavailable: true });
-        if (action === 'get')    return res.json({ ok: false, pg_unavailable: true, value: null });
-        if (action === 'set' || action === 'setMany' || action === 'delete')
-          return res.json({ ok: false, pg_unavailable: true, error: 'PostgreSQL временно недоступен' });
+        const degraded = await respondFromJsonFallback(action, res, { key, value, data, intentional_delete });
+        if (degraded) return degraded;
       }
       if (action === 'get')     {
         const raw = readJSON();
@@ -860,30 +934,17 @@ export default async function handler(req, res) {
 
     return res.status(400).json({ ok: false, error: 'Unknown action' });
   } catch (e) {
-    console.error('[Store] Ошибка:', e);
+    if (isConnectionError(e)) {
+      pgLog('error', `Store перешёл в degraded mode action=${action}`, { detail: e.code || e.message });
+    } else {
+      console.error('[Store] Ошибка:', e);
+    }
     if (isConnectionError(e)) {
       const pgCfgExists = !!readPgConfig();
       if (pgCfgExists) {
         pgLog('error', `Fallback после ошибки подключения action=${action}`, { detail: e.code || e.message });
-        if (action === 'getAll') {
-          const raw = readJSON();
-          const s = ensureStoreDefaults(raw);
-          if (!raw.cm_users?.admin) writeJSON(s);
-          return res.json({ ok: true, data: s, version: g._dataVersion, pg_unavailable: true });
-        }
-        if (action === 'version') {
-          return res.json({ ok: true, version: g._dataVersion, pg_unavailable: true });
-        }
-        if (action === 'get') {
-          const raw = readJSON();
-          const s = ensureStoreDefaults(raw);
-          const safeValue = key === 'cm_users' ? ensureDefaultUsers(s[key]) : (s[key] !== undefined ? s[key] : null);
-          if (!raw.cm_users?.admin) writeJSON(s);
-          return res.json({ ok: true, value: safeValue, pg_unavailable: true });
-        }
-        if (action === 'set' || action === 'setMany' || action === 'delete') {
-          return res.json({ ok: false, pg_unavailable: true, error: 'PostgreSQL временно недоступен' });
-        }
+        const degraded = await respondFromJsonFallback(action, res, { key, value, data, intentional_delete });
+        if (degraded) return degraded;
       }
     }
     return res.status(500).json({ ok: false, error: e.message });
