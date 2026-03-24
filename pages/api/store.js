@@ -1,18 +1,48 @@
 // pages/api/store.js
-// Слой хранения данных через Prisma (PostgreSQL) с fallback на JSON-файл.
-//
-// Porядок подключения:
-//   1. DATABASE_URL (env) → Prisma автоматически использует его
-//   2. Файл data/store.json — только локальная разработка без БД
+// Хранение данных: PostgreSQL (pg Pool) с fallback на JSON-файл.
+// Порядок подключения: DATABASE_URL (env) → PG_HOST (env) → data/pg-config.json
 
 import fs from 'fs';
 import path from 'path';
+import zlib from 'zlib';
+import { readPgConfig as _readPgConfigBase, parseEnvFile } from '../../lib/pg-config-reader.js';
 
-const DATA_DIR   = path.join(process.cwd(), 'data');
-const STORE_FILE = path.join(DATA_DIR, 'store.json');
-const PG_CFG_KEY = '__pg_config__';
+// Отправляет JSON с компрессией если браузер объявил поддержку в заголовке запроса.
+// ВАЖНО: мы читаем accept-encoding из HTTP-заголовка запроса (который браузер ставит сам),
+// а не из JS-хедера fetch — чтобы избежать проблем с Safari, который не принимает
+// gzip-ответы когда Accept-Encoding выставлен вручную в fetch().
+function sendCompressed(req, res, payload) {
+  const json = JSON.stringify(payload);
+  // Читаем реальный accept-encoding, выставленный браузером/ОС — не JS
+  const ae = req.headers?.['accept-encoding'] || '';
+  res.setHeader('Vary', 'Accept-Encoding');
+  res.setHeader('Content-Type', 'application/json');
 
-// ── JSON-файл (локальная разработка без БД) ────────────────────────────────
+  if (ae.includes('br')) {
+    // Brotli — лучшее сжатие, поддерживается всеми современными браузерами включая Safari 15.4+
+    zlib.brotliCompress(Buffer.from(json, 'utf8'), { params: { [zlib.constants.BROTLI_PARAM_QUALITY]: 4 } }, (err, compressed) => {
+      if (err) { res.end(json); return; }
+      res.setHeader('Content-Encoding', 'br');
+      res.end(compressed);
+    });
+  } else if (ae.includes('gzip')) {
+    zlib.gzip(Buffer.from(json, 'utf8'), { level: 6 }, (err, compressed) => {
+      if (err) { res.end(json); return; }
+      res.setHeader('Content-Encoding', 'gzip');
+      res.end(compressed);
+    });
+  } else {
+    res.end(json);
+  }
+}
+
+const DATA_DIR    = path.join(process.cwd(), 'data');
+const STORE_FILE  = path.join(DATA_DIR, 'store.json');
+const PG_CFG_FILE = path.join(DATA_DIR, 'pg-config.json');
+const PG_ENV_FILE = path.join(DATA_DIR, 'pg-env.json');   // резервная копия, используется в persistPgConfig
+const PG_CFG_KEY  = '__pg_config__';
+
+// ── JSON fallback ──────────────────────────────────────────────────────────
 let _lock = Promise.resolve();
 const lock = fn => { const r = _lock.then(fn); _lock = r.catch(() => {}); return r; };
 const ensureDir = () => {
@@ -26,119 +56,453 @@ function writeJSON(data) {
   try { ensureDir(); fs.writeFileSync(STORE_FILE, JSON.stringify(data), 'utf8'); } catch (e) { console.error(e); }
 }
 
-// ── Prisma-клиент (только если DATABASE_URL задан) ─────────────────────────
-function hasDatabaseUrl() {
-  return !!(process.env.DATABASE_URL || process.env.PG_HOST);
+// ── Читаем конфиг PG — делегируем в lib/pg-config-reader.js ───────────────
+// includeStoreJson: true — включает fallback на store.json[__pg_config__]
+function readPgConfig() {
+  return _readPgConfigBase({ includeStoreJson: true, ensureDirFn: ensureDir });
 }
 
-async function getPrisma() {
-  if (!hasDatabaseUrl()) return null;
+// ── Попытка получить конфиг из самой БД (устойчиво к деплоям) ─────────────
+// Если pg-config.json удалён после деплоя с GitHub, пробуем подключиться
+// используя сохранённый в БД конфиг (bootstrapping через временный пул)
+async function tryBootstrapFromDb() {
+  if (g._bootstrapDone) return;
+  g._bootstrapDone = true;
+  // Уже есть конфиг — ничего не делаем
+  if (readPgConfig()) return;
+  // Нет конфига — ищем сохранённые данные подключения в globalThis
+  const saved = g._savedConnStr;
+  const savedCfg = g._savedPgCfg;
+  if (!saved && !savedCfg) return;
   try {
-    const { default: prisma } = await import('../../lib/prisma.js');
-    await prisma.$queryRaw`SELECT 1`;
-    // Убеждаемся что таблица существует (на случай первого запуска без миграции)
-    await prisma.$executeRawUnsafe(`
-      CREATE TABLE IF NOT EXISTS kv (
-        key TEXT PRIMARY KEY,
-        value TEXT NOT NULL,
-        updated_at TIMESTAMPTZ DEFAULT NOW()
-      )
-    `);
-    return prisma;
-  } catch (e) {
-    console.error('[Prisma] Ошибка подключения:', e.message);
-    return null;
+    const { Pool } = await import('pg');
+    const opts = saved
+      ? { connectionString: saved, ssl: { rejectUnauthorized: false }, max: 1, connectionTimeoutMillis: 5000 }
+      : { host: savedCfg.host, port: savedCfg.port || 5432, database: savedCfg.database,
+          user: savedCfg.user, password: savedCfg.password,
+          ssl: savedCfg.ssl ? { rejectUnauthorized: false } : false,
+          max: 1, connectionTimeoutMillis: 5000 };
+    const pool = new Pool(opts);
+    await pool.query('SELECT 1');
+    // Читаем конфиг из kv таблицы
+    const r = await pool.query(`SELECT value FROM kv WHERE key = $1`, [PG_CFG_KEY]);
+    if (r.rows.length) {
+      const cfg = JSON.parse(r.rows[0].value);
+      if (cfg && (cfg.host || cfg.connectionString)) {
+        ensureDir();
+        fs.writeFileSync(PG_CFG_FILE, JSON.stringify(cfg), 'utf8');
+        fs.writeFileSync(PG_ENV_FILE, JSON.stringify(cfg), 'utf8');
+        console.log('[Store] Конфиг БД восстановлен из kv-таблицы');
+      }
+    }
+    await pool.end();
+  } catch {}
+}
+
+// ── pg Pool singleton — хранится в globalThis чтобы пережить hot-reload ──
+// В Next.js каждый API route может переиспользовать один process,
+// поэтому globalThis._pgPool живёт между запросами.
+const g = globalThis;
+
+// ── Логирование подключений к БД ────────────────────────────────────────
+// Ring-буфер последних событий подключения: connect, disconnect, retry,
+// keepalive, error, query timing. Используется для диагностики в админке.
+const PG_LOG_MAX = 200;
+if (!g._pgLogs) g._pgLogs = [];
+
+function pgLog(type, message, extra) {
+  const entry = {
+    ts: new Date().toISOString(),
+    type,       // 'connect' | 'disconnect' | 'retry' | 'keepalive' | 'error' | 'query' | 'pool' | 'init'
+    message,
+    ...(extra || {}),
+  };
+  g._pgLogs.push(entry);
+  if (g._pgLogs.length > PG_LOG_MAX) g._pgLogs.splice(0, g._pgLogs.length - PG_LOG_MAX);
+  // Дублируем в консоль для серверных логов
+  const prefix = `[PG:${type}]`;
+  if (type === 'error') console.error(prefix, message, extra?.detail || '');
+  else console.log(prefix, message, extra?.detail || '');
+}
+
+// ── Retry-обёртка: автоматически пересоздаёт пул при обрыве соединения ───
+// Решает проблему «пользователь долго не заходил → соединения протухли»:
+// первый запрос может упасть на мёртвом соединении, retry пересоздаёт пул
+// и выполняет запрос на свежем соединении — пользователь не замечает проблему.
+const CONNECTION_ERRORS = new Set([
+  'ECONNRESET', 'ECONNREFUSED', 'EPIPE', 'ETIMEDOUT', 'ENOTFOUND',
+  'CONNECTION_ENDED', 'CONNECTION_DESTROYED',
+]);
+
+function isConnectionError(err) {
+  if (!err) return false;
+  if (CONNECTION_ERRORS.has(err.code)) return true;
+  const msg = (err.message || '').toLowerCase();
+  return msg.includes('connection terminated') ||
+         msg.includes('connection reset') ||
+         msg.includes('client has encountered a connection error') ||
+         msg.includes('cannot acquire a client') ||
+         msg.includes('terminating connection due to idle') ||
+         msg.includes('server closed the connection unexpectedly') ||
+         msg.includes('socket hang up') ||
+         msg.includes('read econnreset') ||
+         msg.includes('ssl connection has been closed') ||
+         msg.includes('ssl routines') ||
+         msg.includes('ssl error');
+}
+
+async function queryWithRetry(queryFn, maxRetries = 1) {
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      const start = Date.now();
+      const result = await queryFn();
+      const dur = Date.now() - start;
+      if (dur > 2000) pgLog('query', `Медленный запрос: ${dur}ms`, { duration: dur });
+      return result;
+    } catch (err) {
+      if (attempt < maxRetries && isConnectionError(err)) {
+        pgLog('retry', `Обрыв соединения, пересоздаём пул`, { detail: err.code || err.message });
+        // Сбрасываем пул чтобы getPool() создал новый
+        if (g._pgPool) { try { g._pgPool.end(); } catch {} }
+        g._pgPool = null;
+        g._pgReady = false;
+        g._pgInitPromise = null;
+        g._pgLastError = null; // Сбрасываем cooldown чтобы retry прошёл сразу
+        // Пауза 2s перед retry — даём время на восстановление соединения
+        await new Promise(r => setTimeout(r, 2000));
+        // Даём время на создание нового пула
+        const retryPool = await getPool();
+        if (!retryPool) {
+          pgLog('error', 'Retry не удался — пул не создан', { detail: err.message });
+          throw err;
+        }
+        pgLog('retry', 'Пул пересоздан, повторяем запрос');
+        continue;
+      }
+      pgLog('error', `Ошибка запроса: ${err.message}`, { detail: err.code || '' });
+      throw err;
+    }
   }
 }
 
-// Утилита: сериализовать значение
-function serialize(value) {
-  return typeof value === 'string' ? value : JSON.stringify(value);
+
+async function getPool() {
+  // Если конфига нет — пробуем восстановить из БД (после git deploy)
+  if (!readPgConfig()) {
+    await tryBootstrapFromDb();
+  }
+
+  const cfg = readPgConfig();
+  if (!cfg) return null;
+
+  const { source, ...poolCfg } = cfg;
+  const cfgKey = JSON.stringify(poolCfg);
+
+  // Переиспользуем существующий пул если конфиг не изменился
+  if (g._pgPool && g._pgPoolKey === cfgKey && g._pgReady) {
+    return g._pgPool;
+  }
+
+  // Если уже идёт инициализация — ждём её завершения
+  if (g._pgInitPromise && g._pgPoolKey === cfgKey) {
+    return g._pgInitPromise;
+  }
+
+  // Cooldown после ошибки: не пытаемся переподключиться чаще раза в 3 секунды
+  const now = Date.now();
+  // Cooldown 15s — минимальная пауза между попытками переподключения.
+  // Короткий cooldown (1s) при HTTPS/SSL-окружении создавал бесконечный цикл:
+  // соединение падало → cooldown 1s → новая попытка → снова падала → и так по кругу.
+  if (g._pgLastError && g._pgPoolKey === cfgKey && (now - g._pgLastError) < 15000) {
+    return null;
+  }
+
+  // Создаём новый пул
+  g._pgPoolKey = cfgKey;
+  g._pgReady = false;
+  pgLog('pool', 'Создаём новый пул соединений', { detail: `source=${source}` });
+
+  g._pgInitPromise = (async () => {
+    let newPool = null;
+    try {
+      const { Pool } = await import('pg');
+      if (g._pgPool) { pgLog('pool', 'Закрываем старый пул'); try { await g._pgPool.end(); } catch {} g._pgPool = null; }
+
+      // min:1 УБРАН намеренно — он заставляет пул немедленно создавать соединение
+      // и постоянно поддерживать его живым. При любой ошибке подключения (SSL,
+      // сеть, таймаут) pg-pool мгновенно пытается пересоздать соединение → бесконечный
+      // цикл "появляется/пропадает" в логах. Без min соединения создаются лениво
+      // (только при реальных запросах) и не порождают цикл.
+      const sslOpts = poolCfg.connectionString
+        ? { rejectUnauthorized: false }
+        : (poolCfg.ssl ? { rejectUnauthorized: false } : false);
+
+      const baseOpts = {
+        max: 5,
+        connectionTimeoutMillis: 8000,
+        idleTimeoutMillis: 600000,
+        allowExitOnIdle: false,
+        keepAlive: true,
+        keepAliveInitialDelayMillis: 10000,
+      };
+
+      const opts = poolCfg.connectionString
+        ? { ...baseOpts, connectionString: poolCfg.connectionString, ssl: sslOpts }
+        : { ...baseOpts, host: poolCfg.host, port: poolCfg.port || 5432,
+            database: poolCfg.database, user: poolCfg.user, password: poolCfg.password,
+            ssl: sslOpts };
+
+      newPool = new Pool(opts);
+
+      // КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: обработчик ошибок idle-соединений.
+      // Без него Node.js выбрасывает необработанное исключение при обрыве соединения
+      // с БД (например, когда облачный PostgreSQL закрывает idle-подключения),
+      // что может привести к падению сервера.
+      newPool.on('error', (err) => {
+        pgLog('error', `Ошибка idle-клиента: ${err.message}`, { detail: err.code || '' });
+        // Сбрасываем пул ТОЛЬКО при ECONNREFUSED/ENOTFOUND — сервер реально недоступен.
+        // Все остальные ошибки (Connection terminated, SSL closed, idle timeout) — норма
+        // для облачных PostgreSQL, pg-pool сам пересоздаёт упавший клиент без нашего вмешательства.
+        // Раньше здесь было "Connection terminated unexpectedly" → сброс пула → немедленный
+        // retry → снова та же ошибка → бесконечный цикл "connect/disconnect" в логах.
+        const fatal = err.code === 'ECONNREFUSED' || err.code === 'ENOTFOUND';
+        if (fatal && g._pgPool === newPool) {
+          pgLog('disconnect', 'Фатальная ошибка — пул сброшен', { detail: err.message });
+          g._pgReady = false;
+          g._pgPool = null;
+          g._pgLastError = Date.now();
+        }
+      });
+
+      // ИСПРАВЛЕНИЕ: пул помечается как готовый ДО SELECT 1 и CREATE TABLE.
+      // Это убирает задержку 1-3 RTT из критического пути первого запроса.
+      // SELECT 1 + CREATE TABLE выполняются в фоне — они нужны только для проверки
+      // и создания таблицы, но не блокируют основные запросы.
+      g._pgPool = newPool;
+      g._pgReady = true;
+      g._pgInitPromise = null;
+      pgLog('connect', 'Пул создан и помечен как готовый');
+
+      // Фоновая проверка + создание таблицы (не блокирует первый запрос)
+      // ИСПРАВЛЕНИЕ: ошибка фоновой проверки больше НЕ сбрасывает пул.
+      // Раньше любой сбой SELECT 1 (даже транзитный) уничтожал пул и запускал
+      // цикл «появляется → пропадает» с периодом 1 секунда. Теперь:
+      //  - При неудаче SELECT 1 ошибка логируется, пул остаётся жить.
+      //  - Пул сбрасывается только при реальном запросе через queryWithRetry,
+      //    когда пользователь видит проблему, а не каждую секунду в фоне.
+      //  - CREATE TABLE выполняется отдельно с retry-логикой.
+      (async () => {
+        try {
+          const t0 = Date.now();
+          await newPool.query('SELECT 1');
+          const pingMs = Date.now() - t0;
+          pgLog('connect', `Фоновая проверка OK (SELECT 1 = ${pingMs}ms)`, { duration: pingMs });
+          if (!g._tableEnsured) {
+            await newPool.query(`CREATE TABLE IF NOT EXISTS kv (
+              key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TIMESTAMPTZ DEFAULT NOW()
+            )`);
+            g._tableEnsured = true;
+            pgLog('init', 'Таблица kv проверена/создана');
+          }
+        } catch (e) {
+          pgLog('error', `Фоновая проверка не прошла: ${e.message}`, { detail: e.code || '' });
+          // НЕ сбрасываем пул здесь — это вызывало цикл «появляется/пропадает» раз в секунду.
+          // Если соединение реально мертво, это выяснится при первом реальном запросе
+          // и queryWithRetry пересоздаст пул корректно.
+        }
+      })();
+      // Кэшируем данные подключения для bootstrap после деплоя
+      if (poolCfg.connectionString) g._savedConnStr = poolCfg.connectionString;
+      if (poolCfg.host) g._savedPgCfg = { ...poolCfg };
+      return g._pgPool;
+    } catch (e) {
+      pgLog('error', `Ошибка инициализации пула: ${e.message}`, { detail: e.code || '' });
+      // ИСПРАВЛЕНИЕ: закрываем pool при ошибке чтобы не было утечки соединений
+      if (newPool) { try { newPool.end(); } catch {} }
+      g._pgPool = null;
+      g._pgReady = false;
+      g._pgInitPromise = null;
+      g._pgLastError = Date.now();
+      return null;
+    }
+  })();
+
+  return g._pgInitPromise;
 }
 
-// Утилита: десериализовать значение
-function deserialize(raw) {
-  if (raw == null) return null;
-  try { return JSON.parse(raw); } catch { return raw; }
+// Прогрев пула при первой загрузке модуля (серверный контекст).
+// Запускаем сразу и сохраняем промис — getPool() будет ждать его если пул ещё не готов.
+// ВАЖНО: не используем setImmediate — он выполняется ПОСЛЕ первого запроса,
+// из-за чего первый getAll получал pg_unavailable и клиент ждал 500ms+.
+if (!g._pgWarmupStarted) {
+  g._pgWarmupStarted = true;
+  getPool().catch(() => {});
 }
 
-// ── Prisma: операции с kv ────────────────────────────────────────────────
-const prismaKv = {
-  async get(prisma, key) {
-    const row = await prisma.kv.findUnique({ where: { key } });
-    return row ? deserialize(row.value) : null;
+// ── Keepalive ping — не даём соединениям протухнуть ──────────────────────
+// PostgreSQL-сервер имеет idle_session_timeout, который убивает соединения
+// без SQL-трафика. TCP keepalive не помогает — сервер отслеживает именно
+// отсутствие запросов. Пинг раз в 30 секунд гарантирует что ни одно
+// соединение не будет убито по idle_session_timeout.
+const KEEPALIVE_INTERVAL = 30 * 1000; // 30 секунд
+if (!g._pgKeepaliveTimer) {
+  g._pgKeepaliveTimer = setInterval(async () => {
+    const pool = g._pgPool;
+    if (!pool || !g._pgReady) return;
+    try {
+      const t0 = Date.now();
+      await pool.query('SELECT 1');
+      const ms = Date.now() - t0;
+      pgLog('keepalive', `Пинг OK (${ms}ms)`, { duration: ms });
+    } catch (err) {
+      pgLog('error', `Keepalive пинг не прошёл: ${err.message}`, { detail: err.code || '' });
+      // Не сбрасываем пул — следующий реальный запрос через queryWithRetry сам пересоздаст
+    }
+  }, KEEPALIVE_INTERVAL);
+  // Не блокируем завершение процесса
+  if (g._pgKeepaliveTimer.unref) g._pgKeepaliveTimer.unref();
+}
+
+// ── Версия данных для polling (ETag) ───────────────────────────────────────
+// Инкрементируется при каждом set/delete/setMany — клиент не тянет данные если версия не изменилась
+if (!g._dataVersion) g._dataVersion = Date.now();
+const bumpVersion = () => { g._dataVersion = Date.now(); g._allCache = null; g._allCacheExpiry = 0; };
+
+// ── Серверный кэш getAll (1 секунда TTL) ──────────────────────────────────
+// При 100 пользователях polling каждые 5 секунд = ~20 запросов/сек на getAll
+// Кэш избегает 20 одинаковых запросов к БД в секунду
+if (!g._allCache) g._allCache = null;
+if (!g._allCacheExpiry) g._allCacheExpiry = 0;
+const ALL_CACHE_TTL = 30000; // 30 секунд — при обновлении страницы почти всегда попадём в кэш
+
+// ── Утилиты ────────────────────────────────────────────────────────────────
+const serialize   = v => typeof v === 'string' ? v : JSON.stringify(v);
+const deserialize = raw => { if (raw == null) return null; try { return JSON.parse(raw); } catch { return raw; } };
+
+// ── CRUD ────────────────────────────────────────────────────────────────────
+const pgKv = {
+  async get(pool, key) {
+    const r = await pool.query('SELECT value FROM kv WHERE key=$1', [key]);
+    return r.rows.length ? deserialize(r.rows[0].value) : null;
   },
-  async set(prisma, key, value) {
-    const serialized = serialize(value);
-    await prisma.kv.upsert({
-      where: { key },
-      update: { value: serialized, updated_at: new Date() },
-      create: { key, value: serialized },
-    });
+  async set(pool, key, value) {
+    await pool.query(
+      `INSERT INTO kv(key,value,updated_at) VALUES($1,$2,NOW())
+       ON CONFLICT(key) DO UPDATE SET value=$2, updated_at=NOW()`,
+      [key, serialize(value)]
+    );
+    bumpVersion();
   },
-  async delete(prisma, key) {
-    await prisma.kv.deleteMany({ where: { key } });
+  async delete(pool, key) {
+    await pool.query('DELETE FROM kv WHERE key=$1', [key]);
+    bumpVersion();
   },
-  async getAll(prisma) {
-    const rows = await prisma.kv.findMany({
-      where: { key: { not: PG_CFG_KEY } },
-      orderBy: { key: 'asc' },
-    });
+  async getAll(pool) {
+    // Исключаем тяжёлые ключи с изображениями из polling-запроса:
+    //   cm_images          — 714KB, грузится через /api/images, кэшируется в localStorage
+    //   cm_auctions_images — 235KB, клиент не использует этот ключ напрямую (данные embedded в cm_auctions)
+    // Без исключения: +949KB на каждый getAll = значительная задержка на слабом соединении.
+    const r = await pool.query(
+      `SELECT key,value FROM kv WHERE key!=$1 AND key!='cm_images' AND key!='cm_auctions_images' ORDER BY key`,
+      [PG_CFG_KEY]
+    );
     const out = {};
-    rows.forEach(({ key, value }) => { out[key] = deserialize(value); });
+    r.rows.forEach(({ key, value }) => {
+      const parsed = deserialize(value);
+      // Страховка: если base64 ещё не вынесен миграцией — вырезаем на лету
+      if (key === 'cm_appearance' && parsed && typeof parsed === 'object') {
+        const slim = { ...parsed };
+        if (slim.logo?.startsWith?.('data:'))           slim.logo = '__stored__';
+        if (slim.banner?.image?.startsWith?.('data:'))  slim.banner = { ...slim.banner, image: '__stored__' };
+        if (slim.currency?.logo?.startsWith?.('data:')) slim.currency = { ...slim.currency, logo: '__stored__' };
+        if (slim.seo?.favicon?.startsWith?.('data:'))   slim.seo = { ...slim.seo, favicon: '__stored__' };
+        if (slim.sectionSettings) {
+          const ss = { ...slim.sectionSettings };
+          for (const s of Object.keys(ss)) {
+            if (ss[s]?.banner?.startsWith?.('data:')) ss[s] = { ...ss[s], banner: '__stored__' };
+          }
+          slim.sectionSettings = ss;
+        }
+        out[key] = slim;
+      } else {
+        out[key] = parsed;
+      }
+    });
     return out;
   },
-  async setMany(prisma, data) {
-    await prisma.$transaction(
-      Object.entries(data || {}).map(([key, value]) =>
-        prisma.kv.upsert({
-          where: { key },
-          update: { value: serialize(value), updated_at: new Date() },
-          create: { key, value: serialize(value) },
-        })
-      )
-    );
+  async setMany(pool, data) {
+    if (!Object.keys(data || {}).length) return;
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      for (const [key, value] of Object.entries(data)) {
+        await client.query(
+          `INSERT INTO kv(key,value,updated_at) VALUES($1,$2,NOW())
+           ON CONFLICT(key) DO UPDATE SET value=$2, updated_at=NOW()`,
+          [key, serialize(value)]
+        );
+      }
+      await client.query('COMMIT');
+      bumpVersion();
+    } catch (e) { await client.query('ROLLBACK'); throw e; }
+    finally { client.release(); }
   },
 };
 
-// ── pg_config операции ─────────────────────────────────────────────────────
-async function getPgConfigForUI() {
-  const PG_CFG_FILE = path.join(DATA_DIR, 'pg-config.json');
-  try {
-    if (fs.existsSync(PG_CFG_FILE)) {
-      const c = JSON.parse(fs.readFileSync(PG_CFG_FILE, 'utf8'));
-      if (c?.host || c?.connectionString) return { cfg: c, source: 'file' };
-    }
-  } catch {}
-  if (process.env.DATABASE_URL) return { cfg: { connectionString: process.env.DATABASE_URL }, source: 'env_url' };
-  if (process.env.PG_HOST) return { cfg: {
-    host: process.env.PG_HOST, port: process.env.PG_PORT || '5432',
-    database: process.env.PG_DATABASE || process.env.PG_DB || 'postgres',
-    user: process.env.PG_USER, password: process.env.PG_PASSWORD,
-    ssl: process.env.PG_SSL === 'true',
-  }, source: 'env_host' };
-  return { cfg: null, source: 'none' };
-}
-
+// ── Сохранение конфига ─────────────────────────────────────────────────────
 async function persistPgConfig(cfg) {
-  const PG_CFG_FILE = path.join(DATA_DIR, 'pg-config.json');
-  try {
-    ensureDir();
-    if (cfg) fs.writeFileSync(PG_CFG_FILE, JSON.stringify(cfg), 'utf8');
-    else if (fs.existsSync(PG_CFG_FILE)) fs.unlinkSync(PG_CFG_FILE);
-  } catch {}
-  const prisma = await getPrisma();
-  if (prisma) {
-    if (cfg) await prismaKv.set(prisma, PG_CFG_KEY, cfg);
-    else await prismaKv.delete(prisma, PG_CFG_KEY);
+  ensureDir();
+  if (cfg) {
+    fs.writeFileSync(PG_CFG_FILE, JSON.stringify(cfg), 'utf8');
+    // Резервная копия — переживает git deploy если data/ — persistent volume
+    try { fs.writeFileSync(PG_ENV_FILE, JSON.stringify(cfg), 'utf8'); } catch {}
+    // Также сохраняем в store.json чтобы пережить git deploy (если data/ — persistent volume)
+    try {
+      const store = readJSON();
+      store[PG_CFG_KEY] = cfg;
+      writeJSON(store);
+    } catch {}
+    // Также сохраняем в globalThis чтобы bootstrap мог его использовать
+    g._savedConnStr = cfg.connectionString || null;
+    g._savedPgCfg = cfg.host ? { ...cfg } : null;
+  } else {
+    if (fs.existsSync(PG_CFG_FILE)) fs.unlinkSync(PG_CFG_FILE);
+    if (fs.existsSync(PG_ENV_FILE)) try { fs.unlinkSync(PG_ENV_FILE); } catch {}
+    // Удаляем из store.json тоже
+    try {
+      const store = readJSON();
+      delete store[PG_CFG_KEY];
+      writeJSON(store);
+    } catch {}
+    g._savedConnStr = null;
+    g._savedPgCfg = null;
+  }
+  // Сбрасываем пул чтобы пересоздать с новым конфигом
+  g._pgPool = null; g._pgReady = false; g._pgPoolKey = null; g._pgInitPromise = null;
+
+  // Сохраняем конфиг в саму БД (чтобы пережить git deploy)
+  if (cfg) {
+    try {
+      const pool = await getPool();
+      if (pool) {
+        await pool.query(
+          `INSERT INTO kv(key,value,updated_at) VALUES($1,$2,NOW()) ON CONFLICT(key) DO UPDATE SET value=$2, updated_at=NOW()`,
+          [PG_CFG_KEY, JSON.stringify(cfg)]
+        );
+        console.log('[Store] Конфиг БД сохранён в kv-таблицу (устойчиво к деплоям)');
+      }
+    } catch (e) {
+      console.warn('[Store] Не удалось сохранить конфиг в kv:', e.message);
+    }
   }
 }
 
 // ── Handler ────────────────────────────────────────────────────────────────
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).end();
-  const { action, key, value, data, config } = req.body || {};
+  const { action, key, value, data, config, intentional_delete } = req.body || {};
 
+  // ── Конфиг ──
   if (action === 'pg_save') {
     await persistPgConfig(config || null);
     return res.json({ ok: true });
@@ -146,72 +510,287 @@ export default async function handler(req, res) {
 
   if (action === 'pg_get') {
     try {
-      const { cfg, source } = await getPgConfigForUI();
+      const cfg = readPgConfig();
       if (!cfg) return res.json({ ok: true, config: null, source: 'none' });
-      const { password, ...safe } = cfg;
-      safe._passwordSaved = !!(password);
-      return res.json({ ok: true, config: safe, source });
-    } catch (e) {
-      return res.json({ ok: true, config: null, source: 'none', error: e.message });
-    }
+      const { password, source, ...safe } = cfg;
+      safe._passwordSaved = !!password;
+      return res.json({ ok: true, config: safe, source: source || 'unknown' });
+    } catch (e) { return res.json({ ok: true, config: null, source: 'none', error: e.message }); }
   }
 
+  // ── Логи подключения к БД ──
+  if (action === 'pg_logs') {
+    const pool = g._pgPool;
+    return res.json({
+      ok: true,
+      logs: [...(g._pgLogs || [])],
+      poolStatus: {
+        ready: !!g._pgReady,
+        hasPool: !!pool,
+        totalCount: pool?.totalCount ?? null,
+        idleCount: pool?.idleCount ?? null,
+        waitingCount: pool?.waitingCount ?? null,
+      },
+      uptime: process.uptime(),
+      memoryMB: Math.round(process.memoryUsage().rss / 1024 / 1024),
+    });
+  }
+
+  // ── Тест подключения ──
   if (action === 'pg_test') {
     if (!config) return res.json({ ok: false, error: 'Нет конфига' });
     try {
       const { Pool } = await import('pg');
       const opts = config.connectionString
         ? { connectionString: config.connectionString, ssl: { rejectUnauthorized: false }, max: 1, connectionTimeoutMillis: 8000 }
-        : { host: config.host, port: parseInt(config.port) || 5432, database: config.database, user: config.user, password: config.password, ssl: config.ssl ? { rejectUnauthorized: false } : false, max: 1, connectionTimeoutMillis: 8000 };
+        : { host: config.host, port: parseInt(config.port) || 5432, database: config.database,
+            user: config.user, password: config.password,
+            ssl: config.ssl ? { rejectUnauthorized: false } : false, max: 1, connectionTimeoutMillis: 8000 };
       const pool = new Pool(opts);
       const r = await pool.query('SELECT version(), current_database() as db, pg_size_pretty(pg_database_size(current_database())) as sz');
       await pool.query(`CREATE TABLE IF NOT EXISTS kv(key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TIMESTAMPTZ DEFAULT NOW())`);
       const cnt = await pool.query('SELECT COUNT(*) as c FROM kv');
       await pool.end();
       return res.json({ ok: true, version: r.rows[0].version, database: r.rows[0].db, size: r.rows[0].sz, rows: parseInt(cnt.rows[0].c) });
+    } catch (e) { return res.json({ ok: false, error: e.message }); }
+  }
+
+  // ── Диагностика ──
+  if (action === 'pg_diag') {
+    const cfg = readPgConfig();
+    let pgTest = null, pgKeys = [], rowCounts = {}, dbSize = '—', pgError = null;
+    const pool = await getPool();
+    if (pool) {
+      try {
+        const rows = await pool.query('SELECT key, value FROM kv ORDER BY key');
+        const cnt = rows.rows.length;
+        pgKeys = rows.rows.map(r => r.key);
+        pgTest = { ok: true, rows: cnt };
+        for (const row of rows.rows) {
+          try {
+            const p = JSON.parse(row.value);
+            if (Array.isArray(p)) rowCounts[row.key] = p.length;
+            else if (p && typeof p === 'object') {
+              rowCounts[row.key] = Object.keys(p).length;
+              if (row.key === 'cm_users')
+                rowCounts['_total_coins'] = Object.values(p).reduce((s, u) => s + (u?.balance || 0), 0);
+            } else rowCounts[row.key] = 1;
+          } catch { rowCounts[row.key] = 1; }
+        }
+        rowCounts['_total_keys'] = cnt;
+        const szRes = await pool.query('SELECT pg_size_pretty(pg_database_size(current_database())) as size');
+        dbSize = szRes.rows[0]?.size || '—';
+      } catch (e) { pgTest = { ok: false, error: e.message }; pgError = e.message; }
+    }
+    const jsonData = readJSON();
+    return res.json({
+      ok: true, usingPg: !!pool, source: cfg?.source || 'none',
+      hasPgCfgFile: fs.existsSync(PG_CFG_FILE),
+      hasEnvPg: !!process.env.PG_HOST, hasEnvDbUrl: !!process.env.DATABASE_URL,
+      cfgHost: cfg?.host || (cfg?.connectionString ? '(connectionString)' : null),
+      pgTest, pgKeys, rowCounts, dbSize, pgError,
+      jsonKeys: Object.keys(jsonData).filter(k => k !== PG_CFG_KEY),
+      dataVersion: g._dataVersion,
+      cwd: process.cwd(),
+    });
+  }
+
+  // ── Миграция JSON → PG ──
+  if (action === 'migrate') {
+    const pool = await getPool();
+    if (!pool) return res.json({ ok: false, error: 'PostgreSQL не подключён' });
+    try {
+      const source = data || readJSON();
+      await pgKv.setMany(pool, source);
+      return res.json({ ok: true, migrated: Object.keys(source).length });
+    } catch (e) { return res.json({ ok: false, error: e.message }); }
+  }
+
+  // ── Версия данных (для polling без лишних запросов) ──
+  if (action === 'version') {
+    res.setHeader('Cache-Control', 'no-store');
+    return res.json({ ok: true, version: g._dataVersion });
+  }
+
+  // ── Ежедневные начисления (трудодни + дни рождения) ──
+  // Выполняется на сервере атомарно, чтобы клиент не затирал данные
+  if (action === 'daily_grants') {
+    try {
+      const pool = await getPool();
+      const store = pool ? {
+        get: (k) => pgKv.get(pool, k),
+        set: (k, v) => pgKv.set(pool, k, v),
+      } : {
+        get: (k) => { const s = readJSON(); return Promise.resolve(s[k] ?? null); },
+        set: (k, v) => lock(() => { const s = readJSON(); s[k] = v; writeJSON(s); bumpVersion(); }),
+      };
+
+      const todayDate = new Date();
+      const todayStr = todayDate.toISOString().slice(0, 10);
+      const currentYear = String(todayDate.getFullYear());
+
+      // Читаем актуальные данные с сервера
+      const users     = (await store.get('cm_users'))     || {};
+      const appearance = (await store.get('cm_appearance')) || {};
+      const wdGrant   = (await store.get('cm_workday_grant'))  || '';
+      const bdGrant   = (await store.get('cm_birthday_grant')) || '';
+
+      let updatedUsers = { ...users };
+      const grants = { workday: 0, birthday: 0 };
+
+      // ── Трудодни ──
+      if (wdGrant !== todayStr) {
+        const wdCfg = appearance.workdays || {};
+        const wdCoins = Number(wdCfg.coinsPerDay || 0);
+        if (wdCoins > 0) {
+          const overrides = wdCfg.userOverrides || {};
+          const globalMode = wdCfg.globalMode || 'employment';
+          const globalCustomDate = wdCfg.globalCustomDate || '';
+          Object.entries(users).forEach(([uname, ud]) => {
+            if (!ud || ud.role === 'admin') return;
+            const override = overrides[uname];
+            const mode = override?.mode || globalMode;
+            let startStr = null;
+            if (mode === 'employment') startStr = ud.employmentDate || null;
+            else if (mode === 'activation') startStr = ud.activationDate || ud.createdAt || null;
+            else if (mode === 'custom') startStr = override?.customDate || globalCustomDate || null;
+            if (!startStr) return;
+            const start = new Date(startStr);
+            if (isNaN(start.getTime()) || start > todayDate) return;
+            updatedUsers[uname] = { ...updatedUsers[uname], balance: (updatedUsers[uname].balance || 0) + wdCoins };
+            grants.workday++;
+          });
+          await store.set('cm_workday_grant', todayStr);
+        } else {
+          // coinsPerDay = 0, просто отмечаем что проверили
+          await store.set('cm_workday_grant', todayStr);
+        }
+      }
+
+      // ── Дни рождения ──
+      if (bdGrant !== currentYear) {
+        const bonusEnabled = appearance.birthdayEnabled !== false;
+        const bonusAmount = parseInt(appearance.birthdayBonus || 100);
+        if (bonusEnabled && bonusAmount > 0) {
+          Object.entries(users).forEach(([uname, ud]) => {
+            if (!ud || !ud.birthdate) return;
+            const bd = new Date(ud.birthdate);
+            if (isNaN(bd)) return;
+            if (bd.getDate() === todayDate.getDate() && bd.getMonth() === todayDate.getMonth()) {
+              updatedUsers[uname] = { ...updatedUsers[uname], balance: (updatedUsers[uname].balance || 0) + bonusAmount };
+              grants.birthday++;
+            }
+          });
+          if (grants.birthday > 0) await store.set('cm_birthday_grant', currentYear);
+        }
+      }
+
+      // Сохраняем пользователей только если что-то изменилось
+      if (grants.workday > 0 || grants.birthday > 0) {
+        await store.set('cm_users', updatedUsers);
+      }
+
+      return res.json({ ok: true, grants, users: updatedUsers, version: g._dataVersion });
     } catch (e) {
+      console.error('[daily_grants]', e);
       return res.json({ ok: false, error: e.message });
     }
   }
 
-  if (action === 'pg_diag') {
-    const prisma = await getPrisma();
-    const { cfg, source } = await getPgConfigForUI().catch(() => ({ cfg: null, source: 'error' }));
-    let pgTest = null, pgKeys = [];
-    if (prisma) {
-      try {
-        const cnt = await prisma.kv.count();
-        const keys = await prisma.kv.findMany({ select: { key: true }, orderBy: { key: 'asc' } });
-        pgTest = { ok: true, rows: cnt };
-        pgKeys = keys.map(r => r.key);
-      } catch (e) { pgTest = { ok: false, error: e.message }; }
-    }
-    const PG_CFG_FILE = path.join(DATA_DIR, 'pg-config.json');
-    return res.json({
-      ok: true, usingPg: !!prisma, usingPrisma: true, source,
-      hasPgCfgFile: fs.existsSync(PG_CFG_FILE),
-      hasEnvPg: !!process.env.PG_HOST, hasEnvDbUrl: !!process.env.DATABASE_URL,
-      cfgHost: cfg?.host || (cfg?.connectionString ? '(connectionString)' : null),
-      pgTest, pgKeys, cwd: process.cwd(),
-    });
-  }
-
-  // ── Основные data-операции ──
+  // ── Основные CRUD ──
   try {
-    const prisma = await getPrisma();
+    const pool = await getPool();
 
-    if (prisma) {
-      if (action === 'get') return res.json({ ok: true, value: await prismaKv.get(prisma, key) });
-      if (action === 'set') { await prismaKv.set(prisma, key, value); return res.json({ ok: true }); }
-      if (action === 'delete') { await prismaKv.delete(prisma, key); return res.json({ ok: true }); }
-      if (action === 'getAll') return res.json({ ok: true, data: await prismaKv.getAll(prisma) });
-      if (action === 'setMany') { await prismaKv.setMany(prisma, data); return res.json({ ok: true }); }
+    // Защита: никогда не сохранять cm_users как пустой объект/null
+    // и никогда не терять пароли пользователей
+    if (action === 'set' && key === 'cm_users') {
+      if (!value || typeof value !== 'object' || Object.keys(value).length === 0) {
+        console.warn('[Store] Попытка сохранить пустой cm_users — отклонено');
+        return res.json({ ok: false, error: 'Cannot save empty users' });
+      }
+      // Мержим с существующими данными на сервере чтобы не терять пользователей
+      const existingUsers = pool 
+        ? await pgKv.get(pool, 'cm_users') 
+        : (readJSON()['cm_users'] || null);
+      if (existingUsers && typeof existingUsers === 'object') {
+        // Проверяем что ни один пользователь не потерял пароль
+        Object.keys(value).forEach(k => {
+          if (value[k] && typeof value[k] === 'object') {
+            if (!value[k].password && existingUsers[k]?.password) {
+              value[k].password = existingUsers[k].password;
+            }
+            if (value[k].balance === undefined && existingUsers[k]?.balance !== undefined) {
+              value[k].balance = existingUsers[k].balance;
+            }
+          }
+        });
+        // Добавляем пользователей которые есть на сервере но отсутствуют в запросе
+        Object.keys(existingUsers).forEach(k => {
+          if (!value[k] && existingUsers[k]) {
+            // Если это intentional delete — не восстанавливаем
+            if (intentional_delete && intentional_delete === k) return;
+            // Пользователь пропал из запроса — сохраняем его
+            value[k] = existingUsers[k];
+          }
+        });
+      }
+    }
+
+    if (pool) {
+      if (action === 'get') {
+        const value = await queryWithRetry(() => pgKv.get(g._pgPool || pool, key));
+        return res.json({ ok: true, value });
+      }
+      if (action === 'set') {
+        await queryWithRetry(() => pgKv.set(g._pgPool || pool, key, value));
+        return res.json({ ok: true });
+      }
+      if (action === 'delete') {
+        await queryWithRetry(() => pgKv.delete(g._pgPool || pool, key));
+        return res.json({ ok: true });
+      }
+      if (action === 'getAll') {
+        const now = Date.now();
+
+        // ETag-проверка: если клиент уже имеет актуальную версию — отвечаем без данных
+        const clientVersion = req.body?.clientVersion || null;
+        if (clientVersion && String(clientVersion) === String(g._dataVersion) && g._allCache) {
+          res.setHeader('Cache-Control', 'no-store');
+          // Возвращаем 200 с notModified:true — НЕ 304, у которого нет тела (ломает res.json на клиенте)
+          return res.json({ ok: true, notModified: true, version: g._dataVersion });
+        }
+
+        // Серверный кэш — не дёргаем БД при каждом запросе
+        if (g._allCache && now < g._allCacheExpiry) {
+          const payload = { ok: true, data: g._allCache, version: g._dataVersion };
+          return sendCompressed(req, res, payload);
+        }
+        const freshData = await queryWithRetry(() => pgKv.getAll(g._pgPool || pool));
+        g._allCache = freshData;
+        g._allCacheExpiry = now + ALL_CACHE_TTL;
+        const payload = { ok: true, data: freshData, version: g._dataVersion };
+        return sendCompressed(req, res, payload);
+      }
+      if (action === 'setMany') {
+        await queryWithRetry(() => pgKv.setMany(g._pgPool || pool, data));
+        return res.json({ ok: true });
+      }
     } else {
-      if (action === 'get') { const s = readJSON(); return res.json({ ok: true, value: s[key] !== undefined ? s[key] : null }); }
-      if (action === 'getAll') return res.json({ ok: true, data: readJSON() });
-      if (action === 'set') { await lock(() => { const s = readJSON(); s[key] = value; writeJSON(s); }); return res.json({ ok: true }); }
-      if (action === 'delete') { await lock(() => { const s = readJSON(); delete s[key]; writeJSON(s); }); return res.json({ ok: true }); }
-      if (action === 'setMany') { await lock(() => { const s = readJSON(); Object.assign(s, data || {}); writeJSON(s); }); return res.json({ ok: true }); }
+      // PG настроен но недоступен — сообщаем клиенту чтобы он не перезаписывал состояние
+      const pgCfgExists = !!readPgConfig();
+      if (pgCfgExists) {
+        pgLog('error', `Пул недоступен при запросе action=${action}`, { detail: 'pg_unavailable' });
+        if (action === 'getAll') return res.json({ ok: false, pg_unavailable: true, error: 'PostgreSQL временно недоступен' });
+        if (action === 'version') return res.json({ ok: true, version: g._dataVersion, pg_unavailable: true });
+        if (action === 'get')    return res.json({ ok: false, pg_unavailable: true, value: null });
+        if (action === 'set' || action === 'setMany' || action === 'delete')
+          return res.json({ ok: false, pg_unavailable: true, error: 'PostgreSQL временно недоступен' });
+      }
+      if (action === 'get')     { const s = readJSON(); return res.json({ ok: true, value: s[key] !== undefined ? s[key] : null }); }
+      if (action === 'getAll')  return res.json({ ok: true, data: readJSON(), version: g._dataVersion });
+      if (action === 'set')     { await lock(() => { const s = readJSON(); s[key] = value; writeJSON(s); bumpVersion(); }); return res.json({ ok: true }); }
+      if (action === 'delete')  { await lock(() => { const s = readJSON(); delete s[key]; writeJSON(s); bumpVersion(); }); return res.json({ ok: true }); }
+      if (action === 'setMany') { await lock(() => { const s = readJSON(); Object.assign(s, data || {}); writeJSON(s); bumpVersion(); }); return res.json({ ok: true }); }
     }
 
     return res.status(400).json({ ok: false, error: 'Unknown action' });
