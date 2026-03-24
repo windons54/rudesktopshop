@@ -1,6 +1,7 @@
 'use client';
 import React, { useState, useEffect, useMemo, useCallback, memo } from 'react';
 import Head from 'next/head';
+import LicenseActivationCard from './LicenseActivationCard.jsx';
 const XLSX = { utils: null, writeFile: null, read: null };
 if (typeof window !== 'undefined') {
   import('xlsx').then(m => { Object.assign(XLSX, m); });
@@ -527,6 +528,14 @@ function App({ initialData, initialVersion }) {
   const [pgConfig, setPgConfig] = useState(null);
   const [isPgActive, setIsPgActive] = useState(false);
   const savePgConfigState = (cfg) => { setPgConfig(cfg); setIsPgActive(!!(cfg?.host)); };
+  const [licenseState, setLicenseState] = useState({
+    loading: true,
+    configured: false,
+    valid: false,
+    blocked: true,
+    config: { serverUrl: '', hasKey: false, licenseKeyMasked: '', instanceId: null },
+    status: null,
+  });
   const [sqliteDisabled, setSqliteDisabledState] = useState(() => {
     if (typeof window === 'undefined') return false;
     return localStorage.getItem('__sqlite_disabled__') === '1';
@@ -929,6 +938,18 @@ function App({ initialData, initialVersion }) {
     };
   }, []);
 
+  useEffect(() => {
+    loadLicenseStatus(false);
+    const iv = setInterval(() => loadLicenseStatus(false), 10 * 60 * 1000);
+    return () => clearInterval(iv);
+  }, [loadLicenseStatus]);
+
+  useEffect(() => {
+    if (!licenseState.loading && !licenseState.valid && !currentUser && page !== 'login') {
+      setPage('login');
+    }
+  }, [licenseState.loading, licenseState.valid, currentUser, page]);
+
   // Получить статистику по ключам хранилища
   function getSQLiteStats() {
     try {
@@ -1084,6 +1105,80 @@ ym(${integ.ymCounterId}, "init", { clickmap:true, trackLinks:true, accurateTrack
   const saveUserDeposits = useCallback((ud) => { const data = ud || []; setUserDeposits(data); storage.set("cm_user_deposits", data); }, []);
   const saveTaskSubmissions = useCallback((ts) => { setTaskSubmissions(ts); storage.set("cm_task_submissions", ts); }, []);
 
+  const loadLicenseStatus = useCallback(async (force = false) => {
+    setLicenseState(prev => ({ ...prev, loading: true }));
+    try {
+      const res = await fetch('/api/license', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: force ? 'refresh' : 'status', force }),
+      });
+      const data = await res.json();
+      setLicenseState({
+        loading: false,
+        configured: !!data.configured,
+        valid: !!data.valid,
+        blocked: !!data.blocked,
+        config: data.config || { serverUrl: '', hasKey: false, licenseKeyMasked: '', instanceId: null },
+        status: data.status || null,
+      });
+      return data;
+    } catch (e) {
+      const fail = {
+        loading: false,
+        configured: false,
+        valid: false,
+        blocked: true,
+        config: { serverUrl: '', hasKey: false, licenseKeyMasked: '', instanceId: null },
+        status: { valid: false, message: e.message || 'Не удалось проверить лицензию' },
+      };
+      setLicenseState(fail);
+      return fail;
+    }
+  }, []);
+
+  const activateLicense = useCallback(async ({ serverUrl, licenseKey }) => {
+    const res = await fetch('/api/license', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'activate', serverUrl, licenseKey }),
+    });
+    const data = await res.json();
+    if (!res.ok || data.ok === false) {
+      notify(data.error || 'Не удалось сохранить лицензию', 'err');
+      return data;
+    }
+    setLicenseState({
+      loading: false,
+      configured: !!data.configured,
+      valid: !!data.valid,
+      blocked: !!data.blocked,
+      config: data.config || { serverUrl: '', hasKey: false, licenseKeyMasked: '', instanceId: null },
+      status: data.status || null,
+    });
+    if (data.valid) notify('Лицензия успешно активирована ✓');
+    else notify(data.status?.message || 'Лицензия сохранена, но проверка не пройдена', 'err');
+    return data;
+  }, [notify]);
+
+  const clearLicense = useCallback(async () => {
+    const res = await fetch('/api/license', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'clear' }),
+    });
+    const data = await res.json();
+    setLicenseState({
+      loading: false,
+      configured: false,
+      valid: false,
+      blocked: true,
+      config: { serverUrl: '', hasKey: false, licenseKeyMasked: '', instanceId: null },
+      status: null,
+    });
+    if (data.ok) notify('Лицензия сброшена', 'ok');
+  }, [notify]);
+
   const [cartAnimating, setCartAnimating] = useState(false);
   const addToCart = (product) => {
     if (product.size && product.sizeStock && product.sizeStock[product.size] === 0) {
@@ -1169,6 +1264,7 @@ ym(${integ.ymCounterId}, "init", { clickmap:true, trackLinks:true, accurateTrack
   };
 
   const isAdmin = currentUser && users[currentUser]?.role === "admin";
+  const licenseBlocked = !licenseState.loading && !licenseState.valid;
   const allProducts = customProducts !== null ? customProducts : PRODUCTS;
   const activeProducts = useMemo(() => allProducts.filter(p => !p.inactive), [allProducts]);
   const allCategories = customCategories !== null ? customCategories : ["Одежда", "Аксессуары", "Посуда", "Канцелярия"];
@@ -1189,6 +1285,24 @@ ym(${integ.ymCounterId}, "init", { clickmap:true, trackLinks:true, accurateTrack
   return (
     <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", background: appearance.pageBg || undefined }}>
       {toast && <div className={`toast toast-${toast.type}`}>{toast.msg}</div>}
+
+      {licenseBlocked && page !== 'login' && (
+        <div className="modal-overlay" style={{ zIndex: 10000, background: 'rgba(15,23,42,0.72)', backdropFilter: 'blur(6px)' }}>
+          <div onClick={e => e.stopPropagation()}>
+            <LicenseActivationCard
+              mode="overlay"
+              licenseState={licenseState}
+              isAdmin={!!isAdmin}
+              currentUser={currentUser}
+              onActivate={activateLicense}
+              onRefresh={loadLicenseStatus}
+              onClear={clearLicense}
+              onOpenSettings={() => setPage('login')}
+              onSignOut={() => { setCurrentUser(null); _lsDel('cm_session'); setPage('login'); }}
+            />
+          </div>
+        </div>
+      )}
 
       {orderSuccess && (
         <div className="modal-overlay" style={{zIndex:9999}} onClick={() => { setOrderSuccess(false); setPage("shop"); }}>
@@ -1423,12 +1537,12 @@ ym(${integ.ymCounterId}, "init", { clickmap:true, trackLinks:true, accurateTrack
         {page === "favorites" && currentUser && <FavoritesPage products={activeProducts.filter(p => favorites.includes(p.id))} favorites={favorites} toggleFavorite={toggleFavorite} addToCart={addToCart} setPage={setPage} />}
         {page === "history" && currentUser && <HistoryPage currentUser={currentUser} transfers={transfers} orders={orders} taskSubmissions={taskSubmissions} currency={appearance.currency} />}
         {page === "cart" && <CartPage cart={cart} removeFromCart={removeFromCart} cartTotal={cartTotal} checkout={checkout} currentUser={currentUser} setPage={setPage} users={users} currency={appearance.currency} />}
-        {page === "login" && <LoginPage users={users} setCurrentUser={setCurrentUser} setPage={setPage} notify={notify} appearance={appearance} saveUsers={saveUsers} />}
+        {page === "login" && <LoginPage users={users} setCurrentUser={setCurrentUser} setPage={setPage} notify={notify} appearance={appearance} saveUsers={saveUsers} licenseState={licenseState} />}
         {page === "register" && <RegisterPage users={users} saveUsers={saveUsers} setCurrentUser={setCurrentUser} setPage={setPage} notify={notify} appearance={appearance} />}
         
         {page === "orders" && currentUser && <OrdersPage orders={orders.filter(o => o.user === currentUser)} currency={appearance.currency} />}
         {page === "transfer" && currentUser && <TransferPage currentUser={currentUser} users={users} saveUsers={saveUsers} transfers={transfers} saveTransfers={saveTransfers} notify={notify} setPage={setPage} currency={appearance.currency} />}
-        {page === "settings" && currentUser && <SettingsPage currentUser={currentUser} users={users} saveUsers={saveUsers} notify={notify} setPage={setPage} dbConfig={dbConfig} saveDbConfig={saveDbConfig} refreshDbConfig={refreshDbConfig} pgConfig={pgConfig} savePgConfig={savePgConfigState} isPgActive={isPgActive} isAdmin={isAdmin} orders={orders} saveOrders={saveOrders} products={allProducts} saveProducts={saveProducts} categories={allCategories} saveCategories={saveCategories} appearance={appearance} saveAppearance={saveAppearance} transfers={transfers} saveTransfers={saveTransfers} markOrdersSeen={markOrdersSeen} faq={faq} saveFaq={saveFaq} videos={videos} saveVideos={saveVideos} tasks={tasks} saveTasks={saveTasks} taskSubmissions={taskSubmissions} saveTaskSubmissions={saveTaskSubmissions} auctions={auctions} saveAuctions={saveAuctions} lotteries={lotteries} saveLotteries={saveLotteries} polls={polls} savePolls={savePolls} deposits={deposits} saveDeposits={saveDeposits} userDeposits={userDeposits} saveUserDeposits={saveUserDeposits} users={users} saveUsers={saveUsers} sqliteDisabled={sqliteDisabled} setSqliteDisabled={setSqliteDisabled} addIssued={addIssued} />}
+        {page === "settings" && currentUser && <SettingsPage currentUser={currentUser} users={users} saveUsers={saveUsers} notify={notify} setPage={setPage} dbConfig={dbConfig} saveDbConfig={saveDbConfig} refreshDbConfig={refreshDbConfig} pgConfig={pgConfig} savePgConfig={savePgConfigState} isPgActive={isPgActive} isAdmin={isAdmin} orders={orders} saveOrders={saveOrders} products={allProducts} saveProducts={saveProducts} categories={allCategories} saveCategories={saveCategories} appearance={appearance} saveAppearance={saveAppearance} transfers={transfers} saveTransfers={saveTransfers} markOrdersSeen={markOrdersSeen} faq={faq} saveFaq={saveFaq} videos={videos} saveVideos={saveVideos} tasks={tasks} saveTasks={saveTasks} taskSubmissions={taskSubmissions} saveTaskSubmissions={saveTaskSubmissions} auctions={auctions} saveAuctions={saveAuctions} lotteries={lotteries} saveLotteries={saveLotteries} polls={polls} savePolls={savePolls} deposits={deposits} saveDeposits={saveDeposits} userDeposits={userDeposits} saveUserDeposits={saveUserDeposits} users={users} saveUsers={saveUsers} sqliteDisabled={sqliteDisabled} setSqliteDisabled={setSqliteDisabled} addIssued={addIssued} licenseState={licenseState} activateLicense={activateLicense} refreshLicenseStatus={loadLicenseStatus} clearLicense={clearLicense} />}
       </main>
 
       <footer className="rd-footer" style={appearance.footerBg ? {background: appearance.footerBg} : {}}>
@@ -3457,7 +3571,7 @@ function CartPage({ cart, removeFromCart, cartTotal, checkout, currentUser, setP
 
 // ── LOGIN ─────────────────────────────────────────────────────────────────
 
-function LoginPage({ users, setCurrentUser, setPage, notify, appearance, saveUsers }) {
+function LoginPage({ users, setCurrentUser, setPage, notify, appearance, saveUsers, licenseState }) {
   const [form, setForm] = useState({ username: "", password: "", remember: true });
   const submit = () => {
     const u = users[form.username];
@@ -3526,6 +3640,11 @@ function LoginPage({ users, setCurrentUser, setPage, notify, appearance, saveUse
       <div className="page-eyebrow">Вход</div>
       <h2 className="page-title" style={{fontSize:"32px"}}>Войдите в аккаунт</h2>
       <div className="auth-card">
+        {!licenseState?.loading && !licenseState?.valid && (
+          <div style={{marginBottom:"14px",padding:"10px 12px",borderRadius:"10px",background:"rgba(199,22,24,0.08)",border:"1px solid rgba(199,22,24,0.18)",color:"var(--rd-red)",fontSize:"13px",lineHeight:1.6}}>
+            Магазин ещё не активирован. Войдите под администратором и введите адрес сервера лицензий и ключ активации.
+          </div>
+        )}
         {bx24.enabled && (
           <>
             <button
@@ -5931,7 +6050,7 @@ volumes:
   );
 }
 
-function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbConfig, refreshDbConfig, pgConfig, savePgConfig, isPgActive, isAdmin, orders, saveOrders, products, saveProducts, categories, saveCategories, appearance, saveAppearance, markOrdersSeen, transfers, saveTransfers, faq, saveFaq, videos, saveVideos, tasks, saveTasks, taskSubmissions, saveTaskSubmissions, auctions, saveAuctions, lotteries, saveLotteries, polls, savePolls, deposits, saveDeposits, userDeposits, saveUserDeposits, sqliteDisabled, setSqliteDisabled, addIssued }) {
+function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbConfig, refreshDbConfig, pgConfig, savePgConfig, isPgActive, isAdmin, orders, saveOrders, products, saveProducts, categories, saveCategories, appearance, saveAppearance, markOrdersSeen, transfers, saveTransfers, faq, saveFaq, videos, saveVideos, tasks, saveTasks, taskSubmissions, saveTaskSubmissions, auctions, saveAuctions, lotteries, saveLotteries, polls, savePolls, deposits, saveDeposits, userDeposits, saveUserDeposits, sqliteDisabled, setSqliteDisabled, addIssued, licenseState, activateLicense, refreshLicenseStatus, clearLicense }) {
   const [tab, setTab] = useState("profile");
   const setTabSafe = (t) => { if (!isAdmin && t !== "profile") return; setTab(t); };
   const [adminTab, setAdminTab] = useState("products");
@@ -5966,6 +6085,11 @@ function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbC
   useEffect(() => {
     if (appearance.features) setFeatures(prev => ({ ...prev, ...appearance.features }));
   }, [JSON.stringify(appearance.features)]);
+  useEffect(() => {
+    if (isAdmin && licenseState && !licenseState.loading && !licenseState.valid) {
+      setTab('license');
+    }
+  }, [isAdmin, licenseState]);
   const user = users[currentUser] || {};
   const [form, setForm] = useState({ email: user.email || "", firstName: user.firstName || "", lastName: user.lastName || "", currentPassword: "", newPassword: "", confirmPassword: "", avatar: user.avatar || "" });
   const [ap, setAp] = useState({ ...appearance });
@@ -6374,6 +6498,7 @@ function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbC
 
   const SIDEBAR_TABS = isAdmin ? [
     { id: "profile",    icon: "👤", label: "Профиль" },
+    { id: "license",    icon: "🔐", label: "Лицензия" },
     { id: "general",    icon: "⚙️", label: "Общее" },
     { id: "appearance", icon: "🎨", label: "Внешний вид" },
     { id: "banner",     icon: "🖼️", label: "Баннер" },
@@ -6457,6 +6582,18 @@ function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbC
         </div>
 
         <div className="settings-content">
+
+          {tab === "license" && isAdmin && (
+            <LicenseActivationCard
+              licenseState={licenseState}
+              isAdmin={!!isAdmin}
+              currentUser={currentUser}
+              onActivate={activateLicense}
+              onRefresh={refreshLicenseStatus}
+              onClear={clearLicense}
+              onOpenSettings={() => setTab('license')}
+            />
+          )}
 
           {tab === "general" && isAdmin && (
             <div>

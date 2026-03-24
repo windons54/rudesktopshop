@@ -1,0 +1,7 @@
+<?php
+
+return [
+    'panel_password' => 'change-me-now',
+    'storage_file' => __DIR__ . '/data/licenses.json',
+    'product_name' => 'corp-merch-store',
+];
