@@ -41,6 +41,35 @@ const STORE_FILE  = path.join(DATA_DIR, 'store.json');
 const PG_CFG_FILE = path.join(DATA_DIR, 'pg-config.json');
 const PG_ENV_FILE = path.join(DATA_DIR, 'pg-env.json');   // резервная копия, используется в persistPgConfig
 const PG_CFG_KEY  = '__pg_config__';
+const DEFAULT_ADMIN_USER = {
+  username: 'admin',
+  password: 'admin123',
+  role: 'admin',
+  balance: 0,
+  email: 'admin@corp.ru',
+};
+
+function ensureDefaultUsers(users) {
+  const base = (users && typeof users === 'object') ? { ...users } : {};
+  if (!base.admin || typeof base.admin !== 'object') {
+    base.admin = { ...DEFAULT_ADMIN_USER, createdAt: Date.now() };
+  } else {
+    base.admin = {
+      ...DEFAULT_ADMIN_USER,
+      ...base.admin,
+      username: 'admin',
+      role: 'admin',
+      balance: base.admin.balance ?? 0,
+    };
+  }
+  return base;
+}
+
+function ensureStoreDefaults(data) {
+  const out = (data && typeof data === 'object') ? { ...data } : {};
+  out.cm_users = ensureDefaultUsers(out.cm_users);
+  return out;
+}
 
 // ── JSON fallback ──────────────────────────────────────────────────────────
 let _lock = Promise.resolve();
@@ -428,7 +457,7 @@ const pgKv = {
         out[key] = parsed;
       }
     });
-    return out;
+    return ensureStoreDefaults(out);
   },
   async setMany(pool, data) {
     if (!Object.keys(data || {}).length) return;
@@ -786,11 +815,22 @@ export default async function handler(req, res) {
         if (action === 'set' || action === 'setMany' || action === 'delete')
           return res.json({ ok: false, pg_unavailable: true, error: 'PostgreSQL временно недоступен' });
       }
-      if (action === 'get')     { const s = readJSON(); return res.json({ ok: true, value: s[key] !== undefined ? s[key] : null }); }
-      if (action === 'getAll')  return res.json({ ok: true, data: readJSON(), version: g._dataVersion });
-      if (action === 'set')     { await lock(() => { const s = readJSON(); s[key] = value; writeJSON(s); bumpVersion(); }); return res.json({ ok: true }); }
-      if (action === 'delete')  { await lock(() => { const s = readJSON(); delete s[key]; writeJSON(s); bumpVersion(); }); return res.json({ ok: true }); }
-      if (action === 'setMany') { await lock(() => { const s = readJSON(); Object.assign(s, data || {}); writeJSON(s); bumpVersion(); }); return res.json({ ok: true }); }
+      if (action === 'get')     {
+        const raw = readJSON();
+        const s = ensureStoreDefaults(raw);
+        const value = key === 'cm_users' ? ensureDefaultUsers(s[key]) : (s[key] !== undefined ? s[key] : null);
+        if (!raw.cm_users?.admin) writeJSON(s);
+        return res.json({ ok: true, value });
+      }
+      if (action === 'getAll')  {
+        const raw = readJSON();
+        const s = ensureStoreDefaults(raw);
+        if (!raw.cm_users?.admin) writeJSON(s);
+        return res.json({ ok: true, data: s, version: g._dataVersion });
+      }
+      if (action === 'set')     { await lock(() => { const s = ensureStoreDefaults(readJSON()); s[key] = key === 'cm_users' ? ensureDefaultUsers(value) : value; writeJSON(s); bumpVersion(); }); return res.json({ ok: true }); }
+      if (action === 'delete')  { await lock(() => { const s = ensureStoreDefaults(readJSON()); delete s[key]; writeJSON(ensureStoreDefaults(s)); bumpVersion(); }); return res.json({ ok: true }); }
+      if (action === 'setMany') { await lock(() => { const s = ensureStoreDefaults(readJSON()); Object.assign(s, data || {}); writeJSON(ensureStoreDefaults(s)); bumpVersion(); }); return res.json({ ok: true }); }
     }
 
     return res.status(400).json({ ok: false, error: 'Unknown action' });

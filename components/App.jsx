@@ -21,6 +21,30 @@ const PRODUCTS = [
 ];
 
 let _globalCurrency = { name: "RuDeCoin", icon: "🪙", logo: "" };
+const DEFAULT_ADMIN_USER = {
+  username: "admin",
+  password: "admin123",
+  role: "admin",
+  balance: 0,
+  email: "admin@corp.ru",
+};
+
+function ensureDefaultUsers(users) {
+  const base = (users && typeof users === 'object') ? { ...users } : {};
+  if (!base.admin || typeof base.admin !== 'object') {
+    base.admin = { ...DEFAULT_ADMIN_USER, createdAt: Date.now() };
+  } else {
+    base.admin = {
+      ...DEFAULT_ADMIN_USER,
+      ...base.admin,
+      username: "admin",
+      role: "admin",
+      balance: base.admin.balance ?? 0,
+    };
+  }
+  return base;
+}
+
 function getCurrName(currency) {
   const c = currency || _globalCurrency;
   return (c && c.name) ? c.name : "RuDeCoin";
@@ -474,7 +498,7 @@ function HistoryPage({ currentUser, transfers, orders, taskSubmissions, currency
 import { THEMES, applyTheme } from '../lib/utils.js';
 
 function App({ initialData, initialVersion }) {
-  const [users, setUsers] = useState({});
+  const [users, setUsers] = useState(() => ensureDefaultUsers({}));
   const [customProducts, setCustomProducts] = useState(null);
   const [customCategories, setCustomCategories] = useState(null);
   const [transfers, setTransfers] = useState([]);
@@ -690,11 +714,8 @@ function App({ initialData, initialVersion }) {
       }
 
       // Пользователи: берём с сервера. admin создаём ТОЛЬКО если его нет совсем
-      const base = u || {};
-      if (!base.admin) {
-        base.admin = { username: "admin", password: "admin123", role: "admin", balance: 0, email: "admin@corp.ru", createdAt: Date.now() };
-        storage.set("cm_users", base);
-      }
+      const base = ensureDefaultUsers(u);
+      if (!u?.admin) storage.set("cm_users", base);
       setUsers(base);
 
       setDbConfig({ connected: true, dbSize: Object.keys(storage.all()).length, rowCounts: getSQLiteStats() });
@@ -754,7 +775,7 @@ function App({ initialData, initialVersion }) {
         if (newUsers && typeof newUsers === 'object' && Object.keys(newUsers).length > 0) {
           // Мержим с текущим состоянием: не теряем пользователей которые уже есть в state
           setUsers(prev => {
-            const merged = { ...prev };
+            const merged = ensureDefaultUsers(prev);
             Object.keys(newUsers).forEach(k => {
               if (newUsers[k] && typeof newUsers[k] === 'object') {
                 // Для каждого пользователя: мержим поля, не теряем password/role/balance
@@ -770,7 +791,7 @@ function App({ initialData, initialVersion }) {
                 }
               }
             });
-            return merged;
+            return ensureDefaultUsers(merged);
           });
           // Восстановление сессии: если currentUser не установлен, но сессия есть в localStorage
           const savedSession = _lsGet("cm_session");
@@ -944,7 +965,7 @@ function App({ initialData, initialVersion }) {
     }
     
     // Гарантируем что у каждого пользователя есть обязательные поля
-    const safe = { ...u };
+    const safe = ensureDefaultUsers(u);
     Object.keys(safe).forEach(k => {
       if (safe[k] && typeof safe[k] === 'object') {
         if (!safe[k].role) safe[k].role = (k === 'admin') ? 'admin' : 'user';
