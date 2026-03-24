@@ -950,6 +950,8 @@ function App({ initialData, initialVersion }) {
     }
   }, [licenseState.loading, licenseState.valid, currentUser, page]);
 
+  const notify = (msg, type = "ok") => { setToast({ msg, type }); setTimeout(() => setToast(null), 3200); pushNotif(msg, type); };
+
   // Получить статистику по ключам хранилища
   function getSQLiteStats() {
     try {
@@ -972,8 +974,6 @@ function App({ initialData, initialVersion }) {
     const totalKeys = Object.keys(all).length;
     setDbConfig({ connected: storage.isReady(), dbSize: totalKeys, rowCounts: getSQLiteStats() });
   };
-
-  const notify = (msg, type = "ok") => { setToast({ msg, type }); setTimeout(() => setToast(null), 3200); pushNotif(msg, type); };
 
   const saveUsers = (u) => {
     // Гарантируем что пользовательские данные не потеряются
