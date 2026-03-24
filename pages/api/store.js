@@ -85,6 +85,29 @@ function writeJSON(data) {
   try { ensureDir(); fs.writeFileSync(STORE_FILE, JSON.stringify(data), 'utf8'); } catch (e) { console.error(e); }
 }
 
+function writeRootPgEnv(cfg) {
+  const lines = [
+    '# pg.env — настройки подключения к PostgreSQL',
+    '# Обновляется из UI и имеет приоритет при чтении конфига.',
+    '# Если используете DATABASE_URL, PG_* поля можно оставить пустыми.',
+    '',
+  ];
+
+  if (cfg?.connectionString) {
+    lines.push(`DATABASE_URL=${cfg.connectionString}`);
+    lines.push(`PG_SSL=${cfg.ssl ? 'true' : 'false'}`);
+  } else if (cfg?.host || cfg?.user || cfg?.database || cfg?.password) {
+    lines.push(`PG_HOST=${cfg.host || ''}`);
+    lines.push(`PG_PORT=${cfg.port || 5432}`);
+    lines.push(`PG_DATABASE=${cfg.database || ''}`);
+    lines.push(`PG_USER=${cfg.user || ''}`);
+    lines.push(`PG_PASSWORD=${cfg.password || ''}`);
+    lines.push(`PG_SSL=${cfg.ssl ? 'true' : 'false'}`);
+  }
+
+  fs.writeFileSync(path.join(process.cwd(), 'pg.env'), lines.join('\n') + '\n', 'utf8');
+}
+
 // ── Читаем конфиг PG — делегируем в lib/pg-config-reader.js ───────────────
 // includeStoreJson: true — включает fallback на store.json[__pg_config__]
 function readPgConfig() {
@@ -482,6 +505,7 @@ const pgKv = {
 async function persistPgConfig(cfg) {
   ensureDir();
   if (cfg) {
+    try { writeRootPgEnv(cfg); } catch (e) { console.warn('[Store] Не удалось обновить root pg.env:', e.message); }
     fs.writeFileSync(PG_CFG_FILE, JSON.stringify(cfg), 'utf8');
     // Резервная копия — переживает git deploy если data/ — persistent volume
     try { fs.writeFileSync(PG_ENV_FILE, JSON.stringify(cfg), 'utf8'); } catch {}
@@ -495,6 +519,7 @@ async function persistPgConfig(cfg) {
     g._savedConnStr = cfg.connectionString || null;
     g._savedPgCfg = cfg.host ? { ...cfg } : null;
   } else {
+    try { writeRootPgEnv(null); } catch (e) { console.warn('[Store] Не удалось очистить root pg.env:', e.message); }
     if (fs.existsSync(PG_CFG_FILE)) fs.unlinkSync(PG_CFG_FILE);
     if (fs.existsSync(PG_ENV_FILE)) try { fs.unlinkSync(PG_ENV_FILE); } catch {}
     // Удаляем из store.json тоже
