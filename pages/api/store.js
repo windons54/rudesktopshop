@@ -861,6 +861,31 @@ export default async function handler(req, res) {
     return res.status(400).json({ ok: false, error: 'Unknown action' });
   } catch (e) {
     console.error('[Store] Ошибка:', e);
+    if (isConnectionError(e)) {
+      const pgCfgExists = !!readPgConfig();
+      if (pgCfgExists) {
+        pgLog('error', `Fallback после ошибки подключения action=${action}`, { detail: e.code || e.message });
+        if (action === 'getAll') {
+          const raw = readJSON();
+          const s = ensureStoreDefaults(raw);
+          if (!raw.cm_users?.admin) writeJSON(s);
+          return res.json({ ok: true, data: s, version: g._dataVersion, pg_unavailable: true });
+        }
+        if (action === 'version') {
+          return res.json({ ok: true, version: g._dataVersion, pg_unavailable: true });
+        }
+        if (action === 'get') {
+          const raw = readJSON();
+          const s = ensureStoreDefaults(raw);
+          const safeValue = key === 'cm_users' ? ensureDefaultUsers(s[key]) : (s[key] !== undefined ? s[key] : null);
+          if (!raw.cm_users?.admin) writeJSON(s);
+          return res.json({ ok: true, value: safeValue, pg_unavailable: true });
+        }
+        if (action === 'set' || action === 'setMany' || action === 'delete') {
+          return res.json({ ok: false, pg_unavailable: true, error: 'PostgreSQL временно недоступен' });
+        }
+      }
+    }
     return res.status(500).json({ ok: false, error: e.message });
   }
 }
