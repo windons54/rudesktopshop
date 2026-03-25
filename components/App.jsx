@@ -1022,12 +1022,6 @@ function App({ initialData, initialVersion }) {
   }, []);
 
   useEffect(() => {
-    loadLicenseStatus(false);
-    const iv = setInterval(() => loadLicenseStatus(false), 10 * 60 * 1000);
-    return () => clearInterval(iv);
-  }, [loadLicenseStatus]);
-
-  useEffect(() => {
     if (!licenseState.loading && !licenseState.valid && !currentUser && page !== 'login') {
       setPage('login');
     }
@@ -1261,6 +1255,12 @@ ym(${integ.ymCounterId}, "init", { clickmap:true, trackLinks:true, accurateTrack
     });
     if (data.ok) notify('Лицензия сброшена', 'ok');
   }, [notify]);
+
+  useEffect(() => {
+    loadLicenseStatus(false);
+    const iv = setInterval(() => loadLicenseStatus(false), 10 * 60 * 1000);
+    return () => clearInterval(iv);
+  }, [loadLicenseStatus]);
 
   const [cartAnimating, setCartAnimating] = useState(false);
   const addToCart = (product) => {
