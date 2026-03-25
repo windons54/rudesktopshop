@@ -6232,31 +6232,24 @@ function SettingsPage({ currentUser, users, saveUsers, notify, dbConfig, saveDbC
       }
       
       // 2. Если режим 'new' - мигрируем данные
+      let migrationPayload = null;
       if (pgActivationMode === 'new') {
         notify("Миграция данных из SQLite в PostgreSQL...", "ok");
-        const all = storage.all();
-        const migrateRes = await fetch('/api/store', { 
-          method: 'POST', 
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ action: 'setMany', data: all }) 
-        });
-        const migrateData = await migrateRes.json();
-        if (!migrateData.ok) { 
-          notify("Ошибка миграции: " + migrateData.error, "err"); 
-          setPgTesting(false); 
-          return; 
-        }
-        notify("✓ Мигрировано " + Object.keys(all).length + " ключей", "ok");
+        migrationPayload = storage.all();
       }
       
-      // 3. Сохраняем конфиг и активируем PostgreSQL
+      // 3. Сохраняем конфиг и активируем PostgreSQL атомарно на сервере
       const r2 = await fetch('/api/store', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'pg_save', config: cfg }) });
+        body: JSON.stringify({ action: 'pg_activate', config: cfg, data: migrationPayload }) });
       const saved = await r2.json();
       if (!saved.ok) { 
-        notify("Ошибка сохранения конфига: " + (saved.error||''), "err"); 
+        notify("Ошибка активации PostgreSQL: " + (saved.error||''), "err"); 
         setPgTesting(false); 
         return; 
+      }
+
+      if (pgActivationMode === 'new' && migrationPayload) {
+        notify("✓ Мигрировано " + Object.keys(migrationPayload).length + " ключей", "ok");
       }
       
       savePgConfig(cfg);

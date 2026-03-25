@@ -108,6 +108,52 @@ function writeRootPgEnv(cfg) {
   fs.writeFileSync(path.join(process.cwd(), 'pg.env'), lines.join('\n') + '\n', 'utf8');
 }
 
+function buildPoolOptions(config, overrides = {}) {
+  const ssl = config?.connectionString
+    ? { rejectUnauthorized: false }
+    : (config?.ssl ? { rejectUnauthorized: false } : false);
+
+  const base = {
+    max: 1,
+    connectionTimeoutMillis: 8000,
+    idleTimeoutMillis: 10000,
+    ...overrides,
+  };
+
+  if (config?.connectionString) {
+    return { ...base, connectionString: config.connectionString, ssl };
+  }
+
+  return {
+    ...base,
+    host: config?.host,
+    port: parseInt(config?.port, 10) || 5432,
+    database: config?.database,
+    user: config?.user,
+    password: config?.password,
+    ssl,
+  };
+}
+
+async function createPoolFromConfig(config, overrides = {}) {
+  const { Pool } = await import('pg');
+  return new Pool(buildPoolOptions(config, overrides));
+}
+
+function resetPgRuntimeState() {
+  if (g._pgPool) {
+    try { g._pgPool.end(); } catch {}
+  }
+  g._pgPool = null;
+  g._pgReady = false;
+  g._pgPoolKey = null;
+  g._pgInitPromise = null;
+  g._pgLastError = null;
+  g._pgDisabledUntil = 0;
+  g._pgDisabledKey = null;
+  g._pgDisabledReason = null;
+}
+
 // ── Читаем конфиг PG — делегируем в lib/pg-config-reader.js ───────────────
 // includeStoreJson: true — включает fallback на store.json[__pg_config__]
 function readPgConfig() {
@@ -560,8 +606,8 @@ async function persistPgConfig(cfg) {
     g._savedConnStr = null;
     g._savedPgCfg = null;
   }
-  // Сбрасываем пул чтобы пересоздать с новым конфигом
-  g._pgPool = null; g._pgReady = false; g._pgPoolKey = null; g._pgInitPromise = null;
+  // Сбрасываем runtime-состояние чтобы новый конфиг активировался сразу
+  resetPgRuntimeState();
 
   // Сохраняем конфиг в саму БД (чтобы пережить git deploy)
   if (cfg) {
@@ -578,6 +624,30 @@ async function persistPgConfig(cfg) {
       console.warn('[Store] Не удалось сохранить конфиг в kv:', e.message);
     }
   }
+}
+
+async function activatePgConfig(cfg, migrateData = null) {
+  const pool = await createPoolFromConfig(cfg, { max: 2, connectionTimeoutMillis: 8000, idleTimeoutMillis: 600000 });
+  try {
+    await pool.query('SELECT 1');
+    await pool.query(`CREATE TABLE IF NOT EXISTS kv (
+      key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TIMESTAMPTZ DEFAULT NOW()
+    )`);
+    if (migrateData && Object.keys(migrateData).length) {
+      await pgKv.setMany(pool, migrateData);
+    }
+    await pool.query(
+      `INSERT INTO kv(key,value,updated_at) VALUES($1,$2,NOW())
+       ON CONFLICT(key) DO UPDATE SET value=$2, updated_at=NOW()`,
+      [PG_CFG_KEY, JSON.stringify(cfg)]
+    );
+  } finally {
+    await pool.end().catch(() => {});
+  }
+
+  await persistPgConfig(cfg);
+  g._tableEnsured = true;
+  await getPool();
 }
 
 function respondFromJsonFallback(action, res, { key, value, data, intentional_delete } = {}) {
@@ -639,6 +709,16 @@ export default async function handler(req, res) {
     return res.json({ ok: true });
   }
 
+  if (action === 'pg_activate') {
+    if (!config) return res.json({ ok: false, error: 'Нет конфига' });
+    try {
+      await activatePgConfig(config, data || null);
+      return res.json({ ok: true });
+    } catch (e) {
+      return res.json({ ok: false, error: e.message });
+    }
+  }
+
   if (action === 'pg_get') {
     try {
       const cfg = readPgConfig();
@@ -671,13 +751,7 @@ export default async function handler(req, res) {
   if (action === 'pg_test') {
     if (!config) return res.json({ ok: false, error: 'Нет конфига' });
     try {
-      const { Pool } = await import('pg');
-      const opts = config.connectionString
-        ? { connectionString: config.connectionString, ssl: { rejectUnauthorized: false }, max: 1, connectionTimeoutMillis: 8000 }
-        : { host: config.host, port: parseInt(config.port) || 5432, database: config.database,
-            user: config.user, password: config.password,
-            ssl: config.ssl ? { rejectUnauthorized: false } : false, max: 1, connectionTimeoutMillis: 8000 };
-      const pool = new Pool(opts);
+      const pool = await createPoolFromConfig(config);
       const r = await pool.query('SELECT version(), current_database() as db, pg_size_pretty(pg_database_size(current_database())) as sz');
       await pool.query(`CREATE TABLE IF NOT EXISTS kv(key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TIMESTAMPTZ DEFAULT NOW())`);
       const cnt = await pool.query('SELECT COUNT(*) as c FROM kv');
