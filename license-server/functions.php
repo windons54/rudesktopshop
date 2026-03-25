@@ -66,6 +66,8 @@ function duration_to_expiry(string $duration): string
 {
     $now = new DateTimeImmutable('now', new DateTimeZone('UTC'));
     switch ($duration) {
+        case '14d':
+            return $now->modify('+14 days')->format(DateTimeInterface::ATOM);
         case '6m':
             return $now->modify('+6 months')->format(DateTimeInterface::ATOM);
         case '2y':
@@ -79,6 +81,8 @@ function duration_to_expiry(string $duration): string
 function duration_label(string $duration): string
 {
     switch ($duration) {
+        case '14d':
+            return 'Триал 14 дней';
         case '6m':
             return '6 месяцев';
         case '2y':
@@ -87,6 +91,43 @@ function duration_label(string $duration): string
         default:
             return '1 год';
     }
+}
+
+function extend_license_expiry(array $license, string $duration): array
+{
+    $now = new DateTimeImmutable('now', new DateTimeZone('UTC'));
+    $base = $now;
+    if (!empty($license['expires_at'])) {
+        try {
+            $current = new DateTimeImmutable($license['expires_at']);
+            if ($current > $now) {
+                $base = $current;
+            }
+        } catch (Throwable $e) {
+            $base = $now;
+        }
+    }
+
+    switch ($duration) {
+        case '14d':
+            $expires = $base->modify('+14 days');
+            break;
+        case '6m':
+            $expires = $base->modify('+6 months');
+            break;
+        case '2y':
+            $expires = $base->modify('+2 years');
+            break;
+        case '1y':
+        default:
+            $expires = $base->modify('+1 year');
+            break;
+    }
+
+    $license['status'] = 'active';
+    $license['expires_at'] = $expires->format(DateTimeInterface::ATOM);
+    $license['updated_at'] = $now->format(DateTimeInterface::ATOM);
+    return $license;
 }
 
 function find_license_index(array $db, string $licenseKey): int

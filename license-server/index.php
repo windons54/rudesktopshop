@@ -82,6 +82,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             'bound_domain' => '',
             'instance_id' => '',
             'created_at' => gmdate(DateTimeInterface::ATOM),
+            'updated_at' => gmdate(DateTimeInterface::ATOM),
             'last_check_at' => null,
             'last_site_url' => null,
         ];
@@ -95,13 +96,60 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $index = find_license_index($db, $key);
         if ($index >= 0) {
             $db['licenses'][$index]['status'] = ($db['licenses'][$index]['status'] ?? 'active') === 'active' ? 'disabled' : 'active';
+            $db['licenses'][$index]['updated_at'] = gmdate(DateTimeInterface::ATOM);
             save_license_db($db);
             $message = 'Статус ключа обновлён.';
         }
     }
+
+    if ($action === 'extend') {
+        $key = $_POST['key'] ?? '';
+        $duration = $_POST['extend_duration'] ?? '14d';
+        $index = find_license_index($db, $key);
+        if ($index >= 0) {
+            $db['licenses'][$index] = extend_license_expiry($db['licenses'][$index], $duration);
+            save_license_db($db);
+            $message = 'Срок действия ключа продлён.';
+        }
+    }
 }
 
-$licenses = array_reverse($db['licenses']);
+$query = trim((string)($_GET['q'] ?? ''));
+$durationFilter = trim((string)($_GET['duration'] ?? ''));
+$statusFilter = trim((string)($_GET['status'] ?? ''));
+$dateFrom = trim((string)($_GET['date_from'] ?? ''));
+$dateTo = trim((string)($_GET['date_to'] ?? ''));
+
+$licenses = array_values(array_filter(array_reverse($db['licenses']), function (array $license) use ($query, $durationFilter, $statusFilter, $dateFrom, $dateTo): bool {
+    if ($query !== '') {
+        $haystack = mb_strtolower(implode(' ', [
+            (string)($license['customer_name'] ?? ''),
+            (string)($license['customer_email'] ?? ''),
+            (string)($license['notes'] ?? ''),
+            (string)($license['key'] ?? ''),
+            (string)($license['bound_domain'] ?? ''),
+        ]));
+        if (mb_strpos($haystack, mb_strtolower($query)) === false) {
+            return false;
+        }
+    }
+
+    if ($durationFilter !== '' && ($license['duration'] ?? '') !== $durationFilter) {
+        return false;
+    }
+
+    if ($statusFilter !== '' && ($license['status'] ?? 'active') !== $statusFilter) {
+        return false;
+    }
+
+    if ($dateFrom !== '' || $dateTo !== '') {
+        $createdAt = substr((string)($license['created_at'] ?? ''), 0, 10);
+        if ($dateFrom !== '' && $createdAt < $dateFrom) return false;
+        if ($dateTo !== '' && $createdAt > $dateTo) return false;
+    }
+
+    return true;
+}));
 ?>
 <!doctype html>
 <html lang="ru">
@@ -130,7 +178,12 @@ $licenses = array_reverse($db['licenses']);
     .badge.disabled { background: #fee2e2; color: #b91c1c; }
     .mono { font-family: monospace; font-size: 13px; }
     .actions { display: flex; gap: 8px; flex-wrap: wrap; }
+    .filters { display: grid; grid-template-columns: 1.4fr 1fr 1fr 1fr 1fr auto; gap: 10px; margin-bottom: 16px; align-items: end; }
+    .filters .field { display: flex; flex-direction: column; gap: 4px; }
+    .filters label { margin: 0; }
+    .actions form { margin: 0; }
     @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } .top { flex-direction: column; align-items: flex-start; } }
+    @media (max-width: 1100px) { .filters { grid-template-columns: 1fr 1fr; } }
   </style>
 </head>
 <body>
@@ -152,6 +205,7 @@ $licenses = array_reverse($db['licenses']);
           <input type="hidden" name="action" value="generate">
           <label>Срок действия</label>
           <select name="duration">
+            <option value="14d">Триал 14 дней</option>
             <option value="6m">6 месяцев</option>
             <option value="1y">1 год</option>
             <option value="2y">2 года</option>
@@ -174,6 +228,41 @@ $licenses = array_reverse($db['licenses']);
 
       <div class="card">
         <h2>Выданные ключи</h2>
+        <form method="get" class="filters">
+          <div class="field">
+            <label>Поиск по компании</label>
+            <input type="text" name="q" value="<?= htmlspecialchars($query, ENT_QUOTES, 'UTF-8') ?>" placeholder="Название компании, email, домен, ключ">
+          </div>
+          <div class="field">
+            <label>Срок</label>
+            <select name="duration">
+              <option value="">Все</option>
+              <option value="14d" <?= $durationFilter === '14d' ? 'selected' : '' ?>>Триал 14 дней</option>
+              <option value="6m" <?= $durationFilter === '6m' ? 'selected' : '' ?>>6 месяцев</option>
+              <option value="1y" <?= $durationFilter === '1y' ? 'selected' : '' ?>>1 год</option>
+              <option value="2y" <?= $durationFilter === '2y' ? 'selected' : '' ?>>2 года</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>Статус</label>
+            <select name="status">
+              <option value="">Все</option>
+              <option value="active" <?= $statusFilter === 'active' ? 'selected' : '' ?>>Активен</option>
+              <option value="disabled" <?= $statusFilter === 'disabled' ? 'selected' : '' ?>>Отключён</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>Дата от</label>
+            <input type="date" name="date_from" value="<?= htmlspecialchars($dateFrom, ENT_QUOTES, 'UTF-8') ?>">
+          </div>
+          <div class="field">
+            <label>Дата до</label>
+            <input type="date" name="date_to" value="<?= htmlspecialchars($dateTo, ENT_QUOTES, 'UTF-8') ?>">
+          </div>
+          <div class="field">
+            <button type="submit">Фильтр</button>
+          </div>
+        </form>
         <table class="table">
           <thead>
             <tr>
@@ -211,6 +300,17 @@ $licenses = array_reverse($db['licenses']);
                     <input type="hidden" name="action" value="toggle">
                     <input type="hidden" name="key" value="<?= htmlspecialchars($license['key'] ?? '', ENT_QUOTES, 'UTF-8') ?>">
                     <button type="submit" class="muted"><?= ($license['status'] ?? 'active') === 'active' ? 'Отключить' : 'Включить' ?></button>
+                  </form>
+                  <form method="post" class="actions">
+                    <input type="hidden" name="action" value="extend">
+                    <input type="hidden" name="key" value="<?= htmlspecialchars($license['key'] ?? '', ENT_QUOTES, 'UTF-8') ?>">
+                    <select name="extend_duration">
+                      <option value="14d">+14 дней</option>
+                      <option value="6m">+6 месяцев</option>
+                      <option value="1y">+1 год</option>
+                      <option value="2y">+2 года</option>
+                    </select>
+                    <button type="submit">Продлить</button>
                   </form>
                 </td>
               </tr>

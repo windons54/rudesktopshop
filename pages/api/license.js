@@ -142,7 +142,7 @@ async function resolveStatus(req, { force = false, configOverride = null } = {})
   const sameLicense = cached && cached.licenseKeyHash === hashKey(config.licenseKey) && cached.serverUrl === normalizeServerUrl(config.serverUrl);
   const checkedAtTs = cached?.checkedAt ? new Date(cached.checkedAt).getTime() : 0;
 
-  if (!force && sameLicense && checkedAtTs && (Date.now() - checkedAtTs) < CHECK_TTL_MS) {
+  if (!force && sameLicense && cached?.valid && isUnexpired(cached?.expiresAt) && checkedAtTs && (Date.now() - checkedAtTs) < CHECK_TTL_MS) {
     return { config, status: cached };
   }
 
