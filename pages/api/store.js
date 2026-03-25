@@ -7,6 +7,7 @@ import fs from 'fs';
 import path from 'path';
 import zlib from 'zlib';
 import { readPgConfig as _readPgConfigBase, parseEnvFile } from '../../lib/pg-config-reader.js';
+import { appendDebugLog } from '../../lib/debug-log.js';
 
 // Отправляет JSON с компрессией если браузер объявил поддержку в заголовке запроса.
 // ВАЖНО: мы читаем accept-encoding из HTTP-заголовка запроса (который браузер ставит сам),
@@ -222,6 +223,7 @@ function pgLog(type, message, extra) {
   const prefix = `[PG:${type}]`;
   if (type === 'error') console.error(prefix, message, extra?.detail || '');
   else console.log(prefix, message, extra?.detail || '');
+  appendDebugLog('store.pg', `${type}:${message}`, extra || null);
 }
 
 // ── Retry-обёртка: автоматически пересоздаёт пул при обрыве соединения ───
@@ -581,7 +583,7 @@ const pgKv = {
 async function persistPgConfig(cfg) {
   ensureDir();
   if (cfg) {
-    try { writeRootPgEnv(cfg); } catch (e) { console.warn('[Store] Не удалось обновить root pg.env:', e.message); }
+    try { writeRootPgEnv(cfg); } catch (e) { console.warn('[Store] Не удалось обновить root pg.env:', e.message); appendDebugLog('store.persist', 'write_root_pg_env_failed', { error: e.message }); }
     fs.writeFileSync(PG_CFG_FILE, JSON.stringify(cfg), 'utf8');
     // Резервная копия — переживает git deploy если data/ — persistent volume
     try { fs.writeFileSync(PG_ENV_FILE, JSON.stringify(cfg), 'utf8'); } catch {}
@@ -595,7 +597,7 @@ async function persistPgConfig(cfg) {
     g._savedConnStr = cfg.connectionString || null;
     g._savedPgCfg = cfg.host ? { ...cfg } : null;
   } else {
-    try { writeRootPgEnv(null); } catch (e) { console.warn('[Store] Не удалось очистить root pg.env:', e.message); }
+    try { writeRootPgEnv(null); } catch (e) { console.warn('[Store] Не удалось очистить root pg.env:', e.message); appendDebugLog('store.persist', 'clear_root_pg_env_failed', { error: e.message }); }
     if (fs.existsSync(PG_CFG_FILE)) fs.unlinkSync(PG_CFG_FILE);
     if (fs.existsSync(PG_ENV_FILE)) try { fs.unlinkSync(PG_ENV_FILE); } catch {}
     // Удаляем из store.json тоже
@@ -623,6 +625,7 @@ async function persistPgConfig(cfg) {
       }
     } catch (e) {
       console.warn('[Store] Не удалось сохранить конфиг в kv:', e.message);
+      appendDebugLog('store.persist', 'save_pg_config_to_kv_failed', { error: e.message });
     }
   }
 }
@@ -912,6 +915,7 @@ export default async function handler(req, res) {
     if (action === 'set' && key === 'cm_users') {
       if (!value || typeof value !== 'object' || Object.keys(value).length === 0) {
         console.warn('[Store] Попытка сохранить пустой cm_users — отклонено');
+        appendDebugLog('store.guard', 'empty_cm_users_rejected');
         return res.json({ ok: false, error: 'Cannot save empty users' });
       }
       // Мержим с существующими данными на сервере чтобы не терять пользователей
@@ -1013,6 +1017,7 @@ export default async function handler(req, res) {
       pgLog('error', `Store перешёл в degraded mode action=${action}`, { detail: e.code || e.message });
     } else {
       console.error('[Store] Ошибка:', e);
+      appendDebugLog('store.error', 'handler_failed', { action, error: e.message, code: e.code || null });
     }
     if (isConnectionError(e)) {
       const pgCfgExists = !!readPgConfig();
