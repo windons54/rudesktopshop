@@ -161,7 +161,7 @@ $licenses = array_values(array_filter(array_reverse($db['licenses']), function (
     body { font-family: Arial, sans-serif; background: #f8fafc; color: #0f172a; margin: 0; }
     .page { max-width: 1180px; margin: 0 auto; padding: 28px 20px 40px; }
     .top { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-bottom: 22px; }
-    .grid { display: grid; grid-template-columns: 360px 1fr; gap: 18px; align-items: start; }
+    .grid { display: grid; grid-template-columns: 1fr; gap: 18px; align-items: start; }
     .card { background: #fff; border: 1px solid #e2e8f0; border-radius: 16px; padding: 20px; box-shadow: 0 10px 30px rgba(15,23,42,0.06); }
     h1, h2 { margin: 0 0 10px; }
     p { color: #475569; line-height: 1.6; }
@@ -177,13 +177,12 @@ $licenses = array_values(array_filter(array_reverse($db['licenses']), function (
     .badge.active { background: #dcfce7; color: #166534; }
     .badge.disabled { background: #fee2e2; color: #b91c1c; }
     .mono { font-family: monospace; font-size: 13px; }
-    .actions { display: flex; gap: 8px; flex-wrap: wrap; }
-    .filters { display: grid; grid-template-columns: 1.4fr 1fr 1fr 1fr 1fr auto; gap: 10px; margin-bottom: 16px; align-items: end; }
+    .actions { display: flex; flex-direction: column; gap: 8px; align-items: stretch; }
+    .filters { display: grid; grid-template-columns: 1fr; gap: 10px; margin-bottom: 16px; align-items: end; }
     .filters .field { display: flex; flex-direction: column; gap: 4px; }
     .filters label { margin: 0; }
     .actions form { margin: 0; }
-    @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } .top { flex-direction: column; align-items: flex-start; } }
-    @media (max-width: 1100px) { .filters { grid-template-columns: 1fr 1fr; } }
+    @media (max-width: 900px) { .top { flex-direction: column; align-items: flex-start; } }
   </style>
 </head>
 <body>
