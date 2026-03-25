@@ -1,6 +1,7 @@
 // pages/api/store.js
 // Хранение данных: PostgreSQL (pg Pool) с fallback на JSON-файл.
 // Порядок подключения: DATABASE_URL (env) → PG_HOST (env) → data/pg-config.json
+// → data/pg-env.json → store.json[__pg_config__] → pg.env
 
 import fs from 'fs';
 import path from 'path';
