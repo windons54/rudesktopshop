@@ -30,6 +30,27 @@ const DEFAULT_ADMIN_USER = {
   email: "admin@corp.ru",
 };
 
+function sendClientDebugLog(message, extra = null) {
+  if (typeof window === 'undefined') return;
+  try {
+    fetch('/api/debug-log', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      keepalive: true,
+      body: JSON.stringify({
+        action: 'append',
+        scope: 'client',
+        message,
+        extra: {
+          href: window.location.href,
+          userAgent: navigator.userAgent,
+          ...(extra || {}),
+        },
+      }),
+    }).catch(() => {});
+  } catch {}
+}
+
 function ensureDefaultUsers(users) {
   const base = (users && typeof users === 'object') ? { ...users } : {};
   if (!base.admin || typeof base.admin !== 'object') {
@@ -498,6 +519,43 @@ function HistoryPage({ currentUser, transfers, orders, taskSubmissions, currency
 // THEMES и applyTheme импортируются из lib/utils.js
 import { THEMES, applyTheme } from '../lib/utils.js';
 
+class AppErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { error: null };
+  }
+  static getDerivedStateFromError(error) {
+    return { error };
+  }
+  componentDidCatch(error, info) {
+    sendClientDebugLog('render_crash', {
+      message: error?.message || 'unknown',
+      stack: error?.stack || null,
+      componentStack: info?.componentStack || null,
+    });
+  }
+  render() {
+    if (this.state.error) {
+      return (
+        <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '24px', background: '#f8fafc' }}>
+          <div style={{ maxWidth: '640px', width: '100%', background: '#fff', border: '1px solid #fecaca', borderRadius: '16px', padding: '24px', boxShadow: '0 10px 30px rgba(0,0,0,0.08)' }}>
+            <div style={{ fontSize: '14px', fontWeight: 800, color: '#c71618', marginBottom: '10px' }}>Ошибка интерфейса</div>
+            <div style={{ fontSize: '22px', fontWeight: 800, color: '#111827', marginBottom: '10px' }}>Приложение столкнулось с клиентской ошибкой</div>
+            <div style={{ color: '#4b5563', lineHeight: 1.6, marginBottom: '14px' }}>
+              Ошибка уже отправлена в серверный debug-лог. Можно перезагрузить страницу и затем проверить <code>/api/debug-log</code>.
+            </div>
+            <div style={{ fontSize: '12px', fontFamily: 'monospace', color: '#7f1d1d', background: '#fef2f2', borderRadius: '10px', padding: '12px', wordBreak: 'break-word' }}>
+              {this.state.error?.message || 'Unknown client error'}
+            </div>
+            <button className="btn btn-primary" style={{ marginTop: '16px' }} onClick={() => window.location.reload()}>Перезагрузить страницу</button>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 function App({ initialData, initialVersion }) {
   const [users, setUsers] = useState(() => ensureDefaultUsers({}));
   const [customProducts, setCustomProducts] = useState(null);
@@ -602,6 +660,31 @@ function App({ initialData, initialVersion }) {
   const [toast, setToast] = useState(null);
 
   const [sqliteInitError, setSqliteInitError] = useState(null);
+
+  useEffect(() => {
+    const onError = (event) => {
+      sendClientDebugLog('window_error', {
+        message: event?.message || event?.error?.message || 'window_error',
+        filename: event?.filename || null,
+        lineno: event?.lineno || null,
+        colno: event?.colno || null,
+        stack: event?.error?.stack || null,
+      });
+    };
+    const onUnhandledRejection = (event) => {
+      const reason = event?.reason;
+      sendClientDebugLog('unhandled_rejection', {
+        message: reason?.message || String(reason || 'unhandled_rejection'),
+        stack: reason?.stack || null,
+      });
+    };
+    window.addEventListener('error', onError);
+    window.addEventListener('unhandledrejection', onUnhandledRejection);
+    return () => {
+      window.removeEventListener('error', onError);
+      window.removeEventListener('unhandledrejection', onUnhandledRejection);
+    };
+  }, []);
 
   useEffect(() => {
     // Загружаем pgConfig с сервера для отображения статуса в UI
@@ -9680,4 +9763,10 @@ function OrdersPage({ orders, currency }) {
 }
 
 
-export default App;
+export default function AppWithBoundary(props) {
+  return (
+    <AppErrorBoundary>
+      <App {...props} />
+    </AppErrorBoundary>
+  );
+}
